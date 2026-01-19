@@ -1,23 +1,53 @@
 import { NextResponse } from "next/server";
-import { products, PRODUCT_PRICE } from "@/lib/products";
-import { supabaseAdmin } from "@/lib/supabaseAdmin";
-import { getInventoryMap, updateInventorySheet } from "@/lib/stock";
+import { getProductMap } from "@/lib/products";
+import { rateLimit } from "@/lib/rateLimit";
+import { stripe } from "@/lib/stripe";
 
-const productIndex = new Map(products.map((product) => [product.sku, product]));
+const CHECKOUT_WINDOW_MS = 60_000;
+const CHECKOUT_MAX = 6;
+
+const getClientId = (request) => {
+  const forwardedFor = request.headers.get("x-forwarded-for");
+  if (forwardedFor) {
+    return forwardedFor.split(",")[0].trim();
+  }
+
+  return request.headers.get("x-real-ip") || "unknown";
+};
+
+export const runtime = "nodejs";
 
 export async function POST(request) {
-  if (!supabaseAdmin) {
+  if (!stripe) {
     return NextResponse.json(
-      { error: "Supabase is not configured." },
+      { error: "Stripe is not configured." },
       { status: 500 }
     );
   }
 
-  let payload;
+  const clientId = getClientId(request);
+  const limit = rateLimit(clientId, {
+    windowMs: CHECKOUT_WINDOW_MS,
+    max: CHECKOUT_MAX
+  });
 
+  if (!limit.ok) {
+    const retryAfter = Math.max(1, Math.ceil((limit.resetAt - Date.now()) / 1000));
+    return NextResponse.json(
+      { error: "Too many checkout attempts. Please wait and try again." },
+      {
+        status: 429,
+        headers: {
+          "Retry-After": String(retryAfter)
+        }
+      }
+    );
+  }
+
+  let payload;
   try {
     payload = await request.json();
-  } catch (error) {
+  } catch {
     return NextResponse.json({ error: "Invalid payload." }, { status: 400 });
   }
 
@@ -43,17 +73,10 @@ export async function POST(request) {
     .map((item) => {
       const sku = String(item.sku || "").trim();
       const quantity = Number.parseInt(item.quantity, 10);
-      const product = productIndex.get(sku);
 
-      if (!product || Number.isNaN(quantity) || quantity <= 0) {
-        return null;
-      }
+      if (!sku || Number.isNaN(quantity) || quantity <= 0) return null;
 
-      return {
-        sku,
-        name: product.name,
-        quantity
-      };
+      return { sku, quantity };
     })
     .filter(Boolean);
 
@@ -64,33 +87,8 @@ export async function POST(request) {
     );
   }
 
-  const inventoryMap = await getInventoryMap();
-
-  const orderItems = normalizedItems.map((item) => ({
-    ...item,
-    name: inventoryMap[item.sku]?.name || item.name
-  }));
-
-  const enrichedItems = orderItems.map((item) => {
-    const available = inventoryMap[item.sku]?.stock ?? 0;
-    const preorder = available <= 0 || item.quantity > available;
-
-    return {
-      ...item,
-      preorder,
-      unitPrice: PRODUCT_PRICE,
-      lineTotal: PRODUCT_PRICE * item.quantity,
-      stockAtOrder: available
-    };
-  });
-
-  const subtotal = enrichedItems.reduce(
-    (sum, item) => sum + item.lineTotal,
-    0
-  );
-
-  const hasPreorder = enrichedItems.some((item) => item.preorder);
-  const isPickup = fulfillment === "market";
+  const normalizedFulfillment = fulfillment === "market" ? "market" : "ship";
+  const isPickup = normalizedFulfillment === "market";
 
   if (!isPickup) {
     const address1 = String(customer.address1 || "").trim();
@@ -106,74 +104,99 @@ export async function POST(request) {
     }
   }
 
-  const orderRecord = {
-    name,
-    email,
-    phone: String(customer.phone || "").trim(),
-    fulfillment,
+  const skus = normalizedItems.map((item) => item.sku);
+  const productMap = await getProductMap(skus);
+
+  const lineItems = normalizedItems
+    .map((item) => {
+      const product = productMap.get(item.sku);
+      const unitAmount = Number(product?.price_cents);
+      if (!product || !Number.isFinite(unitAmount) || unitAmount < 0) return null;
+
+      return {
+        quantity: item.quantity,
+        price_data: {
+          currency: "usd",
+          unit_amount: unitAmount,
+          tax_behavior: "exclusive",
+          product_data: {
+            name: product.name,
+            images: product.image_url ? [product.image_url] : undefined,
+            metadata: {
+              sku: item.sku
+            }
+          }
+        }
+      };
+    })
+    .filter(Boolean);
+
+  if (lineItems.length === 0 || lineItems.length !== normalizedItems.length) {
+    return NextResponse.json(
+      { error: "Items are unavailable." },
+      { status: 400 }
+    );
+  }
+
+  const siteUrl = (process.env.SITE_URL || request.headers.get("origin") || "").replace(
+    /\/$/,
+    ""
+  );
+
+  if (!siteUrl) {
+    return NextResponse.json(
+      { error: "Site URL is not configured." },
+      { status: 500 }
+    );
+  }
+
+  const itemsPayload = normalizedItems.map((item) => {
+    const product = productMap.get(item.sku);
+
+    return {
+      sku: item.sku,
+      quantity: item.quantity,
+      price_cents: product?.price_cents ?? 0
+    };
+  });
+
+  const metadata = {
+    fulfillment: normalizedFulfillment,
+    customer_name: name,
+    customer_email: email,
+    customer_phone: String(customer.phone || "").trim(),
     address1: String(customer.address1 || "").trim(),
     address2: String(customer.address2 || "").trim(),
     city: String(customer.city || "").trim(),
     state: String(customer.state || "").trim(),
     postal_code: String(customer.postalCode || "").trim(),
     note: String(customer.note || "").trim(),
-    items: enrichedItems,
-    subtotal,
-    preorder: hasPreorder
+    items: JSON.stringify(itemsPayload)
   };
 
-  const sheetUpdates = orderItems.map((item) => {
-    const record = inventoryMap[item.sku] || {
-      stock: 0,
-      preorders: 0,
-      sales: 0
-    };
-    const available = record.stock ?? 0;
-    const preorderCount = Math.max(item.quantity - available, 0);
-
-    return {
-      sku: item.sku,
-      row: record.row,
-      stock: Math.max(available - item.quantity, 0),
-      preorders: (record.preorders ?? 0) + preorderCount,
-      sales: (record.sales ?? 0) + item.quantity
-    };
-  });
-
-  const { data, error } = await supabaseAdmin
-    .from("orders")
-    .insert([orderRecord])
-    .select("id")
-    .single();
-
-  if (error) {
-    return NextResponse.json(
-      { error: "Unable to save order." },
-      { status: 500 }
-    );
-  }
-
   try {
-    await updateInventorySheet(sheetUpdates);
-  } catch (sheetError) {
-    if (data?.id) {
-      const { error: deleteError } = await supabaseAdmin
-        .from("orders")
-        .delete()
-        .eq("id", data.id);
+    const session = await stripe.checkout.sessions.create({
+      mode: "payment",
+      line_items: lineItems,
+      success_url: `${siteUrl}/?checkout=success`,
+      cancel_url: `${siteUrl}/?checkout=cancel`,
+      customer_email: email,
+      billing_address_collection: "required",
+      automatic_tax: { enabled: true },
+      metadata,
+      shipping_address_collection: isPickup
+        ? undefined
+        : {
+            allowed_countries: ["US"]
+          }
+    });
 
-      if (deleteError) {
-        console.error("Unable to roll back order after sheet failure.");
-      }
-    }
-
-    console.error("Unable to update Google Sheet.", sheetError);
-
+    return NextResponse.json({ url: session.url }, { status: 200 });
+  } catch (error) {
+    console.error("checkout session error:", error);
     return NextResponse.json(
-      { error: "Unable to sync inventory." },
+      { error: "Unable to start checkout." },
       { status: 500 }
     );
   }
-
-  return NextResponse.json({ ok: true });
 }

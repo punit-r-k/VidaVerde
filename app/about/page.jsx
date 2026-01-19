@@ -42,6 +42,13 @@ export default function AboutPage() {
               </p>
             </div>
             <div className="about__panel">
+              <div className="about__portrait">
+                <img
+                  src="https://images.unsplash.com/photo-1524504388940-b1c1722653e1?auto=format&fit=crop&w=600&q=80"
+                  alt="Vida Verde founder portrait"
+                  loading="lazy"
+                />
+              </div>
               <h3>Founder Principles</h3>
               <ul>
                 <li>Microgreens in every batch for freshness and vitality.</li>

@@ -28,17 +28,6 @@ body {
   min-height: 100vh;
 }
 
-body::before {
-  content: "";
-  position: fixed;
-  inset: 0;
-  background-image: var(--vine-pattern);
-  background-size: 240px 240px;
-  opacity: 0.18;
-  pointer-events: none;
-  z-index: 0;
-}
-
 body::after {
   content: "";
   position: fixed;
@@ -84,10 +73,9 @@ img {
 .hero__overlay {
   position: absolute;
   inset: 0;
-  background-image: linear-gradient(120deg, rgba(10, 36, 24, 0.85), rgba(15, 46, 33, 0.6)),
-    var(--vine-pattern);
-  background-size: cover, 260px 260px;
-  background-repeat: no-repeat, repeat;
+  background-image: linear-gradient(120deg, rgba(10, 36, 24, 0.85), rgba(15, 46, 33, 0.6));
+  background-size: cover;
+  background-repeat: no-repeat;
   z-index: 1;
 }
 
@@ -740,6 +728,23 @@ select:focus {
   border-radius: var(--radius-lg);
   display: grid;
   gap: 18px;
+}
+
+.about__portrait {
+  padding: 12px;
+  border-radius: 18px;
+  background-color: var(--white);
+  background-image: var(--vine-pattern);
+  background-size: 180px 180px;
+  background-repeat: repeat;
+  border: 1px solid var(--line);
+  box-shadow: var(--shadow);
+}
+
+.about__portrait img {
+  border-radius: 12px;
+  height: 240px;
+  object-fit: cover;
 }
 
 .about__panel ul {

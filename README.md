@@ -1,6 +1,6 @@
 # Vida Verde Storefront
 
-Premium sourkrout and microgreen nourishment, built with Next.js + Supabase.
+Premium sourkrout and microgreen nourishment, built with Next.js + Supabase + Stripe.
 
 ## Quick Start
 
@@ -18,105 +18,48 @@ npm install
 npm run dev
 ```
 
-## Stock Sync (Google Sheets)
+## Inventory Sync (Google Sheets)
 
-The storefront reads live inventory from a public CSV export of your Google Sheet.
-Orders can also write stock, preorder, and sales counts back to the sheet via
-Google Apps Script (status and restock date columns are ignored).
+Inventory is stored in Supabase and synced to the `Inventory` sheet via Apps Script.
+Column C is a restock delta; it is cleared after a successful sync to prevent double-counting.
 
-Supported formats:
-- Header-based: columns named `sku` (or `name`) and `stock`, with optional `preorders` and `sales`.
-- Fixed layout: names start in column B row 5, stock in column C row 5, preorders in column E row 5, and total sales in column G row 5.
-  - Names in column B are shown on the storefront.
+Apps Script file: `apps-script/inventory-sync.gs`
 
-Example CSV URL format:
-```
-https://docs.google.com/spreadsheets/d/YOUR_SHEET_ID/gviz/tq?tqx=out:csv
-```
+Script properties required:
+- `API_BASE_URL` (example: `https://your-site-url`)
+- `ADMIN_RESTOCK_SECRET` (matches your `.env.local`)
 
-Write-back requirements (for sales to decrement stock and increment totals):
-- Deploy the Apps Script below as a web app and copy its URL.
-- Set these environment variables:
-  - `GOOGLE_APPS_SCRIPT_URL`
-  - `GOOGLE_APPS_SCRIPT_TOKEN` (optional shared secret)
+Sheet columns:
+- Column A: SKU (`VV1` ... `VV6`)
+- Column B: Product (name or slug, optional)
+- Column C: Stock input (restock delta)
+- Column D: Stock Status (on_hand)
+- Column E: Status (In Stock / Out of Stock)
+- Column F: # of Preorders
+- Column G: Expected restock date
+- Column H: Total Sales
 
-Apps Script (bound to your sheet):
-```javascript
-const SHEET_NAME = "Sheet1";
+## Supabase Schema
 
-function doPost(e) {
-  const payload = JSON.parse(e.postData.contents || "{}");
-  const expectedToken = PropertiesService.getScriptProperties().getProperty("TOKEN");
+Schema + seed data live in `supabase/schema.sql`.
+It defines tables for `products`, `inventory`, `orders`, `order_items`, and `preorder_queue`.
+RPC functions:
+- `record_paid_order` (Stripe webhook)
+- `apply_restock` (restock delta)
+- `set_expected_restock_date`
 
-  if (expectedToken && payload.token !== expectedToken) {
-    return ContentService.createTextOutput("Unauthorized").setMimeType(
-      ContentService.MimeType.TEXT
-    );
-  }
+## Stripe Checkout
 
-  const sheet = SpreadsheetApp.getActive().getSheetByName(SHEET_NAME);
-  if (!sheet) {
-    return ContentService.createTextOutput("Missing sheet").setMimeType(
-      ContentService.MimeType.TEXT
-    );
-  }
+Checkout sessions are created in `app/api/order/route.js`.
+Stripe webhooks are handled in `app/api/stripe/webhook/route.js`.
 
-  const updates = Array.isArray(payload.updates) ? payload.updates : [];
-  const columns = payload.columns || { stock: "C", preorders: "E", sales: "G" };
-
-  updates.forEach((update) => {
-    sheet.getRange(`${columns.stock}${update.row}`).setValue(update.stock);
-    sheet.getRange(`${columns.preorders}${update.row}`).setValue(update.preorders);
-    sheet.getRange(`${columns.sales}${update.row}`).setValue(update.sales);
-  });
-
-  return ContentService.createTextOutput("ok").setMimeType(
-    ContentService.MimeType.TEXT
-  );
-}
-```
-
-Set the `TOKEN` script property if you use `GOOGLE_APPS_SCRIPT_TOKEN`.
-
-SKUs used by the site (match these in your sheet or list the product names in column B):
-- `VV-VERDANT-01`
-- `VV-CITRUS-02`
-- `VV-GARDEN-03`
-- `VV-SMOKE-04`
-- `VV-GOLDEN-05`
-- `VV-PURPLE-06`
-
-Product data lives in `lib/products.js`.
-
-## Supabase Orders
-
-The order API writes to a Supabase `orders` table using the service role key.
-
-Suggested schema:
-```sql
-create table if not exists orders (
-  id uuid primary key default gen_random_uuid(),
-  created_at timestamptz default now(),
-  name text not null,
-  email text not null,
-  phone text,
-  fulfillment text not null,
-  address1 text,
-  address2 text,
-  city text,
-  state text,
-  postal_code text,
-  note text,
-  items jsonb not null,
-  subtotal numeric not null,
-  preorder boolean not null default false
-);
-```
-
-API endpoint: `app/api/order/route.js`
+Required environment variables:
+- `STRIPE_SECRET_KEY`
+- `STRIPE_WEBHOOK_SECRET`
+- `SITE_URL`
 
 ## Customize
 
-- Update copy and sections in `app/page.jsx`.
+- Update copy in `app/page.jsx` and `app/about/page.jsx`.
 - Adjust styling in `app/globals.css`.
-- Add or edit jars in `lib/products.js`.
+- Edit product catalog in the Supabase `products` table.

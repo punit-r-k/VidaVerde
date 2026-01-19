@@ -1,64 +1,57 @@
 "use client";
 
-import { useEffect, useMemo, useRef, useState } from "react";
-import { PRODUCT_PRICE } from "@/lib/products";
+import { useEffect, useMemo, useState } from "react";
+import { useSearchParams } from "next/navigation";
 
-const formatCurrency = (amount) => `$${amount.toFixed(2)}`;
+const formatCurrency = (amountInCents) => {
+  const n = Number(amountInCents);
+  if (!Number.isFinite(n)) return "$0.00";
+  return `$${(n / 100).toFixed(2)}`;
+};
+
 const INVENTORY_POLL_MS = 30000;
-const hasSheetData = (inventory = {}) =>
-  Object.values(inventory).some(
-    (entry) => Number.isInteger(entry?.row) && entry.row > 0
-  );
 
 export default function Storefront({ products, inventory = {} }) {
+  const searchParams = useSearchParams();
   const [cart, setCart] = useState({});
   const [status, setStatus] = useState("idle");
   const [notice, setNotice] = useState("");
   const [fulfillment, setFulfillment] = useState("ship");
   const [liveInventory, setLiveInventory] = useState(inventory);
-  const hasSheetRef = useRef(hasSheetData(inventory));
+
+  const basePriceCents = products[0]?.priceCents ?? 1199;
 
   const applyInventory = (nextInventory) => {
-    const nextHasSheet = hasSheetData(nextInventory);
-
-    if (nextHasSheet || !hasSheetRef.current) {
-      hasSheetRef.current = nextHasSheet;
+    if (nextInventory && typeof nextInventory === "object") {
       setLiveInventory(nextInventory);
     }
   };
 
+  // Poll inventory after mount. Keep first render stable using `inventory` prop.
   useEffect(() => {
     let active = true;
 
     const fetchInventory = async () => {
-      const cacheBust = Date.now();
       try {
-        const response = await fetch(`/api/inventory?ts=${cacheBust}`, {
+        const response = await fetch(`/api/inventory?ts=${Date.now()}`, {
           cache: "no-store"
         });
-
-        if (!response.ok) {
-          return;
-        }
+        if (!response.ok) return;
 
         const data = await response.json();
-
-        if (!active || !data) {
-          return;
-        }
+        if (!active || !data) return;
 
         applyInventory(data);
-      } catch (error) {
-        // Ignore client refresh failures; we still have the server snapshot.
+      } catch {
+        // Ignore refresh failures; keep last known snapshot.
       }
     };
 
     fetchInventory();
     const intervalId = setInterval(fetchInventory, INVENTORY_POLL_MS);
+
     const handleVisibility = () => {
-      if (document.visibilityState === "visible") {
-        fetchInventory();
-      }
+      if (document.visibilityState === "visible") fetchInventory();
     };
 
     window.addEventListener("focus", fetchInventory);
@@ -76,49 +69,67 @@ export default function Storefront({ products, inventory = {} }) {
     applyInventory(inventory);
   }, [inventory]);
 
+  useEffect(() => {
+    const checkoutStatus = searchParams?.get("checkout");
+
+    if (!checkoutStatus) return;
+
+    if (checkoutStatus === "success") {
+      setStatus("success");
+      setNotice("Payment received. We will email fulfillment details shortly.");
+      setCart({});
+      setFulfillment("ship");
+    } else if (checkoutStatus === "cancel") {
+      setStatus("error");
+      setNotice("Checkout canceled. Your cart is still saved below.");
+    }
+
+    if (typeof window !== "undefined") {
+      const url = new URL(window.location.href);
+      url.searchParams.delete("checkout");
+      window.history.replaceState({}, "", url.toString());
+    }
+  }, [searchParams]);
+
   const cartItems = useMemo(() => {
     return products
       .filter((product) => cart[product.sku])
       .map((product) => {
         const quantity = cart[product.sku];
         const record = liveInventory[product.sku] || {
-          stock: 0,
-          preorders: 0,
-          sales: 0
+          on_hand: 0,
+          preorders_remaining: 0,
+          units_sold: 0
         };
-        const displayName = liveInventory[product.sku]?.name || product.name;
-        const available = record.stock;
-        const preorder = available <= 0;
+
+        const available = Math.max(0, Number(record.on_hand || 0));
+        const inStockUnits = Math.min(quantity, available);
+        const preorderUnits = Math.max(0, quantity - available);
 
         return {
           ...product,
-          name: displayName,
           quantity,
           available,
-          preorder,
-          preordersCount: record.preorders,
-          salesCount: record.sales,
-          lineTotal: quantity * PRODUCT_PRICE
+          inStockUnits,
+          preorderUnits,
+          preordersCount: Math.max(0, Number(record.preorders_remaining || 0)),
+          salesCount: Math.max(0, Number(record.units_sold || 0)),
+          lineTotal: quantity * (product.priceCents || 0)
         };
       });
   }, [cart, products, liveInventory]);
 
   const itemCount = cartItems.reduce((sum, item) => sum + item.quantity, 0);
   const subtotal = cartItems.reduce((sum, item) => sum + item.lineTotal, 0);
-  const hasPreorder = cartItems.some((item) => item.preorder);
+  const hasPreorder = cartItems.some((item) => item.preorderUnits > 0);
   const requiresAddress = fulfillment === "ship";
 
   const handleAdd = (product) => {
-    const available = liveInventory[product.sku]?.stock ?? 0;
-
     setCart((prev) => {
       const currentQty = prev[product.sku] || 0;
-      const nextQty =
-        available > 0 ? Math.min(currentQty + 1, available) : currentQty + 1;
-
       return {
         ...prev,
-        [product.sku]: nextQty
+        [product.sku]: currentQty + 1
       };
     });
   };
@@ -130,12 +141,9 @@ export default function Storefront({ products, inventory = {} }) {
         return rest;
       }
 
-      const available = liveInventory[sku]?.stock ?? 0;
-      const adjustedQty = available > 0 ? Math.min(nextQty, available) : nextQty;
-
       return {
         ...prev,
-        [sku]: adjustedQty
+        [sku]: nextQty
       };
     });
   };
@@ -143,9 +151,7 @@ export default function Storefront({ products, inventory = {} }) {
   const handleSubmit = async (event) => {
     event.preventDefault();
 
-    if (status === "submitting") {
-      return;
-    }
+    if (status === "submitting") return;
 
     if (cartItems.length === 0) {
       setStatus("error");
@@ -154,7 +160,7 @@ export default function Storefront({ products, inventory = {} }) {
     }
 
     setStatus("submitting");
-    setNotice("");
+    setNotice("Redirecting to secure checkout...");
 
     const formData = new FormData(event.currentTarget);
 
@@ -171,41 +177,35 @@ export default function Storefront({ products, inventory = {} }) {
         postalCode: String(formData.get("postalCode") || "").trim(),
         note: String(formData.get("note") || "").trim()
       },
+      // Only send sku + quantity. Server decides sold vs preorder.
       items: cartItems.map((item) => ({
         sku: item.sku,
-        name: item.name,
-        quantity: item.quantity,
-        preorder: item.preorder
+        quantity: item.quantity
       }))
     };
 
     try {
       const response = await fetch("/api/order", {
         method: "POST",
-        headers: {
-          "Content-Type": "application/json"
-        },
+        headers: { "Content-Type": "application/json" },
         body: JSON.stringify(payload)
       });
 
       const result = await response.json();
 
       if (!response.ok) {
-        throw new Error(result.error || "Unable to place order.");
+        throw new Error(result.error || "Unable to start checkout.");
       }
 
-      setStatus("success");
-      setNotice(
-        hasPreorder
-          ? "Preorder received. We will follow up with ship timing."
-          : "Order received. We will follow up with shipping details."
-      );
-      setCart({});
-      setFulfillment("ship");
-      event.currentTarget.reset();
+      if (result?.url) {
+        window.location.assign(result.url);
+        return;
+      }
+
+      throw new Error("Checkout session did not return a URL.");
     } catch (error) {
       setStatus("error");
-      setNotice(error.message || "Something went wrong.");
+      setNotice(error?.message || "Something went wrong.");
     }
   };
 
@@ -214,22 +214,24 @@ export default function Storefront({ products, inventory = {} }) {
       <div className="store__grid">
         {products.map((product) => {
           const record = liveInventory[product.sku] || {
-            stock: 0,
-            preorders: 0,
-            sales: 0
+            on_hand: 0,
+            preorders_remaining: 0,
+            units_sold: 0
           };
-          const displayName = liveInventory[product.sku]?.name || product.name;
-          const available = record.stock;
-          const preorder = available <= 0;
-          const atLimit = available > 0 && cart[product.sku] >= available;
+
+          const available = Math.max(0, Number(record.on_hand || 0));
+          const isOut = available <= 0;
+
+          const cartQty = cart[product.sku] || 0;
+          const wouldPreorder = Math.max(0, cartQty + 1 - available) > 0;
 
           return (
             <article className="product-card" key={product.sku}>
-              <img src={product.image} alt={displayName} loading="lazy" />
+              <img src={product.image} alt={product.name} loading="lazy" />
               <div className="product-card__content">
                 <div>
                   <div className="product-card__header">
-                    <h3 suppressHydrationWarning>{displayName}</h3>
+                    <h3>{product.name}</h3>
                     <span>{product.profile}</span>
                   </div>
                   <p>{product.description}</p>
@@ -239,24 +241,34 @@ export default function Storefront({ products, inventory = {} }) {
                     ))}
                   </ul>
                 </div>
+
                 <div className="product-card__footer">
                   <div>
-                    <div className="price">$12</div>
-                    <div className="stock" suppressHydrationWarning>
-                      <span>Stock: {available}</span>
-                      <span>Jar{available === 1 ? "" : "s"}</span>
-                      {preorder ? <span>(Preorder)</span> : null}
-                    </div>
+                    <div className="price">{formatCurrency(product.priceCents)}</div>
+
                     <div className="shipping">+ shipping</div>
-                    <div className="inventory" aria-hidden="true"></div>
+
+                    <div className="stock">
+                      <span>Stock:</span>{" "}
+                      <span>
+                        {available} Jar{available === 1 ? "" : "s"}
+                      </span>
+                    </div>
+
+                    {!isOut ? (
+                      <div className="stock">
+                        <span>Note:</span> <span>Extras become preorder</span>
+                      </div>
+                    ) : null}
                   </div>
+
                   <button
                     className="button button--dark"
                     type="button"
                     onClick={() => handleAdd(product)}
-                    disabled={atLimit}
+                    aria-label={`Add ${product.name} to cart`}
                   >
-                    {preorder ? "Preorder Jar" : "Add To Cart"}
+                    {isOut || wouldPreorder ? "Add (may preorder)" : "Add To Cart"}
                   </button>
                 </div>
               </div>
@@ -269,12 +281,13 @@ export default function Storefront({ products, inventory = {} }) {
         <div className="cart">
           <div className="cart__header">
             <h3>Your Cart</h3>
-            <span>{itemCount} item{itemCount === 1 ? "" : "s"}</span>
+            <span>
+              {itemCount} item{itemCount === 1 ? "" : "s"}
+            </span>
           </div>
+
           {cartItems.length === 0 ? (
-            <p className="cart__empty">
-              Select any jar to begin. Stock updates live from our cellar sheet.
-            </p>
+            <p className="cart__empty">Select any jar to begin. Stock updates live.</p>
           ) : (
             <div className="cart__list">
               {cartItems.map((item) => (
@@ -282,15 +295,25 @@ export default function Storefront({ products, inventory = {} }) {
                   <div>
                     <strong>{item.name}</strong>
                     <span>
-                      {item.preorder ? "Preorder" : "In stock"} | {item.profile}
+                      {item.inStockUnits > 0
+                        ? `In stock: ${item.inStockUnits}`
+                        : "In stock: 0"}
+                      {" | "}
+                      {item.preorderUnits > 0
+                        ? `Preorder: ${item.preorderUnits}`
+                        : "Preorder: 0"}
+                      {" | "}
+                      {item.profile}
                     </span>
                   </div>
+
                   <div className="cart__controls">
                     <button
                       type="button"
                       onClick={() =>
                         handleQuantityChange(item.sku, item.quantity - 1)
                       }
+                      aria-label={`Decrease ${item.name} quantity`}
                     >
                       -
                     </button>
@@ -300,7 +323,7 @@ export default function Storefront({ products, inventory = {} }) {
                       onClick={() =>
                         handleQuantityChange(item.sku, item.quantity + 1)
                       }
-                      disabled={item.available > 0 && item.quantity >= item.available}
+                      aria-label={`Increase ${item.name} quantity`}
                     >
                       +
                     </button>
@@ -309,14 +332,23 @@ export default function Storefront({ products, inventory = {} }) {
               ))}
             </div>
           )}
+
           <div className="cart__summary">
             <div>
               <span>Subtotal</span>
               <strong>{formatCurrency(subtotal)}</strong>
             </div>
             <div>
+              <span>Tax</span>
+              <strong>Calculated at checkout</strong>
+            </div>
+            <div>
               <span>Shipping</span>
-              <strong>Calculated after request</strong>
+              <strong>Calculated at checkout</strong>
+            </div>
+            <div>
+              <span>Total</span>
+              <strong>Calculated at checkout</strong>
             </div>
           </div>
         </div>
@@ -324,9 +356,10 @@ export default function Storefront({ products, inventory = {} }) {
         <form className="order-form" onSubmit={handleSubmit}>
           <h3>Complete Your Order</h3>
           <p>
-            Each jar is $12 plus shipping. Preorders open whenever inventory runs
-            out.
+            Each jar is {formatCurrency(basePriceCents)} plus shipping. Preorders
+            apply when quantity exceeds available stock.
           </p>
+
           <div className="form__row">
             <label>
               Name
@@ -342,6 +375,7 @@ export default function Storefront({ products, inventory = {} }) {
               />
             </label>
           </div>
+
           <div className="form__row">
             <label>
               Phone
@@ -359,6 +393,7 @@ export default function Storefront({ products, inventory = {} }) {
               </select>
             </label>
           </div>
+
           {requiresAddress ? (
             <>
               <label>
@@ -367,7 +402,7 @@ export default function Storefront({ products, inventory = {} }) {
                   type="text"
                   name="address1"
                   placeholder="Street address"
-                  required={requiresAddress}
+                  required
                 />
               </label>
               <label>
@@ -377,19 +412,15 @@ export default function Storefront({ products, inventory = {} }) {
               <div className="form__row">
                 <label>
                   City
-                  <input type="text" name="city" required={requiresAddress} />
+                  <input type="text" name="city" required />
                 </label>
                 <label>
                   State
-                  <input type="text" name="state" required={requiresAddress} />
+                  <input type="text" name="state" required />
                 </label>
                 <label>
                   Postal code
-                  <input
-                    type="text"
-                    name="postalCode"
-                    required={requiresAddress}
-                  />
+                  <input type="text" name="postalCode" required />
                 </label>
               </div>
             </>
@@ -398,6 +429,7 @@ export default function Storefront({ products, inventory = {} }) {
               Pickup available Saturdays at the Fulshear Farmers Market.
             </div>
           )}
+
           <label>
             Order note
             <textarea
@@ -406,23 +438,26 @@ export default function Storefront({ products, inventory = {} }) {
               placeholder="Dietary notes or pickup timing."
             ></textarea>
           </label>
+
           {notice ? (
             <div
               className={`form__status${
                 status === "error" ? " form__status--error" : ""
               }`}
               role="status"
+              aria-live="polite"
             >
               {notice}
             </div>
           ) : null}
+
           <button
             className="button button--dark"
             type="submit"
             disabled={status === "submitting"}
           >
             {status === "submitting"
-              ? "Sending..."
+              ? "Redirecting..."
               : hasPreorder
                 ? "Place Preorder"
                 : "Place Order"}

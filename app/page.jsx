@@ -1,6 +1,6 @@
 import SiteHeader from "./components/SiteHeader";
 import Storefront from "./components/Storefront";
-import { products } from "@/lib/products";
+import { getProducts } from "@/lib/products";
 import { getInventoryMap } from "@/lib/stock";
 
 export const dynamic = "force-dynamic";
@@ -8,7 +8,14 @@ export const runtime = "nodejs";
 export const revalidate = 0;
 
 export default async function Home() {
-  const inventory = await getInventoryMap();
+  const [products, inventory] = await Promise.all([
+    getProducts(),
+    getInventoryMap()
+  ]);
+
+  const basePrice = products[0]?.priceCents
+    ? `$${(products[0].priceCents / 100).toFixed(2)}`
+    : "$11.99";
 
   return (
     <>
@@ -37,7 +44,7 @@ export default async function Home() {
           </h1>
           <p className="hero__subhead reveal" style={{ "--delay": "0.3s" }}>
             Six small-batch sourkrout jars, each finished with microgreen
-            infusions and botanical aromatics. Every jar is $12 plus shipping,
+            infusions and botanical aromatics. Every jar is {basePrice} plus shipping,
             with live stock synced from our cellar sheet.
           </p>
           <div className="hero__actions reveal" style={{ "--delay": "0.4s" }}>
