@@ -268,7 +268,7 @@ export default function Storefront({ products, inventory = {} }) {
                     onClick={() => handleAdd(product)}
                     aria-label={`Add ${product.name} to cart`}
                   >
-                    {isOut || wouldPreorder ? "Add (may preorder)" : "Add To Cart"}
+                    {isOut || wouldPreorder ? "Preorder" : "Add To Cart"}
                   </button>
                 </div>
               </div>
