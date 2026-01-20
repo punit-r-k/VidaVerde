@@ -108,9 +108,11 @@ create index if not exists preorder_queue_sku_idx on preorder_queue (sku, create
 create table if not exists restock_events (
   id uuid primary key default gen_random_uuid(),
   sku text not null references products(sku) on update cascade,
-  restock_qty integer not null check (restock_qty >= 0),
+  restock_qty integer not null,
   created_at timestamptz not null default now()
 );
+
+alter table restock_events drop constraint if exists restock_events_restock_qty_check;
 
 create or replace function set_updated_at()
 returns trigger as $$
@@ -268,17 +270,31 @@ declare
   v_fulfilled integer := 0;
   v_queue record;
 begin
-  if p_restock < 0 then
-    raise exception 'restock must be >= 0';
-  end if;
-
   if not exists (select 1 from inventory i where i.sku = p_sku for update) then
     raise exception 'Unknown SKU: %', p_sku;
   end if;
 
-  if p_restock > 0 then
+  if p_restock <> 0 then
     insert into restock_events (sku, restock_qty)
       values (p_sku, p_restock);
+  end if;
+
+  if p_restock < 0 then
+    update inventory i
+      set on_hand = greatest(i.on_hand + p_restock, 0),
+          updated_at = now()
+      where i.sku = p_sku;
+
+    return query
+    select
+      i.sku,
+      i.on_hand,
+      i.preorders_remaining,
+      i.units_sold,
+      i.expected_restock_date,
+      case when i.on_hand > 0 then 'In Stock' else 'Out of Stock' end as status
+    from inventory i
+    where i.sku = p_sku;
   end if;
 
   v_remaining := p_restock;

@@ -27,7 +27,7 @@ export async function POST(request) {
   const cleanSku = String(sku || "").trim();
   const qty = Number.parseInt(restock, 10);
 
-  if (!cleanSku || Number.isNaN(qty) || qty < 0) {
+  if (!cleanSku || Number.isNaN(qty)) {
     return NextResponse.json({ error: "Invalid payload" }, { status: 400 });
   }
 

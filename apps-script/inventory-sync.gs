@@ -78,7 +78,7 @@ function handleRestockEdit_(sheet, row) {
   if (rawValue === "" || rawValue === null) return;
 
   const restock = Number(rawValue);
-  if (!Number.isFinite(restock) || restock < 0) {
+  if (!Number.isFinite(restock)) {
     Logger.log("Invalid restock value: %s", rawValue);
     return;
   }
@@ -92,7 +92,7 @@ function handleRestockEdit_(sheet, row) {
   const settings = getSettings_();
   const payload = {
     sku,
-    restock: Math.floor(restock)
+    restock: Math.trunc(restock)
   };
 
   const response = postJson_(
