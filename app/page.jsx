@@ -84,6 +84,37 @@ export default async function Home() {
               preorders open automatically when jars sell out.
             </p>
           </div>
+          <div className="dietary">
+            <div className="dietary__intro">
+              <p className="eyebrow">Default Dietary Profile</p>
+              <h3>Simple ingredients, naturally allergy-conscious.</h3>
+              <p>
+                Every jar is fermented with real vegetables and salt only, keeping
+                the final product free from the most common allergens.
+              </p>
+            </div>
+            <ul className="dietary__list" aria-label="Default dietary profile">
+              {[
+                "Gluten-free",
+                "Dairy-free",
+                "Nut-free",
+                "Soy-free",
+                "Egg-free"
+              ].map((label) => (
+                <li key={label}>
+                  <span className="dietary__icon" aria-hidden="true">
+                    <svg viewBox="0 0 24 24" focusable="false" aria-hidden="true">
+                      <path
+                        d="M9.2 16.8 4.9 12.5l1.7-1.7 2.6 2.6 8.1-8.1 1.7 1.7z"
+                        fill="currentColor"
+                      />
+                    </svg>
+                  </span>
+                  <span className="dietary__label">{label}</span>
+                </li>
+              ))}
+            </ul>
+          </div>
           <Storefront products={products} inventory={inventory} />
         </section>
 

@@ -47,35 +47,6 @@ export default function AboutPage() {
                 moving online to expand access to gut and mental health through
                 real, living food.
               </p>
-              <h3>Default dietary profile</h3>
-              <ul>
-                <li>Gluten-free</li>
-                <li>Dairy-free</li>
-                <li>Nut-free</li>
-                <li>Soy-free</li>
-                <li>Egg-free</li>
-              </ul>
-              <h3>Who we serve</h3>
-              <ul>
-                <li>
-                  Primary buyers (30-55): focused on gut health, immunity, and
-                  long-term wellness.
-                </li>
-                <li>
-                  Secondary buyers (55-70): health-driven, loyal, and drawn to
-                  natural solutions and tradition.
-                </li>
-                <li>
-                  Emerging segment (23-35): wellness trends, gut-brain
-                  connection, and flavor exploration.
-                </li>
-                <li>Low priority: under 23 due to limited purchasing power.</li>
-              </ul>
-              <p>
-                <strong>Ideal online customer:</strong> 35-50, urban or
-                suburban, middle to upper-middle income, and motivated by
-                transparency, real food, and results.
-              </p>
             </div>
             <div className="about__panel">
               <div className="about__portrait">

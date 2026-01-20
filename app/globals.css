@@ -284,6 +284,79 @@ img {
   color: rgba(38, 96, 68, 0.8);
 }
 
+.dietary {
+  margin: 32px 0 48px;
+  padding: 28px;
+  border-radius: var(--radius-lg);
+  border: 1px solid var(--line);
+  background: linear-gradient(140deg, rgba(238, 244, 239, 0.95), rgba(215, 230, 218, 0.75));
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1.1fr);
+  gap: 24px;
+  align-items: center;
+  box-shadow: 0 18px 32px rgba(15, 21, 18, 0.08);
+}
+
+.dietary__intro h3 {
+  margin: 12px 0 12px;
+  font-family: var(--font-fraunces), serif;
+  font-weight: 500;
+  font-size: clamp(1.4rem, 2.4vw, 2rem);
+  color: var(--green-900);
+}
+
+.dietary__intro p {
+  margin: 0;
+  line-height: 1.6;
+  color: rgba(15, 21, 18, 0.75);
+}
+
+.dietary__list {
+  list-style: none;
+  padding: 0;
+  margin: 0;
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(160px, 1fr));
+  gap: 14px;
+}
+
+.dietary__list li {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 12px 14px;
+  background: var(--white);
+  border-radius: var(--radius);
+  border: 1px solid var(--line);
+  box-shadow: 0 10px 20px rgba(15, 21, 18, 0.06);
+}
+
+.dietary__icon {
+  width: 34px;
+  height: 34px;
+  border-radius: 999px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  background: var(--green-900);
+  color: var(--white);
+  box-shadow: 0 8px 18px rgba(15, 46, 33, 0.25);
+  flex-shrink: 0;
+}
+
+.dietary__icon svg {
+  width: 16px;
+  height: 16px;
+}
+
+.dietary__label {
+  font-size: 0.78rem;
+  letter-spacing: 0.16em;
+  text-transform: uppercase;
+  color: var(--green-900);
+  font-weight: 600;
+}
+
 .shop {
   background: var(--white);
 }
@@ -826,6 +899,10 @@ select:focus {
 
   .hero__content {
     padding-top: 18vh;
+  }
+
+  .dietary {
+    grid-template-columns: 1fr;
   }
 }
 
