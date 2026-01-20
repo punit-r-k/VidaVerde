@@ -417,10 +417,10 @@ insert into products (
     'red-coral',
     'Red Coral',
     'Crisp + Mineral',
-    'White cabbage fermented slowly with alpine salt for clean acidity.',
+    'Cabbage, beets, and carrots fermented with salt for bright, balanced crunch.',
     array[
       'Ferment: 28 days',
-      'Ingredients: white cabbage, alpine salt',
+      'Ingredients: cabbage, beets, carrots, salt',
       'Microgreen infusion: broccoli sprouts',
       'Jar size: 12oz'
     ],
@@ -438,7 +438,7 @@ insert into products (
     'Turmeric and cumin seed add warm spice to a crisp cabbage and carrot kraut.',
     array[
       'Ferment: 21 days',
-      'Ingredients: organic cabbage, carrots, turmeric, cumin seeds, sea salt',
+      'Ingredients: cabbage, carrots, turmeric, cumin seeds, salt',
       'Microgreen infusion: basil shoots',
       'Pairing: seafood + salads',
       'Jar size: 12oz'
@@ -454,10 +454,10 @@ insert into products (
     'caribean-heat',
     'Caribean Heat',
     'Green + Silky',
-    'A garden-forward blend with parsley, coriander, and celery leaf.',
+    'Cabbage and jalapeno deliver clean heat with a bright finish.',
     array[
       'Ferment: 18 days',
-      'Ingredients: parsley, coriander, celery',
+      'Ingredients: cabbage, jalapeno, salt',
       'Microgreen infusion: pea tendrils',
       'Texture: silk + crunch',
       'Jar size: 12oz'
@@ -473,10 +473,10 @@ insert into products (
     'endless-summer',
     'Endless Summer',
     'Deep + Warming',
-    'Ancho chili and cacao husk deliver a smoky, velvety finish.',
+    'Cabbage and carrots fermented with salt for a clean, sunny profile.',
     array[
       'Ferment: 35 days',
-      'Ingredients: ancho, cacao husk, agave',
+      'Ingredients: cabbage, carrots, salt',
       'Heat level: 6/10',
       'Pairing: roasted vegetables',
       'Jar size: 12oz'
@@ -489,15 +489,15 @@ insert into products (
   ),
   (
     'VV5',
-    'tropical-wave',
-    'Tropical Wave',
-    'Warm + Vibrant',
-    'Turmeric, ginger, and carrot bring glow and gentle spice.',
+    'green-kick',
+    'Green Kick',
+    'Herbal + Bright',
+    'Raw unpasteurized fermented jalapeno with onion, green onion, and cilantro.',
     array[
-      'Ferment: 24 days',
-      'Ingredients: turmeric, ginger, carrot',
-      'Microgreen infusion: sunflower greens',
-      'Finish: bright + earthy',
+      'Ferment: 18 days',
+      'Ingredients: jalapeno, onion, green onion, cilantro',
+      'Heat level: 5/10',
+      'Finish: zesty + fresh',
       'Jar size: 12oz'
     ],
     'https://images.unsplash.com/photo-1476718406336-bb5a9690ee2a?auto=format&fit=crop&w=800&q=80',
@@ -508,15 +508,15 @@ insert into products (
   ),
   (
     'VV6',
-    'sourkreut-6',
-    'Sourkreut 6',
-    'Lush + Botanical',
-    'Red cabbage and beetroot for a lush, antioxidant-rich kraut.',
+    'hell-yeah',
+    'Hell Yeah',
+    'Fire + Bold',
+    'Raw fermented red jalapeno and habanero with onion.',
     array[
-      'Ferment: 26 days',
-      'Ingredients: beetroot, red cabbage',
-      'Microgreen infusion: radish greens',
-      'Color: deep violet',
+      'Ferment: 20 days',
+      'Ingredients: red jalapeno, habanero, onion',
+      'Heat level: 8/10',
+      'Finish: smoky + hot',
       'Jar size: 12oz'
     ],
     'https://images.unsplash.com/photo-1505250469679-203ad9ced0cb?auto=format&fit=crop&w=800&q=80',
