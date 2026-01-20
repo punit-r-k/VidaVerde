@@ -34,8 +34,9 @@ create table if not exists inventory (
 
 create table if not exists orders (
   id uuid primary key default gen_random_uuid(),
-  stripe_session_id text not null unique,
-  stripe_payment_intent text,
+  payment_session_id text not null unique,
+  payment_reference text,
+  payment_provider text not null default 'square',
   status text not null default 'paid',
   fulfillment text not null check (fulfillment in ('ship', 'market')),
   customer_name text not null,
@@ -54,6 +55,33 @@ create table if not exists orders (
   amount_total integer not null default 0,
   created_at timestamptz not null default now()
 );
+
+do $$
+begin
+  if exists (
+    select 1
+    from information_schema.columns
+    where table_name = 'orders' and column_name = 'stripe_session_id'
+  ) then
+    alter table orders rename column stripe_session_id to payment_session_id;
+  end if;
+
+  if exists (
+    select 1
+    from information_schema.columns
+    where table_name = 'orders' and column_name = 'stripe_payment_intent'
+  ) then
+    alter table orders rename column stripe_payment_intent to payment_reference;
+  end if;
+
+  if not exists (
+    select 1
+    from information_schema.columns
+    where table_name = 'orders' and column_name = 'payment_provider'
+  ) then
+    alter table orders add column payment_provider text not null default 'square';
+  end if;
+end $$;
 
 create table if not exists order_items (
   id uuid primary key default gen_random_uuid(),
@@ -104,7 +132,8 @@ for each row execute function set_updated_at();
 
 create or replace function record_paid_order(
   p_session_id text,
-  p_payment_intent text,
+  p_payment_reference text,
+  p_payment_provider text,
   p_fulfillment text,
   p_currency text,
   p_amount_subtotal integer,
@@ -129,15 +158,16 @@ declare
 begin
   select id into v_order_id
   from orders
-  where stripe_session_id = p_session_id;
+  where payment_session_id = p_session_id;
 
   if v_order_id is not null then
     return v_order_id;
   end if;
 
   insert into orders (
-    stripe_session_id,
-    stripe_payment_intent,
+    payment_session_id,
+    payment_reference,
+    payment_provider,
     status,
     fulfillment,
     customer_name,
@@ -156,7 +186,8 @@ begin
     amount_total
   ) values (
     p_session_id,
-    nullif(p_payment_intent, ''),
+    nullif(p_payment_reference, ''),
+    coalesce(nullif(p_payment_provider, ''), 'square'),
     'paid',
     p_fulfillment,
     coalesce(p_customer->>'name', ''),
@@ -235,18 +266,13 @@ as $$
 declare
   v_remaining integer;
   v_fulfilled integer := 0;
-  v_row record;
+  v_queue record;
 begin
   if p_restock < 0 then
     raise exception 'restock must be >= 0';
   end if;
 
-  select * into v_row
-  from inventory
-  where sku = p_sku
-  for update;
-
-  if not found then
+  if not exists (select 1 from inventory i where i.sku = p_sku for update) then
     raise exception 'Unknown SKU: %', p_sku;
   end if;
 
@@ -257,44 +283,44 @@ begin
 
   v_remaining := p_restock;
 
-  for v_row in
-    select id, remaining
-    from preorder_queue
-    where sku = p_sku and remaining > 0
-    order by created_at, id
+  for v_queue in
+    select pq.id, pq.remaining
+    from preorder_queue pq
+    where pq.sku = p_sku and pq.remaining > 0
+    order by pq.created_at, pq.id
     for update
   loop
     exit when v_remaining <= 0;
 
-    if v_row.remaining <= v_remaining then
-      update preorder_queue
+    if v_queue.remaining <= v_remaining then
+      update preorder_queue pq
         set remaining = 0,
             fulfilled_at = now()
-        where id = v_row.id;
-      v_remaining := v_remaining - v_row.remaining;
-      v_fulfilled := v_fulfilled + v_row.remaining;
+        where pq.id = v_queue.id;
+      v_remaining := v_remaining - v_queue.remaining;
+      v_fulfilled := v_fulfilled + v_queue.remaining;
     else
-      update preorder_queue
-        set remaining = remaining - v_remaining
-        where id = v_row.id;
+      update preorder_queue pq
+        set remaining = pq.remaining - v_remaining
+        where pq.id = v_queue.id;
       v_fulfilled := v_fulfilled + v_remaining;
       v_remaining := 0;
     end if;
   end loop;
 
   if v_fulfilled > 0 then
-    update inventory
-      set preorders_remaining = greatest(preorders_remaining - v_fulfilled, 0)
-      where sku = p_sku;
+    update inventory i
+      set preorders_remaining = greatest(i.preorders_remaining - v_fulfilled, 0)
+      where i.sku = p_sku;
   end if;
 
   if v_remaining > 0 then
-    update inventory
-      set on_hand = on_hand + v_remaining
-      where sku = p_sku;
+    update inventory i
+      set on_hand = i.on_hand + v_remaining
+      where i.sku = p_sku;
   end if;
 
-  update inventory set updated_at = now() where sku = p_sku;
+  update inventory i set updated_at = now() where i.sku = p_sku;
 
   return query
   select

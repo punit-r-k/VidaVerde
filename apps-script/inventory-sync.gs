@@ -102,7 +102,12 @@ function handleRestockEdit_(sheet, row) {
   );
 
   if (!response?.ok) {
-    Logger.log("Restock failed for %s", sku);
+    Logger.log(
+      "Restock failed for %s (status: %s, error: %s)",
+      sku,
+      response?.status ?? "unknown",
+      response?.error || response?.message || response?.raw || "unknown"
+    );
     return;
   }
 
@@ -218,7 +223,18 @@ function postJson_(url, adminSecret, payload) {
     muteHttpExceptions: true
   });
 
-  return JSON.parse(response.getContentText());
+  const status = response.getResponseCode();
+  const text = response.getContentText();
+
+  try {
+    const parsed = JSON.parse(text);
+    if (parsed && typeof parsed === "object") {
+      return { status, ...parsed };
+    }
+    return { status, data: parsed };
+  } catch (error) {
+    return { status, error: "Invalid JSON response", raw: text };
+  }
 }
 
 function patchJson_(url, adminSecret, payload) {

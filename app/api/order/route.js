@@ -1,7 +1,8 @@
 import { NextResponse } from "next/server";
 import { getProductMap } from "@/lib/products";
 import { rateLimit } from "@/lib/rateLimit";
-import { stripe } from "@/lib/stripe";
+import crypto from "crypto";
+import { squareConfig, squareRequest } from "@/lib/square";
 
 const CHECKOUT_WINDOW_MS = 60_000;
 const CHECKOUT_MAX = 6;
@@ -18,9 +19,9 @@ const getClientId = (request) => {
 export const runtime = "nodejs";
 
 export async function POST(request) {
-  if (!stripe) {
+  if (!squareConfig) {
     return NextResponse.json(
-      { error: "Stripe is not configured." },
+      { error: "Square is not configured." },
       { status: 500 }
     );
   }
@@ -175,23 +176,57 @@ export async function POST(request) {
   };
 
   try {
-    const session = await stripe.checkout.sessions.create({
-      mode: "payment",
-      line_items: lineItems,
-      success_url: `${siteUrl}/?checkout=success`,
-      cancel_url: `${siteUrl}/?checkout=cancel`,
-      customer_email: email,
-      billing_address_collection: "required",
-      automatic_tax: { enabled: true },
-      metadata,
-      shipping_address_collection: isPickup
-        ? undefined
-        : {
-            allowed_countries: ["US"]
-          }
-    });
+    const locationId = process.env.SQUARE_LOCATION_ID;
+    if (!locationId) {
+      return NextResponse.json(
+        { error: "Square location is not configured." },
+        { status: 500 }
+      );
+    }
 
-    return NextResponse.json({ url: session.url }, { status: 200 });
+    const squareLineItems = lineItems.map((item) => ({
+      name: item.price_data.product_data.name,
+      quantity: String(item.quantity),
+      base_price_money: {
+        amount: item.price_data.unit_amount,
+        currency: "USD"
+      }
+    }));
+
+    const payload = {
+      idempotency_key: crypto.randomUUID(),
+      order: {
+        location_id: locationId,
+        line_items: squareLineItems,
+        metadata
+      },
+      checkout_options: {
+        redirect_url: `${siteUrl}/?checkout=success`,
+        ask_for_shipping_address: !isPickup,
+        allow_tipping: false
+      },
+      pre_populated_data: {
+        buyer_email: email
+      }
+    };
+
+    const { ok, data, error } = await squareRequest(
+      "/v2/online-checkout/payment-links",
+      {
+        method: "POST",
+        body: payload
+      }
+    );
+
+    if (!ok) {
+      console.error("square payment link error:", error);
+      return NextResponse.json(
+        { error: "Unable to start checkout." },
+        { status: 500 }
+      );
+    }
+
+    return NextResponse.json({ url: data?.payment_link?.url }, { status: 200 });
   } catch (error) {
     console.error("checkout session error:", error);
     return NextResponse.json(
