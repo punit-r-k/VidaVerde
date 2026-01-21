@@ -43,9 +43,9 @@ export default async function Home() {
             Plant-centered fermentation, ready for your table.
           </h1>
           <p className="hero__subhead reveal" style={{ "--delay": "0.3s" }}>
-            Six small-batch sourkrout jars, each finished with microgreen
-            infusions and botanical aromatics. Every jar is {basePrice} plus shipping,
-            with live stock synced from our cellar sheet.
+            Six small-batch ferments: four sourkrout jars and two hot sauces,
+            finished with microgreen infusions and fresh botanicals. Every jar is{" "}
+            {basePrice} plus shipping, with live stock synced from our cellar sheet.
           </p>
           <div className="hero__actions reveal" style={{ "--delay": "0.4s" }}>
             <a className="button button--light" href="#shop">
@@ -77,7 +77,7 @@ export default async function Home() {
         <section id="shop" className="section shop">
           <div className="section__intro">
             <p className="eyebrow">The Collection</p>
-            <h2>Six sourkrout profiles, each built for daily nourishment.</h2>
+            <h2>Four sourkrout profiles plus two hot sauces, built for daily nourishment.</h2>
             <p>
               Fresh microgreens, slow fermentation, and premium ingredients make
               each jar a daily ritual. Stock levels update in real time and

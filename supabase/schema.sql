@@ -282,6 +282,10 @@ begin
   if p_restock < 0 then
     update inventory i
       set on_hand = greatest(i.on_hand + p_restock, 0),
+          expected_restock_date = case
+            when greatest(i.on_hand + p_restock, 0) > 0 then null
+            else i.expected_restock_date
+          end,
           updated_at = now()
       where i.sku = p_sku;
 
@@ -336,7 +340,13 @@ begin
       where i.sku = p_sku;
   end if;
 
-  update inventory i set updated_at = now() where i.sku = p_sku;
+  update inventory i
+    set expected_restock_date = case
+          when i.on_hand > 0 then null
+          else i.expected_restock_date
+        end,
+        updated_at = now()
+    where i.sku = p_sku;
 
   return query
   select

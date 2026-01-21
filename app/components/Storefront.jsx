@@ -9,6 +9,16 @@ const formatCurrency = (amountInCents) => {
   return `$${(n / 100).toFixed(2)}`;
 };
 
+const formatRestockDate = (value) => {
+  if (!value) return "";
+  const date = new Date(`${value}T00:00:00Z`);
+  if (Number.isNaN(date.getTime())) return String(value);
+  const mm = String(date.getUTCMonth() + 1).padStart(2, "0");
+  const dd = String(date.getUTCDate()).padStart(2, "0");
+  const yyyy = date.getUTCFullYear();
+  return `${mm}/${dd}/${yyyy}`;
+};
+
 const INVENTORY_POLL_MS = 30000;
 
 export default function Storefront({ products, inventory = {} }) {
@@ -221,6 +231,7 @@ export default function Storefront({ products, inventory = {} }) {
 
           const available = Math.max(0, Number(record.on_hand || 0));
           const isOut = available <= 0;
+          const restockDate = record.expected_restock_date;
 
           const cartQty = cart[product.sku] || 0;
           const wouldPreorder = Math.max(0, cartQty + 1 - available) > 0;
@@ -254,6 +265,13 @@ export default function Storefront({ products, inventory = {} }) {
                         {available} Jar{available === 1 ? "" : "s"}
                       </span>
                     </div>
+
+                    {isOut && restockDate ? (
+                      <div className="stock">
+                        <span>Restock:</span>{" "}
+                        <span>{formatRestockDate(restockDate)}</span>
+                      </div>
+                    ) : null}
 
                     {!isOut ? (
                       <div className="stock">
