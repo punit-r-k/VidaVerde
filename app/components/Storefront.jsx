@@ -9,6 +9,57 @@ const formatCurrency = (amountInCents) => {
   return `$${(n / 100).toFixed(2)}`;
 };
 
+const normalizeSpaces = (value) => value.replace(/\s+/g, " ").replace(/^\s+/, "");
+
+const formatEmail = (value) => value.replace(/\s+/g, "").toLowerCase();
+
+const formatPhone = (value) => {
+  const digits = value.replace(/\D/g, "").slice(0, 10);
+  if (!digits) return "";
+  if (digits.length < 4) return `(${digits}`;
+  if (digits.length < 7) {
+    return `(${digits.slice(0, 3)}) ${digits.slice(3)}`;
+  }
+  return `(${digits.slice(0, 3)}) ${digits.slice(3, 6)}-${digits.slice(6)}`;
+};
+
+const formatPostalCode = (value) => {
+  const digits = value.replace(/\D/g, "").slice(0, 9);
+  if (digits.length <= 5) return digits;
+  return `${digits.slice(0, 5)}-${digits.slice(5)}`;
+};
+
+const formatState = (value) =>
+  value.replace(/[^a-zA-Z]/g, "").toUpperCase().slice(0, 2);
+
+const formatInputValue = (name, value) => {
+  switch (name) {
+    case "name":
+    case "address1":
+    case "address2":
+    case "city":
+      return normalizeSpaces(value);
+    case "email":
+      return formatEmail(value);
+    case "phone":
+      return formatPhone(value);
+    case "state":
+      return formatState(value);
+    case "postalCode":
+      return formatPostalCode(value);
+    default:
+      return value;
+  }
+};
+
+const handleFormattedInput = (event) => {
+  const { name, value } = event.currentTarget;
+  const formatted = formatInputValue(name, value);
+  if (formatted !== value) {
+    event.currentTarget.value = formatted;
+  }
+};
+
 const formatRestockDate = (value) => {
   if (!value) return "";
   const date = new Date(`${value}T00:00:00Z`);
@@ -381,7 +432,15 @@ export default function Storefront({ products, inventory = {} }) {
           <div className="form__row">
             <label>
               Name
-              <input type="text" name="name" placeholder="Your name" required />
+              <input
+                type="text"
+                name="name"
+                placeholder="Your name"
+                autoComplete="name"
+                autoCapitalize="words"
+                onInput={handleFormattedInput}
+                required
+              />
             </label>
             <label>
               Email
@@ -389,6 +448,9 @@ export default function Storefront({ products, inventory = {} }) {
                 type="email"
                 name="email"
                 placeholder="you@vidaverde.com"
+                autoComplete="email"
+                inputMode="email"
+                onInput={handleFormattedInput}
                 required
               />
             </label>
@@ -397,7 +459,15 @@ export default function Storefront({ products, inventory = {} }) {
           <div className="form__row">
             <label>
               Phone
-              <input type="tel" name="phone" placeholder="Optional" />
+              <input
+                type="tel"
+                name="phone"
+                placeholder="Optional"
+                autoComplete="tel"
+                inputMode="tel"
+                maxLength={14}
+                onInput={handleFormattedInput}
+              />
             </label>
             <label>
               Fulfillment
@@ -420,25 +490,55 @@ export default function Storefront({ products, inventory = {} }) {
                   type="text"
                   name="address1"
                   placeholder="Street address"
+                  autoComplete="address-line1"
+                  onInput={handleFormattedInput}
                   required
                 />
               </label>
               <label>
                 Address line 2
-                <input type="text" name="address2" placeholder="Apt, suite" />
+                <input
+                  type="text"
+                  name="address2"
+                  placeholder="Apt, suite"
+                  autoComplete="address-line2"
+                  onInput={handleFormattedInput}
+                />
               </label>
               <div className="form__row">
                 <label>
                   City
-                  <input type="text" name="city" required />
+                  <input
+                    type="text"
+                    name="city"
+                    autoComplete="address-level2"
+                    onInput={handleFormattedInput}
+                    required
+                  />
                 </label>
                 <label>
                   State
-                  <input type="text" name="state" required />
+                  <input
+                    type="text"
+                    name="state"
+                    autoComplete="address-level1"
+                    inputMode="text"
+                    maxLength={2}
+                    onInput={handleFormattedInput}
+                    required
+                  />
                 </label>
                 <label>
                   Postal code
-                  <input type="text" name="postalCode" required />
+                  <input
+                    type="text"
+                    name="postalCode"
+                    autoComplete="postal-code"
+                    inputMode="numeric"
+                    maxLength={10}
+                    onInput={handleFormattedInput}
+                    required
+                  />
                 </label>
               </div>
             </>
