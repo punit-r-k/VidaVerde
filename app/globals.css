@@ -897,65 +897,6 @@ select:focus {
   color: rgba(38, 96, 68, 0.8);
 }
 
-.about--goals {
-  background: var(--green-100);
-}
-
-.about__grid--goals {
-  align-items: start;
-}
-
-.about__goals {
-  list-style: none;
-  margin: 0;
-  padding: 0;
-  display: grid;
-  gap: 16px;
-}
-
-.about__goal {
-  display: grid;
-  grid-template-columns: auto 1fr;
-  gap: 16px;
-  align-items: center;
-  padding: 16px 18px;
-  border-radius: var(--radius);
-  background: var(--white);
-  border: 1px solid var(--line);
-  box-shadow: 0 12px 24px rgba(15, 21, 18, 0.08);
-}
-
-.about__goal-icon {
-  width: 44px;
-  height: 44px;
-  border-radius: 14px;
-  background: var(--green-900);
-  color: var(--white);
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  box-shadow: 0 10px 18px rgba(15, 46, 33, 0.25);
-  flex-shrink: 0;
-}
-
-.about__goal-icon svg {
-  width: 22px;
-  height: 22px;
-}
-
-.about__goal strong {
-  display: block;
-  font-size: 0.95rem;
-  color: var(--green-900);
-}
-
-.about__goal span {
-  display: block;
-  margin-top: 4px;
-  font-size: 0.85rem;
-  color: rgba(15, 21, 18, 0.7);
-}
-
 @media (max-width: 900px) {
   .about-hero__grid {
     grid-template-columns: 1fr;
