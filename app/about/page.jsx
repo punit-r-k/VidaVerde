@@ -11,62 +11,61 @@ export default function AboutPage() {
     <>
       <header className="about-hero">
         <SiteHeader variant="solid" />
-        <div className="about-hero__content">
-          <p className="eyebrow">Founder</p>
-          <h1>A real story of healing, tradition, and living fermentation.</h1>
-          <p>
-            Vida Verde is built on a founder-led commitment to real food and
-            living fermentation, rooted in family and proven by years of market
-            experience.
-          </p>
+        <div className="about-hero__grid">
+          <div className="about-hero__copy">
+            <p className="eyebrow">Founder</p>
+            <h1>A real story of healing, tradition, and living fermentation.</h1>
+            <p>
+              Eight years ago, a personal challenge changed everything. Our
+              founder began making small-batch sauerkraut at home to help his
+              wife recover from serious digestive issues and a weakened immune
+              system. When she could not tolerate the smell or intensity of
+              classic kraut, he started blending cabbage with fresh vegetables,
+              herbs, and spices, fermenting only in natural juices with no added
+              water.
+            </p>
+            <p>
+              The results were a flavorful, truly live food that she could enjoy
+              daily. Over time her digestion improved and her immune system grew
+              stronger. For five years he supported his family at farmers
+              markets and natural food stores across Houston, producing tons by
+              hand and witnessing thousands of customer transformations.
+            </p>
+            <div className="about-hero__stats">
+              <div>
+                <strong>8 years</strong>
+                <span>Family fermentation</span>
+              </div>
+              <div>
+                <strong>5 years</strong>
+                <span>Market tested</span>
+              </div>
+              <div>
+                <strong>Thousands</strong>
+                <span>Customers served</span>
+              </div>
+            </div>
+          </div>
+          <div className="about-hero__media">
+            <div className="about__portrait about-hero__portrait">
+              <img
+                src="https://images.unsplash.com/photo-1524504388940-b1c1722653e1?auto=format&fit=crop&w=700&q=80"
+                alt="Vida Verde founder portrait"
+                loading="lazy"
+              />
+            </div>
+            <div className="about-hero__quote">
+              <p>
+                "This is not just a product. It is a real story, lived, tested,
+                and proven."
+              </p>
+              <span>Vida Verde Founder</span>
+            </div>
+          </div>
         </div>
       </header>
 
       <main>
-        <section className="section about">
-          <div className="about__grid about__grid--story">
-            <div>
-              <h2>From a family challenge to a living mission.</h2>
-              <p>
-                Eight years ago, a personal challenge changed everything. Our
-                founder began making small-batch sauerkraut at home to help his
-                wife recover from serious digestive issues and a weakened immune
-                system. When she could not tolerate the smell or intensity of
-                classic kraut, he started blending cabbage with fresh vegetables,
-                herbs, and spices, fermenting only in natural juices with no
-                added water.
-              </p>
-              <p>
-                The results delivered a flavorful, truly live food that
-                transformed their daily health. His wife began eating it
-                regularly, digestion improved, and her immune system grew
-                stronger. That success proved traditional fermentation could be
-                both functional and delicious for modern palates.
-              </p>
-              <p>
-                For the past five years he has supported his family by selling
-                these jars at farmers markets and natural food stores across
-                Houston, producing tons by hand and witnessing positive health
-                transformations for thousands of customers.
-              </p>
-              <div className="about__portrait">
-                <img
-                  src="https://images.unsplash.com/photo-1524504388940-b1c1722653e1?auto=format&fit=crop&w=600&q=80"
-                  alt="Vida Verde founder portrait"
-                  loading="lazy"
-                />
-              </div>
-              <div className="about__card">
-                <p>
-                  "This is not just a product. It is a real story, lived,
-                  tested, and proven."
-                </p>
-                <span>Vida Verde Founder</span>
-              </div>
-            </div>
-          </div>
-        </section>
-
         <section className="section about about--goals">
           <div className="about__grid about__grid--goals">
             <div>
