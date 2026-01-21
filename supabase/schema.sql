@@ -377,10 +377,10 @@ security definer
 set search_path = public
 as $$
 begin
-  update inventory
+  update inventory i
     set expected_restock_date = p_date,
         updated_at = now()
-    where sku = p_sku;
+    where i.sku = p_sku;
 
   if not found then
     raise exception 'Unknown SKU: %', p_sku;
