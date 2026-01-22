@@ -37,10 +37,10 @@ export default async function Home() {
         <SiteHeader />
         <div className="hero__content">
           <p className="eyebrow reveal" style={{ "--delay": "0.1s" }}>
-            Live fermentation for gut health
+            Live fermentation for your gut health
           </p>
           <h1 className="reveal" style={{ "--delay": "0.2s" }}>
-            Real food that supports a happier gut.
+            Healthy food supporting your happy gut.
           </h1>
           <p className="hero__subhead reveal" style={{ "--delay": "0.3s" }}>
             Six small-batch ferments crafted in natural vegetable juices with no
