@@ -57,7 +57,7 @@ export default async function Home() {
           </div>
           <div className="hero__metrics reveal" style={{ "--delay": "0.5s" }}>
             <div>
-              <span>6</span>
+              <span>4</span>
               <small>Signature jars</small>
             </div>
             <div>
