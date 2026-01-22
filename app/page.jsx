@@ -45,9 +45,7 @@ export default async function Home() {
           <p className="hero__subhead reveal" style={{ "--delay": "0.3s" }}>
             Six small-batch ferments crafted in natural vegetable juices with no
             added water and never pasteurized. Four sourkrout jars and two hot
-            sauces bring bold flavor, live cultures, and daily nourishment. Every
-            jar is {basePrice} plus shipping, with live stock synced from our
-            cellar sheet.
+            sauces bring bold flavor, live cultures, and daily nourishment.
           </p>
           <div className="hero__actions reveal" style={{ "--delay": "0.4s" }}>
             <a className="button button--light" href="#shop">
