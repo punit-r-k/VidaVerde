@@ -37,15 +37,17 @@ export default async function Home() {
         <SiteHeader />
         <div className="hero__content">
           <p className="eyebrow reveal" style={{ "--delay": "0.1s" }}>
-            Premium sourkrout for gut health
+            Live fermentation for gut health
           </p>
           <h1 className="reveal" style={{ "--delay": "0.2s" }}>
-            Plant-centered fermentation, ready for your table.
+            Real food that supports a happier gut.
           </h1>
           <p className="hero__subhead reveal" style={{ "--delay": "0.3s" }}>
-            Six small-batch ferments: four sourkrout jars and two hot sauces,
-            finished with microgreen infusions and fresh botanicals. Every jar is{" "}
-            {basePrice} plus shipping, with live stock synced from our cellar sheet.
+            Six small-batch ferments crafted in natural vegetable juices with no
+            added water and never pasteurized. Four sourkrout jars and two hot
+            sauces bring bold flavor, live cultures, and daily nourishment. Every
+            jar is {basePrice} plus shipping, with live stock synced from our
+            cellar sheet.
           </p>
           <div className="hero__actions reveal" style={{ "--delay": "0.4s" }}>
             <a className="button button--light" href="#shop">

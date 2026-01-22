@@ -9,9 +9,6 @@ export default function SiteHeader({ variant = "overlay" }) {
         <a href="/#market">Fulshear Market</a>
         <a href="/about">Founder</a>
       </div>
-      <a className="nav__cta" href="/#shop">
-        Shop Now
-      </a>
     </nav>
   );
 }
