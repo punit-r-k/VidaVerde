@@ -70,7 +70,10 @@ export default function AboutPage() {
 
       <footer className="footer">
         <div>
-          <h3>Vida Verde</h3>
+          <h3 className="footer__brand">
+            <img src="/logo.svg" alt="Vida Verde logo" />
+            <span>Vida Verde</span>
+          </h3>
           <p>Premium sourkrout and microgreen nourishment.</p>
         </div>
         <div className="footer__meta">

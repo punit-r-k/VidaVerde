@@ -105,6 +105,18 @@ img {
   font-weight: 600;
   font-size: 20px;
   letter-spacing: 0.18em;
+  display: inline-flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.logo img {
+  width: 36px;
+  height: 36px;
+}
+
+.logo span {
+  display: inline-block;
 }
 
 .nav__links {
@@ -926,6 +938,22 @@ select:focus {
   font-family: var(--font-fraunces), serif;
   font-weight: 500;
   margin: 0 0 8px;
+}
+
+.footer__brand {
+  display: inline-flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.footer__brand img {
+  width: 32px;
+  height: 32px;
+  filter: brightness(0) invert(1);
+}
+
+.footer__brand span {
+  display: inline-block;
 }
 
 .footer__meta {
