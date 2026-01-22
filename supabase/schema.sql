@@ -431,7 +431,7 @@ insert into products (
     array[
       'Ferment: 28 days',
       'Ingredients: cabbage, beets, carrots, salt',
-      'Microgreen infusion: broccoli sprouts',
+      'Pairing: grain bowls + salads',
       'Jar size: 12oz'
     ],
     'https://images.unsplash.com/photo-1504674900247-0877df9cc836?auto=format&fit=crop&w=800&q=80',
@@ -449,7 +449,6 @@ insert into products (
     array[
       'Ferment: 21 days',
       'Ingredients: cabbage, carrots, turmeric, cumin seeds, salt',
-      'Microgreen infusion: basil shoots',
       'Pairing: seafood + salads',
       'Jar size: 12oz'
     ],
@@ -468,7 +467,7 @@ insert into products (
     array[
       'Ferment: 18 days',
       'Ingredients: cabbage, jalapeno, salt',
-      'Microgreen infusion: pea tendrils',
+      'Pairing: tacos + eggs',
       'Texture: silk + crunch',
       'Jar size: 12oz'
     ],
