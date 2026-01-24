@@ -115,6 +115,12 @@ img {
   height: 36px;
 }
 
+.nav .logo img {
+  width: 44px;
+  height: 44px;
+  filter: brightness(0) invert(1);
+}
+
 .logo span {
   display: inline-block;
 }
