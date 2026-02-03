@@ -151,6 +151,24 @@ img {
   max-width: 640px;
 }
 
+.hero__brand {
+  display: inline-flex;
+  align-items: center;
+  gap: 12px;
+  font-family: var(--font-fraunces), serif;
+  font-size: 1.1rem;
+  letter-spacing: 0.18em;
+  text-transform: uppercase;
+  color: var(--white);
+  margin-bottom: 18px;
+}
+
+.hero__brand img {
+  width: 46px;
+  height: 46px;
+  filter: brightness(0) invert(1);
+}
+
 .eyebrow {
   text-transform: uppercase;
   letter-spacing: 0.3em;
@@ -300,6 +318,60 @@ img {
 
 .section .eyebrow {
   color: rgba(38, 96, 68, 0.8);
+}
+
+.section__intro--compact {
+  margin-bottom: 12px;
+}
+
+.section__intro--compact p {
+  margin-bottom: 0;
+}
+
+.collection__bar {
+  margin: 0;
+  padding: 10px 14px;
+  border-radius: 999px;
+  border: 1px solid var(--line);
+  background: rgba(238, 244, 239, 0.8);
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  align-self: start;
+  flex-wrap: wrap;
+  margin-bottom: 28px;
+}
+
+.collection__bar-title {
+  font-size: 0.65rem;
+  letter-spacing: 0.24em;
+  text-transform: uppercase;
+  color: rgba(38, 96, 68, 0.85);
+  font-weight: 600;
+}
+
+.collection__bar-list {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.collection__bar-list li {
+  display: flex;
+}
+
+.collection__bar-pill {
+  padding: 4px 10px;
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  background: var(--white);
+  font-size: 0.65rem;
+  letter-spacing: 0.16em;
+  text-transform: uppercase;
+  color: rgba(15, 21, 18, 0.7);
 }
 
 .dietary {
@@ -1007,6 +1079,7 @@ select:focus {
   .dietary {
     grid-template-columns: 1fr;
   }
+
 }
 
 @media (max-width: 720px) {

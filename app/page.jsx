@@ -1,4 +1,3 @@
-import SiteHeader from "./components/SiteHeader";
 import Storefront from "./components/Storefront";
 import { getProducts } from "@/lib/products";
 import { getInventoryMap } from "@/lib/stock";
@@ -34,8 +33,11 @@ export default async function Home() {
           />
         </video>
         <div className="hero__overlay"></div>
-        <SiteHeader />
         <div className="hero__content">
+          <div className="hero__brand reveal" style={{ "--delay": "0.05s" }}>
+            <img src="/logo.svg" alt="Vida Verde logo" />
+            <span>Vida Verde</span>
+          </div>
           <p className="eyebrow reveal" style={{ "--delay": "0.1s" }}>
             Live fermentation for your gut health
           </p>
@@ -75,25 +77,21 @@ export default async function Home() {
 
       <main>
         <section id="shop" className="section shop">
-          <div className="section__intro">
+          <div className="section__intro section__intro--compact">
             <p className="eyebrow">The Collection</p>
-            <h2>Four sourkrout profiles plus two hot sauces, built for daily nourishment.</h2>
+            <h2>
+              Four sourkrout profiles plus two hot sauces, built for daily
+              nourishment.
+            </h2>
             <p>
               Fresh microgreens, slow fermentation, and premium ingredients make
               each jar a daily ritual. Stock levels update in real time and
               preorders open automatically when jars sell out.
             </p>
           </div>
-          <div className="dietary">
-            <div className="dietary__intro">
-              <p className="eyebrow">Default Dietary Profile</p>
-              <h3>Simple ingredients, naturally allergy-conscious.</h3>
-              <p>
-                Every jar is fermented with real vegetables and salt only, keeping
-                the final product free from the most common allergens.
-              </p>
-            </div>
-            <ul className="dietary__list" aria-label="Default dietary profile">
+          <div className="collection__bar" aria-label="Default dietary profile">
+            <span className="collection__bar-title">Allergen-friendly</span>
+            <ul className="collection__bar-list">
               {[
                 "Gluten-free",
                 "Dairy-free",
@@ -102,15 +100,7 @@ export default async function Home() {
                 "Egg-free"
               ].map((label) => (
                 <li key={label}>
-                  <span className="dietary__icon" aria-hidden="true">
-                    <svg viewBox="0 0 24 24" focusable="false" aria-hidden="true">
-                      <path
-                        d="M9.2 16.8 4.9 12.5l1.7-1.7 2.6 2.6 8.1-8.1 1.7 1.7z"
-                        fill="currentColor"
-                      />
-                    </svg>
-                  </span>
-                  <span className="dietary__label">{label}</span>
+                  <span className="collection__bar-pill">{label}</span>
                 </li>
               ))}
             </ul>
