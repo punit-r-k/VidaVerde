@@ -63,6 +63,18 @@ create table if not exists orders (
   created_at timestamptz not null default now()
 );
 
+create table if not exists email_signups (
+  id uuid primary key default gen_random_uuid(),
+  email text not null,
+  source text not null default 'website',
+  ip_address text,
+  user_agent text,
+  created_at timestamptz not null default now()
+);
+
+create index if not exists email_signups_email_idx on email_signups (email);
+create index if not exists email_signups_created_at_idx on email_signups (created_at desc);
+
 do $$
 begin
   if exists (

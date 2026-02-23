@@ -27,28 +27,13 @@ export default function Storefront({ products, inventory = {} }) {
   const [notice, setNotice] = useState("");
   const [fulfillment, setFulfillment] = useState("ship");
   const [liveInventory, setLiveInventory] = useState(inventory);
-  const [isCartDrawerOpen, setIsCartDrawerOpen] = useState(false);
-  const [showMobileCartToggle, setShowMobileCartToggle] = useState(false);
   const [formValues, setFormValues] = useState(INITIAL_FORM_VALUES);
   const [fieldErrors, setFieldErrors] = useState({});
   const [touchedFields, setTouchedFields] = useState({});
   const [submitAttempted, setSubmitAttempted] = useState(false);
-  const cartDrawerToggleRef = useRef(null);
-  const cartDrawerCloseRef = useRef(null);
-  const shouldRestoreDrawerFocusRef = useRef(false);
   const fieldRefs = useRef({});
 
   const basePriceCents = products[0]?.priceCents ?? 1199;
-
-  const openCartDrawer = useCallback(() => {
-    shouldRestoreDrawerFocusRef.current = false;
-    setIsCartDrawerOpen(true);
-  }, []);
-
-  const closeCartDrawer = useCallback((restoreFocus = true) => {
-    shouldRestoreDrawerFocusRef.current = restoreFocus;
-    setIsCartDrawerOpen(false);
-  }, []);
 
   const setFieldRef = useCallback((name) => {
     return (node) => {
@@ -149,7 +134,6 @@ export default function Storefront({ products, inventory = {} }) {
       setFieldErrors({});
       setTouchedFields({});
       setSubmitAttempted(false);
-      closeCartDrawer(false);
     } else if (checkoutStatus === "cancel") {
       setStatus("error");
       setNotice("Checkout canceled. Your cart is still saved below.");
@@ -160,127 +144,7 @@ export default function Storefront({ products, inventory = {} }) {
       url.searchParams.delete("checkout");
       window.history.replaceState({}, "", url.toString());
     }
-  }, [searchParams, closeCartDrawer]);
-
-  useEffect(() => {
-    if (!isCartDrawerOpen) {
-      if (shouldRestoreDrawerFocusRef.current) {
-        cartDrawerToggleRef.current?.focus();
-        shouldRestoreDrawerFocusRef.current = false;
-      }
-      return;
-    }
-
-    const previousOverflow = document.body.style.overflow;
-    const handleEscape = (event) => {
-      if (event.key === "Escape") {
-        closeCartDrawer();
-      }
-    };
-
-    document.body.style.overflow = "hidden";
-    cartDrawerCloseRef.current?.focus();
-    window.addEventListener("keydown", handleEscape);
-
-    return () => {
-      document.body.style.overflow = previousOverflow;
-      window.removeEventListener("keydown", handleEscape);
-    };
-  }, [isCartDrawerOpen, closeCartDrawer]);
-
-  useEffect(() => {
-    const mediaQuery = window.matchMedia("(min-width: 901px)");
-    const handleDesktop = (event) => {
-      if (event.matches) {
-        closeCartDrawer(false);
-      }
-    };
-
-    if (mediaQuery.matches) {
-      closeCartDrawer(false);
-    }
-
-    if (typeof mediaQuery.addEventListener === "function") {
-      mediaQuery.addEventListener("change", handleDesktop);
-    } else {
-      mediaQuery.addListener(handleDesktop);
-    }
-
-    return () => {
-      if (typeof mediaQuery.removeEventListener === "function") {
-        mediaQuery.removeEventListener("change", handleDesktop);
-      } else {
-        mediaQuery.removeListener(handleDesktop);
-      }
-    };
-  }, [closeCartDrawer]);
-
-  useEffect(() => {
-    if (typeof window === "undefined") return undefined;
-
-    const mediaQuery = window.matchMedia("(max-width: 900px)");
-    let observer;
-
-    const startObserver = () => {
-      const shopSection = document.getElementById("shop");
-      if (!shopSection) {
-        setShowMobileCartToggle(mediaQuery.matches);
-        return;
-      }
-
-      observer = new IntersectionObserver(
-        ([entry]) => {
-          const isVisible = Boolean(entry?.isIntersecting);
-          setShowMobileCartToggle(isVisible);
-
-          if (!isVisible) {
-            closeCartDrawer(false);
-          }
-        },
-        {
-          threshold: 0.08,
-          rootMargin: "-20% 0px -20% 0px"
-        }
-      );
-
-      observer.observe(shopSection);
-    };
-
-    const handleViewport = () => {
-      if (observer) {
-        observer.disconnect();
-        observer = undefined;
-      }
-
-      if (!mediaQuery.matches) {
-        setShowMobileCartToggle(false);
-        closeCartDrawer(false);
-        return;
-      }
-
-      startObserver();
-    };
-
-    handleViewport();
-
-    if (typeof mediaQuery.addEventListener === "function") {
-      mediaQuery.addEventListener("change", handleViewport);
-    } else {
-      mediaQuery.addListener(handleViewport);
-    }
-
-    return () => {
-      if (observer) {
-        observer.disconnect();
-      }
-
-      if (typeof mediaQuery.removeEventListener === "function") {
-        mediaQuery.removeEventListener("change", handleViewport);
-      } else {
-        mediaQuery.removeListener(handleViewport);
-      }
-    };
-  }, [closeCartDrawer]);
+  }, [searchParams]);
 
   const shouldDisplayStock = false;
 
@@ -336,6 +200,12 @@ export default function Storefront({ products, inventory = {} }) {
       ? "Ready for secure checkout."
       : `${requiredFieldRemaining} required field${requiredFieldRemaining === 1 ? "" : "s"} left.`;
 
+  const handleMobileCheckoutJump = useCallback(() => {
+    const cartSummary = document.getElementById("cart-summary");
+    if (!cartSummary) return;
+    cartSummary.scrollIntoView({ behavior: "smooth", block: "start" });
+  }, []);
+
   const handleAdd = (product) => {
     setCart((prev) => {
       const currentQty = prev[product.sku] || 0;
@@ -344,10 +214,6 @@ export default function Storefront({ products, inventory = {} }) {
         [product.sku]: currentQty + 1
       };
     });
-
-    if (typeof window !== "undefined" && window.matchMedia("(max-width: 900px)").matches) {
-      openCartDrawer();
-    }
   };
 
   const handleClearCart = () => {
@@ -567,73 +433,35 @@ export default function Storefront({ products, inventory = {} }) {
 
   return (
     <>
-      {showMobileCartToggle || isCartDrawerOpen ? (
+      {itemCount > 0 ? (
         <button
-          ref={cartDrawerToggleRef}
           type="button"
           className="cart-drawer-toggle"
-          onClick={openCartDrawer}
-          aria-expanded={isCartDrawerOpen}
-          aria-controls="mobile-cart-drawer"
-          aria-haspopup="dialog"
+          onClick={handleMobileCheckoutJump}
+          aria-label={`Go to cart summary. ${cartCountLabel} in cart.`}
         >
-          <span>Cart | {cartCountLabel}</span>
-          <strong>{formatCurrency(subtotal)}</strong>
+          <span className="cart-drawer-toggle__lead">
+            <span className="cart-drawer-toggle__icon" aria-hidden="true">
+              <svg viewBox="0 0 24 24" fill="none" role="presentation">
+                <path
+                  d="M3 4h2l1.6 9.2a2 2 0 0 0 2 1.7h8.4a2 2 0 0 0 2-1.6L20.5 7H7.1"
+                  stroke="currentColor"
+                  strokeWidth="1.8"
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                />
+                <circle cx="10" cy="19" r="1.5" fill="currentColor" />
+                <circle cx="17" cy="19" r="1.5" fill="currentColor" />
+              </svg>
+            </span>
+            <span className="cart-drawer-toggle__count">{itemCount}</span>
+            <span className="cart-drawer-toggle__text">
+              <span className="cart-drawer-toggle__label">View cart</span>
+              <span className="cart-drawer-toggle__items">{cartCountLabel}</span>
+            </span>
+          </span>
+          <strong className="cart-drawer-toggle__subtotal">{formatCurrency(subtotal)}</strong>
         </button>
-      ) : null}
-
-      {isCartDrawerOpen ? (
-        <div
-          className="cart-drawer-overlay"
-          role="presentation"
-          onClick={() => closeCartDrawer()}
-        >
-          <div
-            id="mobile-cart-drawer"
-            className="cart cart-drawer"
-            role="dialog"
-            aria-modal="true"
-            aria-labelledby="mobile-cart-title"
-            onClick={(event) => event.stopPropagation()}
-          >
-            <div className="cart-drawer__head">
-              <div className="cart__header">
-                <div>
-                  <h3 id="mobile-cart-title">Your Cart</h3>
-                  <span>{cartCountLabel}</span>
-                </div>
-                {itemCount > 0 ? (
-                  <button
-                    type="button"
-                    className="cart__clear"
-                    onClick={handleClearCart}
-                  >
-                    Clear
-                  </button>
-                ) : null}
-              </div>
-              <button
-                ref={cartDrawerCloseRef}
-                type="button"
-                className="cart-drawer__close"
-                aria-label="Close cart"
-                onClick={() => closeCartDrawer()}
-              >
-                Close
-              </button>
-            </div>
-
-            {renderCartDetails("drawer")}
-
-            <a
-              className="button button--dark cart-drawer__checkout"
-              href="#checkout-form"
-              onClick={() => closeCartDrawer(false)}
-            >
-              Go To Checkout
-            </a>
-          </div>
-        </div>
       ) : null}
 
       <div className="store">
@@ -721,7 +549,7 @@ export default function Storefront({ products, inventory = {} }) {
         </div>
 
         <aside className="store__panel">
-          <div className="cart cart--sticky">
+          <div id="cart-summary" tabIndex={-1} className="cart cart--sticky">
             <div className="cart__header">
               <div>
                 <h3>Your Cart</h3>

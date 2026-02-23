@@ -16,7 +16,11 @@ const sora = Sora({
 export const metadata = {
   title: "Vida Verde | Live Fermented Foods",
   description:
-    "Live fermented sauerkraut and hot sauce crafted in small batches for daily gut nourishment."
+    "Live fermented sauerkraut and hot sauce crafted in small batches for daily gut nourishment.",
+  icons: {
+    icon: "/logo.svg",
+    shortcut: "/logo.svg"
+  }
 };
 
 export default function RootLayout({ children }) {

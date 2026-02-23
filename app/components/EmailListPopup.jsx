@@ -4,13 +4,16 @@ import { useEffect, useState } from "react";
 import Image from "next/image";
 
 const DISMISS_KEY = "vidaverde-email-popup-dismissed-v1";
-const SAVED_EMAIL_KEY = "vidaverde-email-popup-email-v1";
 const OPEN_DELAY_MS = 1200;
+const DEFAULT_ERROR = "Unable to save your email right now. Please try again.";
+const SUCCESS_MESSAGE = "Thank you. You are on the email list!";
 
 export default function EmailListPopup() {
   const [open, setOpen] = useState(false);
   const [email, setEmail] = useState("");
   const [submitted, setSubmitted] = useState(false);
+  const [isSubmitting, setIsSubmitting] = useState(false);
+  const [errorMessage, setErrorMessage] = useState("");
 
   useEffect(() => {
     const wasDismissed = window.localStorage.getItem(DISMISS_KEY);
@@ -47,17 +50,46 @@ export default function EmailListPopup() {
     setOpen(false);
   };
 
-  const handleSubmit = (event) => {
+  const handleSubmit = async (event) => {
     event.preventDefault();
-    if (!email.trim()) return;
+    if (isSubmitting) return;
 
-    window.localStorage.setItem(SAVED_EMAIL_KEY, email.trim().toLowerCase());
-    window.localStorage.setItem(DISMISS_KEY, "1");
-    setSubmitted(true);
+    const normalizedEmail = email.trim().toLowerCase();
+    if (!normalizedEmail) return;
 
-    window.setTimeout(() => {
-      setOpen(false);
-    }, 1000);
+    setIsSubmitting(true);
+    setErrorMessage("");
+    setSubmitted(false);
+
+    try {
+      const response = await fetch("/api/email-signups", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json"
+        },
+        body: JSON.stringify({
+          email: normalizedEmail,
+          source: "email_popup"
+        })
+      });
+
+      const payload = await response.json().catch(() => ({}));
+      if (!response.ok) {
+        throw new Error(payload?.error || DEFAULT_ERROR);
+      }
+
+      window.localStorage.setItem(DISMISS_KEY, "1");
+      setSubmitted(true);
+      setEmail("");
+
+      window.setTimeout(() => {
+        setOpen(false);
+      }, 1400);
+    } catch (error) {
+      setErrorMessage(error?.message || DEFAULT_ERROR);
+    } finally {
+      setIsSubmitting(false);
+    }
   };
 
   if (!open) return null;
@@ -101,9 +133,23 @@ export default function EmailListPopup() {
               autoComplete="email"
               required
             />
-            <button type="submit" className="email-popup__button">
-              {submitted ? "You are in!" : "I am in"}
+            <button
+              type="submit"
+              className={`email-popup__button${submitted ? " email-popup__button--success" : ""}`}
+              disabled={isSubmitting || submitted}
+            >
+              {submitted ? "You are in!" : isSubmitting ? "Joining..." : "I am in"}
             </button>
+            {submitted ? (
+              <p className="email-popup__success" role="status" aria-live="polite">
+                {SUCCESS_MESSAGE}
+              </p>
+            ) : null}
+            {errorMessage ? (
+              <p className="email-popup__error" role="status" aria-live="polite">
+                {errorMessage}
+              </p>
+            ) : null}
           </form>
 
           <button

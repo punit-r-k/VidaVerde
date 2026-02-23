@@ -1,5 +1,6 @@
 import Storefront from "./components/Storefront";
 import EmailListPopup from "./components/EmailListPopup";
+import EmailSignupForm from "./components/EmailSignupForm";
 import ScrollReveal from "./components/ScrollReveal";
 import JumpNav from "./components/JumpNav";
 import Image from "next/image";
@@ -135,7 +136,7 @@ export default async function Home() {
             Unpasteurized ferments made for daily meals.
           </h1>
           <p className="hero__subhead reveal" style={{ "--delay": "0.3s" }}>
-            Small-batch live fermented sauerkraut and hot sauces made to help restore gut balance naturally. A healthier gut microbiome supports digestion, immunity, energy, mood, and overall well-being.
+            We make small-batch, live fermented sauerkraut and hot sauces made to help restore gut balance naturally. A healthier gut microbiome supports digestion, immunity, energy, mood, and overall well-being.
           </p>
           <div className="hero__actions reveal" style={{ "--delay": "0.4s" }}>
             <a className="button button--light" href="#shop">
@@ -316,6 +317,17 @@ export default async function Home() {
                 Reserve A Jar
               </a>
             </div>
+          </div>
+        </section>
+
+        <section id="join-email" className="section section--compact section--plain email-cta">
+          <div className="email-cta__shell js-reveal" style={{ "--reveal-delay": "170ms" }}>
+            <p className="eyebrow">Stay Updated</p>
+            <h2>Join our email list.</h2>
+            <p>
+              Get new batch drops, seasonal flavor releases, and Saturday pickup reminders.
+            </p>
+            <EmailSignupForm source="homepage_join_email" />
           </div>
         </section>
 
