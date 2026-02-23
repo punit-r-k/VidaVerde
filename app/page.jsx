@@ -1,6 +1,7 @@
 import Storefront from "./components/Storefront";
 import EmailListPopup from "./components/EmailListPopup";
 import ScrollReveal from "./components/ScrollReveal";
+import JumpNav from "./components/JumpNav";
 import Image from "next/image";
 import { getProducts } from "@/lib/products";
 import { getInventoryMap } from "@/lib/stock";
@@ -163,14 +164,7 @@ export default async function Home() {
       </header>
 
       <main>
-        <nav className="jump-nav" aria-label="Page section navigation">
-          <a href="#proof">Proof</a>
-          <a href="#voices">Reviews</a>
-          <a href="#founder">Story</a>
-          <a href="#wellness">Why Live Fermented Foods Matter</a>
-          <a href="#shop">Shop</a>
-          <a href="#faq">FAQ</a>
-        </nav>
+        <JumpNav />
 
         <section id="proof" className="section section--tight section--line signals">
           <div className="signals__shell js-reveal">

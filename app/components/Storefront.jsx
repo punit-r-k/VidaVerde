@@ -28,6 +28,7 @@ export default function Storefront({ products, inventory = {} }) {
   const [fulfillment, setFulfillment] = useState("ship");
   const [liveInventory, setLiveInventory] = useState(inventory);
   const [isCartDrawerOpen, setIsCartDrawerOpen] = useState(false);
+  const [showMobileCartToggle, setShowMobileCartToggle] = useState(false);
   const [formValues, setFormValues] = useState(INITIAL_FORM_VALUES);
   const [fieldErrors, setFieldErrors] = useState({});
   const [touchedFields, setTouchedFields] = useState({});
@@ -210,6 +211,73 @@ export default function Storefront({ products, inventory = {} }) {
         mediaQuery.removeEventListener("change", handleDesktop);
       } else {
         mediaQuery.removeListener(handleDesktop);
+      }
+    };
+  }, [closeCartDrawer]);
+
+  useEffect(() => {
+    if (typeof window === "undefined") return undefined;
+
+    const mediaQuery = window.matchMedia("(max-width: 900px)");
+    let observer;
+
+    const startObserver = () => {
+      const shopSection = document.getElementById("shop");
+      if (!shopSection) {
+        setShowMobileCartToggle(mediaQuery.matches);
+        return;
+      }
+
+      observer = new IntersectionObserver(
+        ([entry]) => {
+          const isVisible = Boolean(entry?.isIntersecting);
+          setShowMobileCartToggle(isVisible);
+
+          if (!isVisible) {
+            closeCartDrawer(false);
+          }
+        },
+        {
+          threshold: 0.08,
+          rootMargin: "-20% 0px -20% 0px"
+        }
+      );
+
+      observer.observe(shopSection);
+    };
+
+    const handleViewport = () => {
+      if (observer) {
+        observer.disconnect();
+        observer = undefined;
+      }
+
+      if (!mediaQuery.matches) {
+        setShowMobileCartToggle(false);
+        closeCartDrawer(false);
+        return;
+      }
+
+      startObserver();
+    };
+
+    handleViewport();
+
+    if (typeof mediaQuery.addEventListener === "function") {
+      mediaQuery.addEventListener("change", handleViewport);
+    } else {
+      mediaQuery.addListener(handleViewport);
+    }
+
+    return () => {
+      if (observer) {
+        observer.disconnect();
+      }
+
+      if (typeof mediaQuery.removeEventListener === "function") {
+        mediaQuery.removeEventListener("change", handleViewport);
+      } else {
+        mediaQuery.removeListener(handleViewport);
       }
     };
   }, [closeCartDrawer]);
@@ -499,18 +567,20 @@ export default function Storefront({ products, inventory = {} }) {
 
   return (
     <>
-      <button
-        ref={cartDrawerToggleRef}
-        type="button"
-        className="cart-drawer-toggle"
-        onClick={openCartDrawer}
-        aria-expanded={isCartDrawerOpen}
-        aria-controls="mobile-cart-drawer"
-        aria-haspopup="dialog"
-      >
-        <span>Cart | {cartCountLabel}</span>
-        <strong>{formatCurrency(subtotal)}</strong>
-      </button>
+      {showMobileCartToggle || isCartDrawerOpen ? (
+        <button
+          ref={cartDrawerToggleRef}
+          type="button"
+          className="cart-drawer-toggle"
+          onClick={openCartDrawer}
+          aria-expanded={isCartDrawerOpen}
+          aria-controls="mobile-cart-drawer"
+          aria-haspopup="dialog"
+        >
+          <span>Cart | {cartCountLabel}</span>
+          <strong>{formatCurrency(subtotal)}</strong>
+        </button>
+      ) : null}
 
       {isCartDrawerOpen ? (
         <div
