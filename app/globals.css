@@ -2128,7 +2128,16 @@ select:focus {
 
 @media (max-width: 640px) {
   .jump-nav {
+    top: 0;
     padding: 10px var(--layout-inline);
+    background: var(--surface-page);
+    border-top: none;
+    -webkit-backdrop-filter: none;
+    backdrop-filter: none;
+    transform: translateZ(0);
+    backface-visibility: hidden;
+    will-change: transform;
+    contain: paint;
   }
 
   .jump-nav__toggle {
