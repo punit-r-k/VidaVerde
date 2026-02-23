@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import { supabaseAdmin } from "@/lib/supabaseAdmin";
+import { getShowStockSetting, setShowStockSetting } from "@/lib/siteSettings";
 
 const requireSecret = (request) => {
   const secret = request.headers.get("x-admin-secret");
@@ -20,9 +21,12 @@ export async function GET(request) {
     );
   }
 
-  const { data, error } = await supabaseAdmin
-    .from("inventory")
-    .select("sku, on_hand, preorders_remaining, units_sold, expected_restock_date");
+  const [{ data, error }, showStock] = await Promise.all([
+    supabaseAdmin
+      .from("inventory")
+      .select("sku, on_hand, preorders_remaining, units_sold, expected_restock_date"),
+    getShowStockSetting()
+  ]);
 
   if (error) {
     console.error("inventory admin read error:", error);
@@ -38,7 +42,12 @@ export async function GET(request) {
     status: row.on_hand > 0 ? "In Stock" : "Out of Stock"
   }));
 
-  return NextResponse.json({ inventory });
+  return NextResponse.json({
+    inventory,
+    settings: {
+      show_stock: showStock
+    }
+  });
 }
 
 export async function PATCH(request) {
@@ -58,6 +67,24 @@ export async function PATCH(request) {
     payload = await request.json();
   } catch {
     return NextResponse.json({ error: "Invalid payload." }, { status: 400 });
+  }
+
+  if (typeof payload?.show_stock === "boolean") {
+    try {
+      const showStock = await setShowStockSetting(payload.show_stock);
+      return NextResponse.json({
+        ok: true,
+        settings: {
+          show_stock: showStock
+        }
+      });
+    } catch (error) {
+      console.error("show_stock update error:", error);
+      return NextResponse.json(
+        { error: "Unable to update stock display setting." },
+        { status: 500 }
+      );
+    }
   }
 
   const cleanSku = String(payload?.sku || "").trim();

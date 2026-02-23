@@ -39,6 +39,11 @@ Sheet columns:
 - Column G: Expected restock date
 - Column H: Total Sales
 
+Spreadsheet toggle for stock visibility:
+- The Apps Script creates a `Settings` sheet.
+- Use `Settings!B2` (`Show stock on website`) checkbox to show/hide stock pills
+  such as `Only 5 left` and `Sold Out` on the storefront.
+
 ## Supabase Schema
 
 Schema + seed data live in `supabase/schema.sql`.
@@ -63,3 +68,15 @@ Required environment variables:
 - Update copy in `app/page.jsx` and `app/about/page.jsx`.
 - Adjust styling in `app/globals.css`.
 - Edit product catalog in the Supabase `products` table.
+
+## Tailwind Hybrid Mode
+
+Tailwind is configured in hybrid mode so existing CSS continues to work while you
+migrate section-by-section:
+
+- Config: `tailwind.config.js` (`preflight` disabled to avoid global resets)
+- PostCSS: `postcss.config.js`
+- Layers loaded in: `app/globals.css`
+
+Current migrated example:
+- The shop allergen chip bar in `app/page.jsx` now uses Tailwind utility classes.

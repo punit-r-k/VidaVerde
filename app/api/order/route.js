@@ -1,6 +1,10 @@
 import { NextResponse } from "next/server";
 import { getProductMap } from "@/lib/products";
 import { rateLimit } from "@/lib/rateLimit";
+import {
+  checkoutPayloadSchema,
+  mapCheckoutIssuesToFieldErrors
+} from "@/lib/checkoutSchema";
 import crypto from "crypto";
 import { squareConfig, squareRequest } from "@/lib/square";
 
@@ -52,58 +56,28 @@ export async function POST(request) {
     return NextResponse.json({ error: "Invalid payload." }, { status: 400 });
   }
 
-  const { customer = {}, items = [], fulfillment = "ship" } = payload || {};
-  const name = String(customer.name || "").trim();
-  const email = String(customer.email || "").trim();
+  const parsedPayload = checkoutPayloadSchema.safeParse(payload);
+  if (!parsedPayload.success) {
+    const issues = parsedPayload.error.issues;
+    const firstIssue = issues[0];
+    const fieldErrors = mapCheckoutIssuesToFieldErrors(issues);
 
-  if (!name || !email) {
     return NextResponse.json(
-      { error: "Name and email are required." },
+      {
+        error: firstIssue?.message || "Checkout details are invalid.",
+        fieldErrors
+      },
       { status: 400 }
     );
   }
 
-  if (!Array.isArray(items) || items.length === 0) {
-    return NextResponse.json(
-      { error: "At least one item is required." },
-      { status: 400 }
-    );
-  }
-
-  const normalizedItems = items
-    .map((item) => {
-      const sku = String(item.sku || "").trim();
-      const quantity = Number.parseInt(item.quantity, 10);
-
-      if (!sku || Number.isNaN(quantity) || quantity <= 0) return null;
-
-      return { sku, quantity };
-    })
-    .filter(Boolean);
-
-  if (normalizedItems.length === 0) {
-    return NextResponse.json(
-      { error: "No valid items were provided." },
-      { status: 400 }
-    );
-  }
-
-  const normalizedFulfillment = fulfillment === "market" ? "market" : "ship";
+  const {
+    customer,
+    items: normalizedItems,
+    fulfillment: normalizedFulfillment
+  } = parsedPayload.data;
+  const { name, email } = customer;
   const isPickup = normalizedFulfillment === "market";
-
-  if (!isPickup) {
-    const address1 = String(customer.address1 || "").trim();
-    const city = String(customer.city || "").trim();
-    const state = String(customer.state || "").trim();
-    const postalCode = String(customer.postalCode || "").trim();
-
-    if (!address1 || !city || !state || !postalCode) {
-      return NextResponse.json(
-        { error: "Shipping address is incomplete." },
-        { status: 400 }
-      );
-    }
-  }
 
   const skus = normalizedItems.map((item) => item.sku);
   const productMap = await getProductMap(skus);
@@ -165,13 +139,13 @@ export async function POST(request) {
     fulfillment: normalizedFulfillment,
     customer_name: name,
     customer_email: email,
-    customer_phone: String(customer.phone || "").trim(),
-    address1: String(customer.address1 || "").trim(),
-    address2: String(customer.address2 || "").trim(),
-    city: String(customer.city || "").trim(),
-    state: String(customer.state || "").trim(),
-    postal_code: String(customer.postalCode || "").trim(),
-    note: String(customer.note || "").trim(),
+    customer_phone: customer.phone,
+    address1: customer.address1,
+    address2: customer.address2,
+    city: customer.city,
+    state: customer.state,
+    postal_code: customer.postalCode,
+    note: customer.note,
     items: JSON.stringify(itemsPayload)
   };
 

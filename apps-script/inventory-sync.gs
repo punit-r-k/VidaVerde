@@ -1,5 +1,6 @@
 const CONFIG = {
   SHEET_NAME: "Inventory",
+  SETTINGS_SHEET_NAME: "Settings",
   HEADER_ROW: 1,
   START_ROW: 2,
   COLS: {
@@ -11,25 +12,58 @@ const CONFIG = {
     PREORDERS: 6,
     RESTOCK_DATE: 7,
     TOTAL_SALES: 8
+  },
+  SETTINGS: {
+    HEADER_KEY_ROW: 1,
+    HEADER_KEY_COL: 1,
+    HEADER_VALUE_ROW: 1,
+    HEADER_VALUE_COL: 2,
+    SHOW_STOCK_LABEL_ROW: 2,
+    SHOW_STOCK_LABEL_COL: 1,
+    SHOW_STOCK_VALUE_ROW: 2,
+    SHOW_STOCK_VALUE_COL: 2
   }
 };
 
 function onOpen() {
+  ensureSettingsSheet_();
+
   SpreadsheetApp.getUi()
     .createMenu("Vida Verde")
     .addItem("Sync Inventory", "syncInventory")
+    .addItem("Setup Edit Trigger", "setupEditTrigger")
     .addToUi();
 }
 
 function onEdit(e) {
+  // Simple onEdit triggers cannot call UrlFetchApp.
+  // Keep this as a no-op and use the installable onInventoryEdit trigger.
+  return;
+}
+
+function onInventoryEdit(e) {
+  handleInventoryEdit_(e);
+}
+
+function handleInventoryEdit_(e) {
   if (!e || !e.range) return;
 
   const sheet = e.range.getSheet();
-  if (sheet.getName() !== CONFIG.SHEET_NAME) return;
-
   const row = e.range.getRow();
   const col = e.range.getColumn();
+  const sheetName = sheet.getName();
 
+  if (sheetName === CONFIG.SETTINGS_SHEET_NAME) {
+    if (
+      row === CONFIG.SETTINGS.SHOW_STOCK_VALUE_ROW &&
+      col === CONFIG.SETTINGS.SHOW_STOCK_VALUE_COL
+    ) {
+      handleShowStockToggleEdit_(sheet);
+    }
+    return;
+  }
+
+  if (sheetName !== CONFIG.SHEET_NAME) return;
   if (row <= CONFIG.HEADER_ROW) return;
 
   if (col === CONFIG.COLS.STOCK_INPUT) {
@@ -41,7 +75,31 @@ function onEdit(e) {
   }
 }
 
+function setupEditTrigger() {
+  const triggers = ScriptApp.getProjectTriggers();
+  const exists = triggers.some((trigger) => {
+    return (
+      trigger.getHandlerFunction() === "onInventoryEdit" &&
+      trigger.getEventType() === ScriptApp.EventType.ON_EDIT
+    );
+  });
+
+  if (exists) {
+    SpreadsheetApp.getUi().alert("Installable edit trigger already exists.");
+    return;
+  }
+
+  ScriptApp.newTrigger("onInventoryEdit")
+    .forSpreadsheet(SpreadsheetApp.getActive())
+    .onEdit()
+    .create();
+
+  SpreadsheetApp.getUi().alert("Installable edit trigger created.");
+}
+
 function syncInventory() {
+  ensureSettingsSheet_();
+
   const settings = getSettings_();
   const response = getJson_(
     `${settings.apiBaseUrl}/api/admin/inventory`,
@@ -55,6 +113,9 @@ function syncInventory() {
     }
     return acc;
   }, {});
+
+  const showStock = normalizeBoolean_(response?.settings?.show_stock, true);
+  writeShowStockSetting_(showStock);
 
   const sheet = SpreadsheetApp.getActive().getSheetByName(CONFIG.SHEET_NAME);
   if (!sheet) {
@@ -158,6 +219,36 @@ function handleRestockDateEdit_(sheet, row) {
   }
 }
 
+function handleShowStockToggleEdit_(sheet) {
+  const rawValue = sheet
+    .getRange(
+      CONFIG.SETTINGS.SHOW_STOCK_VALUE_ROW,
+      CONFIG.SETTINGS.SHOW_STOCK_VALUE_COL
+    )
+    .getValue();
+
+  const showStock = normalizeBoolean_(rawValue, true);
+  const settings = getSettings_();
+
+  const response = patchJson_(
+    `${settings.apiBaseUrl}/api/admin/inventory`,
+    settings.adminSecret,
+    { show_stock: showStock }
+  );
+
+  if (!response?.ok) {
+    Logger.log(
+      "Show stock toggle update failed (status: %s, error: %s)",
+      response?.status ?? "unknown",
+      response?.error || response?.message || response?.raw || "unknown"
+    );
+    return;
+  }
+
+  const confirmed = normalizeBoolean_(response?.settings?.show_stock, showStock);
+  writeShowStockSetting_(confirmed);
+}
+
 function syncInventoryRow_(sheet, row, sku, settings) {
   const response = getJson_(
     `${settings.apiBaseUrl}/api/admin/inventory`,
@@ -186,6 +277,66 @@ function writeRow_(sheet, row, record) {
   sheet.getRange(row, CONFIG.COLS.PREORDERS).setValue(preorders);
   sheet.getRange(row, CONFIG.COLS.RESTOCK_DATE).setValue(dateValue);
   sheet.getRange(row, CONFIG.COLS.TOTAL_SALES).setValue(sales);
+}
+
+function ensureSettingsSheet_() {
+  const book = SpreadsheetApp.getActive();
+  let sheet = book.getSheetByName(CONFIG.SETTINGS_SHEET_NAME);
+
+  if (!sheet) {
+    sheet = book.insertSheet(CONFIG.SETTINGS_SHEET_NAME);
+  }
+
+  sheet
+    .getRange(CONFIG.SETTINGS.HEADER_KEY_ROW, CONFIG.SETTINGS.HEADER_KEY_COL)
+    .setValue("Setting");
+  sheet
+    .getRange(CONFIG.SETTINGS.HEADER_VALUE_ROW, CONFIG.SETTINGS.HEADER_VALUE_COL)
+    .setValue("Value");
+  sheet
+    .getRange(
+      CONFIG.SETTINGS.SHOW_STOCK_LABEL_ROW,
+      CONFIG.SETTINGS.SHOW_STOCK_LABEL_COL
+    )
+    .setValue("Show stock on website");
+
+  const toggleCell = sheet.getRange(
+    CONFIG.SETTINGS.SHOW_STOCK_VALUE_ROW,
+    CONFIG.SETTINGS.SHOW_STOCK_VALUE_COL
+  );
+  toggleCell.insertCheckboxes();
+
+  if (toggleCell.getValue() === "") {
+    toggleCell.setValue(true);
+  }
+
+  return sheet;
+}
+
+function writeShowStockSetting_(showStock) {
+  const sheet = ensureSettingsSheet_();
+  const value = normalizeBoolean_(showStock, true);
+  const toggleCell = sheet.getRange(
+    CONFIG.SETTINGS.SHOW_STOCK_VALUE_ROW,
+    CONFIG.SETTINGS.SHOW_STOCK_VALUE_COL
+  );
+
+  toggleCell.insertCheckboxes();
+  if (toggleCell.getValue() !== value) {
+    toggleCell.setValue(value);
+  }
+}
+
+function normalizeBoolean_(value, fallback) {
+  if (typeof value === "boolean") return value;
+  if (value === 1 || value === "1") return true;
+  if (value === 0 || value === "0") return false;
+
+  const text = String(value || "").trim().toLowerCase();
+  if (!text) return fallback;
+  if (text === "true" || text === "yes" || text === "on") return true;
+  if (text === "false" || text === "no" || text === "off") return false;
+  return fallback;
 }
 
 function getSettings_() {
@@ -248,5 +399,16 @@ function patchJson_(url, adminSecret, payload) {
     muteHttpExceptions: true
   });
 
-  return JSON.parse(response.getContentText());
+  const status = response.getResponseCode();
+  const text = response.getContentText();
+
+  try {
+    const parsed = JSON.parse(text);
+    if (parsed && typeof parsed === "object") {
+      return { status, ...parsed };
+    }
+    return { status, data: parsed };
+  } catch (error) {
+    return { status, error: "Invalid JSON response", raw: text };
+  }
 }

@@ -1,4 +1,5 @@
 import SiteHeader from "../components/SiteHeader";
+import Image from "next/image";
 
 export const metadata = {
   title: "Founder | Vida Verde",
@@ -7,6 +8,8 @@ export const metadata = {
 };
 
 export default function AboutPage() {
+  const marketAddress = "9035 Bois d'Arc Ln, Richmond, TX 77406";
+
   return (
     <>
       <header className="about-hero">
@@ -21,8 +24,7 @@ export default function AboutPage() {
               wife recover from serious digestive issues and a weakened immune
               system. When she could not tolerate the smell or intensity of
               classic kraut, he started blending cabbage with fresh vegetables,
-              herbs, and spices, fermenting only in natural juices with no added
-              water.
+              herbs, and spices, fermenting only in natural juices.
             </p>
             <p>
               The results were a flavorful, truly live food that she could enjoy
@@ -48,16 +50,18 @@ export default function AboutPage() {
           </div>
           <div className="about-hero__media">
             <div className="about__portrait about-hero__portrait">
-              <img
+              <Image
                 src="https://images.unsplash.com/photo-1524504388940-b1c1722653e1?auto=format&fit=crop&w=700&q=80"
                 alt="Vida Verde founder portrait"
-                loading="lazy"
+                width={700}
+                height={1050}
+                sizes="(max-width: 900px) 100vw, 560px"
               />
             </div>
             <div className="about-hero__quote">
               <p>
-                "This is not just a product. It is a real story, lived, tested,
-                and proven."
+                &quot;This is not just a product. It is a real story, lived,
+                tested, and proven.&quot;
               </p>
               <span>Vida Verde Founder</span>
             </div>
@@ -71,13 +75,13 @@ export default function AboutPage() {
       <footer className="footer">
         <div>
           <h3 className="footer__brand">
-            <img src="/logo.svg" alt="Vida Verde logo" />
+            <Image src="/logo.svg" alt="Vida Verde logo" width={32} height={32} />
             <span>Vida Verde</span>
           </h3>
-          <p>Premium sourkrout and microgreen nourishment.</p>
+          <p>Live fermented sauerkraut and hot sauce for daily nourishment.</p>
         </div>
         <div className="footer__meta">
-          <span>Fulshear, TX</span>
+          <span>{marketAddress}</span>
           <span>hello@vidaverde.com</span>
         </div>
       </footer>

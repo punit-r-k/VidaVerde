@@ -32,6 +32,13 @@ create table if not exists inventory (
   updated_at timestamptz not null default now()
 );
 
+create table if not exists site_settings (
+  id boolean primary key default true check (id),
+  show_stock boolean not null default true,
+  created_at timestamptz not null default now(),
+  updated_at timestamptz not null default now()
+);
+
 create table if not exists orders (
   id uuid primary key default gen_random_uuid(),
   payment_session_id text not null unique,
@@ -130,6 +137,11 @@ for each row execute function set_updated_at();
 drop trigger if exists set_inventory_updated_at on inventory;
 create trigger set_inventory_updated_at
 before update on inventory
+for each row execute function set_updated_at();
+
+drop trigger if exists set_site_settings_updated_at on site_settings;
+create trigger set_site_settings_updated_at
+before update on site_settings
 for each row execute function set_updated_at();
 
 create or replace function record_paid_order(
@@ -426,12 +438,12 @@ insert into products (
     'VV1',
     'red-coral',
     'Red Coral',
-    'Crisp + Mineral',
-    'Cabbage, beets, and carrots fermented with salt for bright, balanced crunch.',
+    '',
+    'Beyond the benefits of naturally fermented kraut rich in live probiotics that support digestion and gut balance, this blend features beets and carrots, adding antioxidants and key nutrients that support circulation and overall vitality.',
     array[
-      'Ferment: 28 days',
       'Ingredients: cabbage, beets, carrots, salt',
-      'Pairing: grain bowls + salads',
+      'Naturally rich in live probiotics',
+      'Supports circulation and overall vitality',
       'Jar size: 12oz'
     ],
     'https://images.unsplash.com/photo-1504674900247-0877df9cc836?auto=format&fit=crop&w=800&q=80',
@@ -444,12 +456,12 @@ insert into products (
     'VV2',
     'sunset',
     'Sunset',
-    'Warm + Hearthy',
-    'Turmeric and cumin seed add warm spice to a crisp cabbage and carrot kraut.',
+    'Turmeric + Cumin',
+    'Beyond the benefits of naturally fermented kraut rich in live probiotics that support digestion and gut balance, this blend is infused with turmeric and cumin seeds, two anti-inflammatory spices known to support digestion and overall wellness.',
     array[
-      'Ferment: 21 days',
       'Ingredients: cabbage, carrots, turmeric, cumin seeds, salt',
-      'Pairing: seafood + salads',
+      'Live probiotics for digestion and gut balance',
+      'Turmeric and cumin support overall wellness',
       'Jar size: 12oz'
     ],
     'https://images.unsplash.com/photo-1467003909585-2f8a72700288?auto=format&fit=crop&w=800&q=80',
@@ -460,15 +472,14 @@ insert into products (
   ),
   (
     'VV3',
-    'caribean-heat',
-    'Caribean Heat',
-    'Green + Silky',
-    'Cabbage and jalapeno deliver clean heat with a bright finish.',
+    'caribbean-heat',
+    'Caribbean Heat',
+    'Medium Spice',
+    'Beyond the benefits of naturally fermented sauerkraut rich in live probiotics that support digestion and gut balance, this medium-spice blend of cabbage and jalapeno delivers a vibrant kick. Jalapenos provide natural antioxidants and vitamin C, making this kraut a flavorful addition to sandwiches and wraps.',
     array[
-      'Ferment: 18 days',
-      'Ingredients: cabbage, jalapeno, salt',
-      'Pairing: tacos + eggs',
-      'Texture: silk + crunch',
+      'Ingredients: cabbage, jalapeno pepper, salt',
+      'Medium heat with a vibrant kick',
+      'Vitamin C and antioxidant support',
       'Jar size: 12oz'
     ],
     'https://images.unsplash.com/photo-1473093295043-cdd812d0e601?auto=format&fit=crop&w=800&q=80',
@@ -481,13 +492,12 @@ insert into products (
     'VV4',
     'endless-summer',
     'Endless Summer',
-    'Deep + Warming',
-    'Cabbage and carrots fermented with salt for a clean, sunny profile.',
+    'Fresh + Balanced',
+    'Beyond the benefits of naturally fermented sauerkraut rich in live probiotics that support digestion and gut balance, this blend combines cabbage and carrots, delivering a fresh, well-rounded flavor and natural nutrients that support eye health and overall vitality.',
     array[
-      'Ferment: 35 days',
       'Ingredients: cabbage, carrots, salt',
-      'Heat level: 6/10',
-      'Pairing: roasted vegetables',
+      'Live probiotics for digestion and gut balance',
+      'Nutrients that support eye health and vitality',
       'Jar size: 12oz'
     ],
     'https://images.unsplash.com/photo-1512621776951-a57141f2eefd?auto=format&fit=crop&w=800&q=80',
@@ -499,38 +509,36 @@ insert into products (
   (
     'VV5',
     'green-kick',
-    'Green Kick',
-    'Herbal + Bright',
-    'Raw unpasteurized fermented jalapeno with onion, green onion, and cilantro.',
+    'Green Kick Hot Sauce',
+    'Herbal + Mild',
+    'A raw, fermented hot sauce crafted to preserve live probiotics and bold flavor. With a fresh, herbal profile and mild heat, it is a vibrant addition to scrambled eggs, tacos, wraps, and more. Naturally rich in probiotics, Green Kick delivers flavor and gut-supporting benefits in every spoonful.',
     array[
-      'Ferment: 18 days',
-      'Ingredients: jalapeno, onion, green onion, cilantro',
-      'Heat level: 5/10',
-      'Finish: zesty + fresh',
-      'Jar size: 12oz'
+      'Ingredients: jalapeno pepper, onion, green onion, cilantro',
+      'Raw fermented hot sauce with live probiotics',
+      'Flavor profile: fresh, herbal, mild heat',
+      'Bottle size: 5oz'
     ],
     'https://images.unsplash.com/photo-1476718406336-bb5a9690ee2a?auto=format&fit=crop&w=800&q=80',
     1199,
-    12,
+    5,
     5,
     true
   ),
   (
     'VV6',
     'hell-yeah',
-    'Hell Yeah',
-    'Fire + Bold',
-    'Raw fermented red jalapeno and habanero with onion.',
+    'Hell Yeah! Hot Sauce',
+    'Hot + Bright',
+    'Crafted for those who crave more heat without sacrificing balance, this raw, fermented hot sauce delivers an intense yet well-rounded spice. Beyond the gut-supporting benefits of live probiotics, it brings bold flavor and satisfying heat in just the right measure, perfect for elevating everyday meals.',
     array[
-      'Ferment: 20 days',
-      'Ingredients: red jalapeno, habanero, onion',
-      'Heat level: 8/10',
-      'Finish: smoky + hot',
-      'Jar size: 12oz'
+      'Ingredients: red habanero pepper, red jalapeno pepper, onion',
+      'Raw fermented hot sauce with live probiotics',
+      'Flavor profile: bold heat with bright finish',
+      'Bottle size: 5oz'
     ],
     'https://images.unsplash.com/photo-1505250469679-203ad9ced0cb?auto=format&fit=crop&w=800&q=80',
     1199,
-    12,
+    5,
     6,
     true
   )
@@ -550,5 +558,9 @@ on conflict (sku) do update set
 insert into inventory (sku, on_hand, preorders_remaining, units_sold)
 select sku, 0, 0, 0 from products
 on conflict (sku) do nothing;
+
+insert into site_settings (id, show_stock)
+values (true, true)
+on conflict (id) do nothing;
 
 commit;

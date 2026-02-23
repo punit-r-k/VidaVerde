@@ -1,73 +1,21 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useSearchParams } from "next/navigation";
+import Image from "next/image";
+import {
+  FORM_FIELD_ORDER,
+  INITIAL_FORM_VALUES,
+  SHIPPING_FIELDS,
+  formatCheckoutInputValue,
+  getCheckoutFieldErrors,
+  normalizeFulfillment
+} from "@/lib/checkoutSchema";
 
 const formatCurrency = (amountInCents) => {
   const n = Number(amountInCents);
   if (!Number.isFinite(n)) return "$0.00";
   return `$${(n / 100).toFixed(2)}`;
-};
-
-const normalizeSpaces = (value) => value.replace(/\s+/g, " ").replace(/^\s+/, "");
-
-const formatEmail = (value) => value.replace(/\s+/g, "").toLowerCase();
-
-const formatPhone = (value) => {
-  const digits = value.replace(/\D/g, "").slice(0, 10);
-  if (!digits) return "";
-  if (digits.length < 4) return `(${digits}`;
-  if (digits.length < 7) {
-    return `(${digits.slice(0, 3)}) ${digits.slice(3)}`;
-  }
-  return `(${digits.slice(0, 3)}) ${digits.slice(3, 6)}-${digits.slice(6)}`;
-};
-
-const formatPostalCode = (value) => {
-  const digits = value.replace(/\D/g, "").slice(0, 9);
-  if (digits.length <= 5) return digits;
-  return `${digits.slice(0, 5)}-${digits.slice(5)}`;
-};
-
-const formatState = (value) =>
-  value.replace(/[^a-zA-Z]/g, "").toUpperCase().slice(0, 2);
-
-const formatInputValue = (name, value) => {
-  switch (name) {
-    case "name":
-    case "address1":
-    case "address2":
-    case "city":
-      return normalizeSpaces(value);
-    case "email":
-      return formatEmail(value);
-    case "phone":
-      return formatPhone(value);
-    case "state":
-      return formatState(value);
-    case "postalCode":
-      return formatPostalCode(value);
-    default:
-      return value;
-  }
-};
-
-const handleFormattedInput = (event) => {
-  const { name, value } = event.currentTarget;
-  const formatted = formatInputValue(name, value);
-  if (formatted !== value) {
-    event.currentTarget.value = formatted;
-  }
-};
-
-const formatRestockDate = (value) => {
-  if (!value) return "";
-  const date = new Date(`${value}T00:00:00Z`);
-  if (Number.isNaN(date.getTime())) return String(value);
-  const mm = String(date.getUTCMonth() + 1).padStart(2, "0");
-  const dd = String(date.getUTCDate()).padStart(2, "0");
-  const yyyy = date.getUTCFullYear();
-  return `${mm}/${dd}/${yyyy}`;
 };
 
 const INVENTORY_POLL_MS = 30000;
@@ -79,8 +27,64 @@ export default function Storefront({ products, inventory = {} }) {
   const [notice, setNotice] = useState("");
   const [fulfillment, setFulfillment] = useState("ship");
   const [liveInventory, setLiveInventory] = useState(inventory);
+  const [isCartDrawerOpen, setIsCartDrawerOpen] = useState(false);
+  const [formValues, setFormValues] = useState(INITIAL_FORM_VALUES);
+  const [fieldErrors, setFieldErrors] = useState({});
+  const [touchedFields, setTouchedFields] = useState({});
+  const [submitAttempted, setSubmitAttempted] = useState(false);
+  const cartDrawerToggleRef = useRef(null);
+  const cartDrawerCloseRef = useRef(null);
+  const shouldRestoreDrawerFocusRef = useRef(false);
+  const fieldRefs = useRef({});
 
   const basePriceCents = products[0]?.priceCents ?? 1199;
+
+  const openCartDrawer = useCallback(() => {
+    shouldRestoreDrawerFocusRef.current = false;
+    setIsCartDrawerOpen(true);
+  }, []);
+
+  const closeCartDrawer = useCallback((restoreFocus = true) => {
+    shouldRestoreDrawerFocusRef.current = restoreFocus;
+    setIsCartDrawerOpen(false);
+  }, []);
+
+  const setFieldRef = useCallback((name) => {
+    return (node) => {
+      if (node) {
+        fieldRefs.current[name] = node;
+      } else {
+        delete fieldRefs.current[name];
+      }
+    };
+  }, []);
+
+  const validateCheckoutForm = useCallback((values, nextFulfillment) => {
+    return getCheckoutFieldErrors(values, nextFulfillment);
+  }, []);
+
+  const focusFirstInvalidField = useCallback((errors, nextFulfillment) => {
+    const fields = nextFulfillment === "ship"
+      ? FORM_FIELD_ORDER
+      : FORM_FIELD_ORDER.filter((name) => !SHIPPING_FIELDS.includes(name));
+
+    const firstInvalid = fields.find((name) => errors[name]);
+    if (!firstInvalid) return;
+
+    const node = fieldRefs.current[firstInvalid];
+    if (!node) return;
+
+    node.focus();
+    node.scrollIntoView({ behavior: "smooth", block: "center" });
+  }, []);
+
+  const getFieldError = useCallback((name) => {
+    const hasError = Boolean(fieldErrors[name]);
+    const shouldShow = submitAttempted || touchedFields[name];
+    return hasError && shouldShow ? fieldErrors[name] : "";
+  }, [fieldErrors, submitAttempted, touchedFields]);
+
+  const hasFieldError = useCallback((name) => Boolean(getFieldError(name)), [getFieldError]);
 
   const applyInventory = (nextInventory) => {
     if (nextInventory && typeof nextInventory === "object") {
@@ -140,6 +144,11 @@ export default function Storefront({ products, inventory = {} }) {
       setNotice("Payment received. We will email fulfillment details shortly.");
       setCart({});
       setFulfillment("ship");
+      setFormValues(INITIAL_FORM_VALUES);
+      setFieldErrors({});
+      setTouchedFields({});
+      setSubmitAttempted(false);
+      closeCartDrawer(false);
     } else if (checkoutStatus === "cancel") {
       setStatus("error");
       setNotice("Checkout canceled. Your cart is still saved below.");
@@ -150,7 +159,62 @@ export default function Storefront({ products, inventory = {} }) {
       url.searchParams.delete("checkout");
       window.history.replaceState({}, "", url.toString());
     }
-  }, [searchParams]);
+  }, [searchParams, closeCartDrawer]);
+
+  useEffect(() => {
+    if (!isCartDrawerOpen) {
+      if (shouldRestoreDrawerFocusRef.current) {
+        cartDrawerToggleRef.current?.focus();
+        shouldRestoreDrawerFocusRef.current = false;
+      }
+      return;
+    }
+
+    const previousOverflow = document.body.style.overflow;
+    const handleEscape = (event) => {
+      if (event.key === "Escape") {
+        closeCartDrawer();
+      }
+    };
+
+    document.body.style.overflow = "hidden";
+    cartDrawerCloseRef.current?.focus();
+    window.addEventListener("keydown", handleEscape);
+
+    return () => {
+      document.body.style.overflow = previousOverflow;
+      window.removeEventListener("keydown", handleEscape);
+    };
+  }, [isCartDrawerOpen, closeCartDrawer]);
+
+  useEffect(() => {
+    const mediaQuery = window.matchMedia("(min-width: 901px)");
+    const handleDesktop = (event) => {
+      if (event.matches) {
+        closeCartDrawer(false);
+      }
+    };
+
+    if (mediaQuery.matches) {
+      closeCartDrawer(false);
+    }
+
+    if (typeof mediaQuery.addEventListener === "function") {
+      mediaQuery.addEventListener("change", handleDesktop);
+    } else {
+      mediaQuery.addListener(handleDesktop);
+    }
+
+    return () => {
+      if (typeof mediaQuery.removeEventListener === "function") {
+        mediaQuery.removeEventListener("change", handleDesktop);
+      } else {
+        mediaQuery.removeListener(handleDesktop);
+      }
+    };
+  }, [closeCartDrawer]);
+
+  const shouldDisplayStock = false;
 
   const cartItems = useMemo(() => {
     return products
@@ -160,7 +224,8 @@ export default function Storefront({ products, inventory = {} }) {
         const record = liveInventory[product.sku] || {
           on_hand: 0,
           preorders_remaining: 0,
-          units_sold: 0
+          units_sold: 0,
+          show_stock: true
         };
 
         const available = Math.max(0, Number(record.on_hand || 0));
@@ -184,6 +249,24 @@ export default function Storefront({ products, inventory = {} }) {
   const subtotal = cartItems.reduce((sum, item) => sum + item.lineTotal, 0);
   const hasPreorder = cartItems.some((item) => item.preorderUnits > 0);
   const requiresAddress = fulfillment === "ship";
+  const cartCountLabel = `${itemCount} item${itemCount === 1 ? "" : "s"}`;
+  const requiredFieldNames = requiresAddress
+    ? ["name", "email", "address1", "city", "state", "postalCode"]
+    : ["name", "email"];
+  const completionErrors = useMemo(
+    () => validateCheckoutForm(formValues, fulfillment),
+    [formValues, fulfillment, validateCheckoutForm]
+  );
+  const requiredFieldRemaining = requiredFieldNames.filter((name) =>
+    Boolean(completionErrors[name])
+  ).length;
+  const requiredFieldCompleted = requiredFieldNames.length - requiredFieldRemaining;
+  const completionProgress = Math.round((requiredFieldCompleted / requiredFieldNames.length) * 100);
+  const checkoutReadinessText = itemCount === 0
+    ? "Add at least one jar to continue."
+    : requiredFieldRemaining === 0
+      ? "Ready for secure checkout."
+      : `${requiredFieldRemaining} required field${requiredFieldRemaining === 1 ? "" : "s"} left.`;
 
   const handleAdd = (product) => {
     setCart((prev) => {
@@ -193,6 +276,19 @@ export default function Storefront({ products, inventory = {} }) {
         [product.sku]: currentQty + 1
       };
     });
+
+    if (typeof window !== "undefined" && window.matchMedia("(max-width: 900px)").matches) {
+      openCartDrawer();
+    }
+  };
+
+  const handleClearCart = () => {
+    setCart({});
+
+    if (status !== "idle") {
+      setStatus("idle");
+      setNotice("");
+    }
   };
 
   const handleQuantityChange = (sku, nextQty) => {
@@ -209,6 +305,59 @@ export default function Storefront({ products, inventory = {} }) {
     });
   };
 
+  const handleFieldChange = (event) => {
+    const { name, value } = event.currentTarget;
+    const formatted = formatCheckoutInputValue(name, value);
+    const nextValues = {
+      ...formValues,
+      [name]: formatted
+    };
+
+    setFormValues(nextValues);
+
+    if (status !== "idle") {
+      setStatus("idle");
+      setNotice("");
+    }
+
+    if (submitAttempted || touchedFields[name]) {
+      setFieldErrors(validateCheckoutForm(nextValues, fulfillment));
+    }
+  };
+
+  const handleFieldBlur = (event) => {
+    const { name, value } = event.currentTarget;
+    const formatted = formatCheckoutInputValue(name, value);
+    const nextValues = formatted === formValues[name]
+      ? formValues
+      : {
+        ...formValues,
+        [name]: formatted
+      };
+
+    if (formatted !== formValues[name]) {
+      setFormValues(nextValues);
+    }
+
+    setTouchedFields((prev) => ({
+      ...prev,
+      [name]: true
+    }));
+    setFieldErrors(validateCheckoutForm(nextValues, fulfillment));
+  };
+
+  const handleFulfillmentChange = (event) => {
+    const nextFulfillment = normalizeFulfillment(event.target.value);
+    setFulfillment(nextFulfillment);
+
+    if (status !== "idle") {
+      setStatus("idle");
+      setNotice("");
+    }
+
+    setFieldErrors(validateCheckoutForm(formValues, nextFulfillment));
+  };
+
   const handleSubmit = async (event) => {
     event.preventDefault();
 
@@ -220,23 +369,32 @@ export default function Storefront({ products, inventory = {} }) {
       return;
     }
 
-    setStatus("submitting");
-    setNotice("Redirecting to secure checkout...");
+    setSubmitAttempted(true);
+    const nextErrors = validateCheckoutForm(formValues, fulfillment);
+    setFieldErrors(nextErrors);
 
-    const formData = new FormData(event.currentTarget);
+    if (Object.keys(nextErrors).length > 0) {
+      setStatus("error");
+      setNotice("Please fix the highlighted fields before checkout.");
+      focusFirstInvalidField(nextErrors, fulfillment);
+      return;
+    }
+
+    setStatus("submitting");
+    setNotice("Looks good. Redirecting to secure checkout...");
 
     const payload = {
-      fulfillment,
+      fulfillment: normalizeFulfillment(fulfillment),
       customer: {
-        name: String(formData.get("name") || "").trim(),
-        email: String(formData.get("email") || "").trim(),
-        phone: String(formData.get("phone") || "").trim(),
-        address1: String(formData.get("address1") || "").trim(),
-        address2: String(formData.get("address2") || "").trim(),
-        city: String(formData.get("city") || "").trim(),
-        state: String(formData.get("state") || "").trim(),
-        postalCode: String(formData.get("postalCode") || "").trim(),
-        note: String(formData.get("note") || "").trim()
+        name: String(formValues.name || "").trim(),
+        email: String(formValues.email || "").trim(),
+        phone: String(formValues.phone || "").trim(),
+        address1: String(formValues.address1 || "").trim(),
+        address2: String(formValues.address2 || "").trim(),
+        city: String(formValues.city || "").trim(),
+        state: String(formValues.state || "").trim(),
+        postalCode: String(formValues.postalCode || "").trim(),
+        note: String(formValues.note || "").trim()
       },
       // Only send sku + quantity. Server decides sold vs preorder.
       items: cartItems.map((item) => ({
@@ -255,6 +413,10 @@ export default function Storefront({ products, inventory = {} }) {
       const result = await response.json();
 
       if (!response.ok) {
+        if (result?.fieldErrors && typeof result.fieldErrors === "object") {
+          setFieldErrors((prev) => ({ ...prev, ...result.fieldErrors }));
+          focusFirstInvalidField(result.fieldErrors, fulfillment);
+        }
         throw new Error(result.error || "Unable to start checkout.");
       }
 
@@ -270,318 +432,497 @@ export default function Storefront({ products, inventory = {} }) {
     }
   };
 
-  return (
-    <div className="store">
-      <div className="store__grid">
-        {products.map((product) => {
-          const record = liveInventory[product.sku] || {
-            on_hand: 0,
-            preorders_remaining: 0,
-            units_sold: 0
-          };
-
-          const available = Math.max(0, Number(record.on_hand || 0));
-          const isOut = available <= 0;
-          const restockDate = record.expected_restock_date;
-
-          const cartQty = cart[product.sku] || 0;
-          const wouldPreorder = Math.max(0, cartQty + 1 - available) > 0;
-
-          return (
-            <article className="product-card" key={product.sku}>
-              <img src={product.image} alt={product.name} loading="lazy" />
-              <div className="product-card__content">
-                <div>
-                  <div className="product-card__header">
-                    <h3>{product.name}</h3>
-                    <span>{product.profile}</span>
-                  </div>
-                  <p>{product.description}</p>
-                  <ul>
-                    {product.specs.map((spec) => (
-                      <li key={spec}>{spec}</li>
-                    ))}
-                  </ul>
-                </div>
-
-                <div className="product-card__footer">
-                  <div>
-                    <div className="price">{formatCurrency(product.priceCents)}</div>
-
-                    <div className="shipping">+ shipping</div>
-
-                    <div className="stock">
-                      <span>Stock:</span>{" "}
-                      <span>
-                        {available} Jar{available === 1 ? "" : "s"}
-                      </span>
-                    </div>
-
-                    {isOut && restockDate ? (
-                      <div className="stock">
-                        <span>Restock:</span>{" "}
-                        <span>{formatRestockDate(restockDate)}</span>
-                      </div>
-                    ) : null}
-
-                    {!isOut ? (
-                      <div className="stock">
-                        <span>Note:</span> <span>Extras become preorder</span>
-                      </div>
-                    ) : null}
-                  </div>
-
-                  <button
-                    className="button button--dark"
-                    type="button"
-                    onClick={() => handleAdd(product)}
-                    aria-label={`Add ${product.name} to cart`}
-                  >
-                    {isOut || wouldPreorder ? "Preorder" : "Add To Cart"}
-                  </button>
-                </div>
+  const renderCartDetails = (keyPrefix) => (
+    <>
+      {cartItems.length === 0 ? (
+        <p className="cart__empty">Select any item to begin your order.</p>
+      ) : (
+        <div className="cart__list">
+          {cartItems.map((item) => (
+            <div className="cart__item" key={`${keyPrefix}-${item.sku}`}>
+              <div>
+                <strong>{item.name}</strong>
+                <span>
+                  Qty: {item.quantity}
+                  {item.profile ? ` | ${item.profile}` : ""}
+                </span>
+                {shouldDisplayStock ? (
+                  <span className="cart__split">
+                    {item.inStockUnits} in stock | {item.preorderUnits} preorder
+                  </span>
+                ) : null}
+                <small className="cart__line-total">{formatCurrency(item.lineTotal)}</small>
               </div>
-            </article>
-          );
-        })}
+
+              <div className="cart__controls">
+                <button
+                  type="button"
+                  onClick={() => handleQuantityChange(item.sku, item.quantity - 1)}
+                  aria-label={`Decrease ${item.name} quantity`}
+                >
+                  -
+                </button>
+                <span>{item.quantity}</span>
+                <button
+                  type="button"
+                  onClick={() => handleQuantityChange(item.sku, item.quantity + 1)}
+                  aria-label={`Increase ${item.name} quantity`}
+                >
+                  +
+                </button>
+              </div>
+            </div>
+          ))}
+        </div>
+      )}
+
+      <div className="cart__summary">
+        <div>
+          <span>Subtotal</span>
+          <strong>{formatCurrency(subtotal)}</strong>
+        </div>
+        <div>
+          <span>Tax</span>
+          <strong>Calculated at checkout</strong>
+        </div>
+        <div>
+          <span>Shipping</span>
+          <strong>Calculated at checkout</strong>
+        </div>
+        <div>
+          <span>Total</span>
+          <strong>Calculated at checkout</strong>
+        </div>
       </div>
+    </>
+  );
 
-      <aside className="store__panel">
-        <div className="cart">
-          <div className="cart__header">
-            <h3>Your Cart</h3>
-            <span>
-              {itemCount} item{itemCount === 1 ? "" : "s"}
-            </span>
-          </div>
+  return (
+    <>
+      <button
+        ref={cartDrawerToggleRef}
+        type="button"
+        className="cart-drawer-toggle"
+        onClick={openCartDrawer}
+        aria-expanded={isCartDrawerOpen}
+        aria-controls="mobile-cart-drawer"
+        aria-haspopup="dialog"
+      >
+        <span>Cart | {cartCountLabel}</span>
+        <strong>{formatCurrency(subtotal)}</strong>
+      </button>
 
-          {cartItems.length === 0 ? (
-            <p className="cart__empty">Select any jar to begin. Stock updates live.</p>
-          ) : (
-            <div className="cart__list">
-              {cartItems.map((item) => (
-                <div className="cart__item" key={item.sku}>
-                  <div>
-                    <strong>{item.name}</strong>
-                    <span>
-                      {item.inStockUnits > 0
-                        ? `In stock: ${item.inStockUnits}`
-                        : "In stock: 0"}
-                      {" | "}
-                      {item.preorderUnits > 0
-                        ? `Preorder: ${item.preorderUnits}`
-                        : "Preorder: 0"}
-                      {" | "}
-                      {item.profile}
-                    </span>
-                  </div>
-
-                  <div className="cart__controls">
-                    <button
-                      type="button"
-                      onClick={() =>
-                        handleQuantityChange(item.sku, item.quantity - 1)
-                      }
-                      aria-label={`Decrease ${item.name} quantity`}
-                    >
-                      -
-                    </button>
-                    <span>{item.quantity}</span>
-                    <button
-                      type="button"
-                      onClick={() =>
-                        handleQuantityChange(item.sku, item.quantity + 1)
-                      }
-                      aria-label={`Increase ${item.name} quantity`}
-                    >
-                      +
-                    </button>
-                  </div>
+      {isCartDrawerOpen ? (
+        <div
+          className="cart-drawer-overlay"
+          role="presentation"
+          onClick={() => closeCartDrawer()}
+        >
+          <div
+            id="mobile-cart-drawer"
+            className="cart cart-drawer"
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="mobile-cart-title"
+            onClick={(event) => event.stopPropagation()}
+          >
+            <div className="cart-drawer__head">
+              <div className="cart__header">
+                <div>
+                  <h3 id="mobile-cart-title">Your Cart</h3>
+                  <span>{cartCountLabel}</span>
                 </div>
-              ))}
+                {itemCount > 0 ? (
+                  <button
+                    type="button"
+                    className="cart__clear"
+                    onClick={handleClearCart}
+                  >
+                    Clear
+                  </button>
+                ) : null}
+              </div>
+              <button
+                ref={cartDrawerCloseRef}
+                type="button"
+                className="cart-drawer__close"
+                aria-label="Close cart"
+                onClick={() => closeCartDrawer()}
+              >
+                Close
+              </button>
             </div>
-          )}
 
-          <div className="cart__summary">
-            <div>
-              <span>Subtotal</span>
-              <strong>{formatCurrency(subtotal)}</strong>
-            </div>
-            <div>
-              <span>Tax</span>
-              <strong>Calculated at checkout</strong>
-            </div>
-            <div>
-              <span>Shipping</span>
-              <strong>Calculated at checkout</strong>
-            </div>
-            <div>
-              <span>Total</span>
-              <strong>Calculated at checkout</strong>
-            </div>
+            {renderCartDetails("drawer")}
+
+            <a
+              className="button button--dark cart-drawer__checkout"
+              href="#checkout-form"
+              onClick={() => closeCartDrawer(false)}
+            >
+              Go To Checkout
+            </a>
           </div>
         </div>
+      ) : null}
 
-        <form className="order-form" onSubmit={handleSubmit}>
-          <h3>Complete Your Order</h3>
-          <p>
-            Each jar is {formatCurrency(basePriceCents)} plus shipping. Preorders
-            apply when quantity exceeds available stock.
-          </p>
+      <div className="store">
+        <div className="store__grid">
+          {products.map((product) => {
+            const record = liveInventory[product.sku] || {
+              on_hand: 0,
+              preorders_remaining: 0,
+              units_sold: 0,
+              show_stock: true
+            };
 
-          <div className="form__row">
-            <label>
-              Name
-              <input
-                type="text"
-                name="name"
-                placeholder="Your name"
-                autoComplete="name"
-                autoCapitalize="words"
-                onInput={handleFormattedInput}
-                required
-              />
-            </label>
-            <label>
-              Email
-              <input
-                type="email"
-                name="email"
-                placeholder="you@vidaverde.com"
-                autoComplete="email"
-                inputMode="email"
-                onInput={handleFormattedInput}
-                required
-              />
-            </label>
+            const available = Math.max(0, Number(record.on_hand || 0));
+            const salesCount = Math.max(0, Number(record.units_sold || 0));
+            const isOut = available <= 0;
+            const isLowStock = !isOut && available <= 6;
+            const isBestSeller = salesCount >= 120;
+            const inventoryLabel = isOut
+              ? "Sold Out"
+              : isLowStock
+                ? `Only ${available} left`
+                : `${available} in stock`;
+            const inventoryClass = isOut
+              ? "product-pill product-pill--out"
+              : isLowStock
+                ? "product-pill product-pill--low"
+                : "product-pill product-pill--in";
+
+            const cartQty = cart[product.sku] || 0;
+            const wouldPreorder = Math.max(0, cartQty + 1 - available) > 0;
+
+            return (
+              <article className="product-card" key={product.sku}>
+                <Image
+                  src={product.image}
+                  alt={product.name}
+                  width={800}
+                  height={600}
+                  sizes="(max-width: 900px) 100vw, (max-width: 1400px) 50vw, 33vw"
+                />
+                <div className="product-card__content">
+                  <div>
+                    <div className="product-card__header">
+                      <h3>{product.name}</h3>
+                      {product.profile ? <span>{product.profile}</span> : null}
+                    </div>
+                    {shouldDisplayStock || isBestSeller ? (
+                      <div className="product-card__badges">
+                        {shouldDisplayStock ? (
+                          <span className={inventoryClass}>{inventoryLabel}</span>
+                        ) : null}
+                        {isBestSeller ? (
+                          <span className="product-pill product-pill--accent">
+                            Best Seller
+                          </span>
+                        ) : null}
+                      </div>
+                    ) : null}
+                    <p>{product.description}</p>
+                    <ul>
+                      {product.specs.map((spec) => (
+                        <li key={spec}>{spec}</li>
+                      ))}
+                    </ul>
+                  </div>
+
+                  <div className="product-card__footer">
+                    <div>
+                      <div className="price">{formatCurrency(product.priceCents)}</div>
+                    </div>
+
+                    <button
+                      className="button button--dark"
+                      type="button"
+                      onClick={() => handleAdd(product)}
+                      aria-label={`Add ${product.name} to cart`}
+                    >
+                      {isOut || wouldPreorder ? "Preorder" : "Add To Cart"}
+                    </button>
+                  </div>
+                </div>
+              </article>
+            );
+          })}
+        </div>
+
+        <aside className="store__panel">
+          <div className="cart cart--sticky">
+            <div className="cart__header">
+              <div>
+                <h3>Your Cart</h3>
+                <span>{cartCountLabel}</span>
+              </div>
+              {itemCount > 0 ? (
+                <button
+                  type="button"
+                  className="cart__clear"
+                  onClick={handleClearCart}
+                >
+                  Clear
+                </button>
+              ) : null}
+            </div>
+
+            {renderCartDetails("desktop")}
           </div>
 
-          <div className="form__row">
-            <label>
-              Phone
-              <input
-                type="tel"
-                name="phone"
-                placeholder="Optional"
-                autoComplete="tel"
-                inputMode="tel"
-                maxLength={14}
-                onInput={handleFormattedInput}
-              />
-            </label>
-            <label>
-              Fulfillment
-              <select
-                name="fulfillment"
-                value={fulfillment}
-                onChange={(event) => setFulfillment(event.target.value)}
-              >
-                <option value="ship">Ship to me</option>
-                <option value="market">Pick up at Fulshear Farmers Market</option>
-              </select>
-            </label>
-          </div>
+          <form id="checkout-form" className="order-form" onSubmit={handleSubmit} noValidate>
+            <h3>Complete Your Order</h3>
+            <p>
+              Each jar is {formatCurrency(basePriceCents)} plus shipping. Preorders
+              apply when demand exceeds current batch availability.
+            </p>
+            <p className="order-form__assist">
+              Fields marked * are required. Checkout opens after details validate.
+            </p>
+            <div className="order-form__progress" aria-live="polite">
+              <div className="order-form__progress-row">
+                <strong>
+                  {requiredFieldCompleted}/{requiredFieldNames.length} required complete
+                </strong>
+                <span>{checkoutReadinessText}</span>
+              </div>
+              <div className="order-form__progress-track" aria-hidden="true">
+                <span style={{ width: `${completionProgress}%` }}></span>
+              </div>
+            </div>
 
-          {requiresAddress ? (
-            <>
-              <label>
-                Address line 1
+            <div className="form__row">
+              <label className={`form-field${hasFieldError("name") ? " form-field--error" : ""}`}>
+                Name *
                 <input
+                  ref={setFieldRef("name")}
                   type="text"
-                  name="address1"
-                  placeholder="Street address"
-                  autoComplete="address-line1"
-                  onInput={handleFormattedInput}
+                  name="name"
+                  value={formValues.name}
+                  placeholder="Your name"
+                  autoComplete="name"
+                  autoCapitalize="words"
+                  onChange={handleFieldChange}
+                  onBlur={handleFieldBlur}
+                  aria-invalid={hasFieldError("name")}
+                  aria-describedby={hasFieldError("name") ? "name-error" : undefined}
                   required
                 />
+                {hasFieldError("name") ? (
+                  <span id="name-error" className="form-field__error" role="alert">
+                    {getFieldError("name")}
+                  </span>
+                ) : null}
               </label>
-              <label>
-                Address line 2
+              <label className={`form-field${hasFieldError("email") ? " form-field--error" : ""}`}>
+                Email *
                 <input
-                  type="text"
-                  name="address2"
-                  placeholder="Apt, suite"
-                  autoComplete="address-line2"
-                  onInput={handleFormattedInput}
+                  ref={setFieldRef("email")}
+                  type="email"
+                  name="email"
+                  value={formValues.email}
+                  placeholder="you@vidaverde.com"
+                  autoComplete="email"
+                  inputMode="email"
+                  onChange={handleFieldChange}
+                  onBlur={handleFieldBlur}
+                  aria-invalid={hasFieldError("email")}
+                  aria-describedby={hasFieldError("email") ? "email-error" : undefined}
+                  required
                 />
+                {hasFieldError("email") ? (
+                  <span id="email-error" className="form-field__error" role="alert">
+                    {getFieldError("email")}
+                  </span>
+                ) : null}
               </label>
-              <div className="form__row">
-                <label>
-                  City
+            </div>
+
+            <div className="form__row">
+              <label className={`form-field${hasFieldError("phone") ? " form-field--error" : ""}`}>
+                Phone
+                <input
+                  ref={setFieldRef("phone")}
+                  type="tel"
+                  name="phone"
+                  value={formValues.phone}
+                  placeholder="Optional"
+                  autoComplete="tel"
+                  inputMode="tel"
+                  maxLength={14}
+                  onChange={handleFieldChange}
+                  onBlur={handleFieldBlur}
+                  aria-invalid={hasFieldError("phone")}
+                  aria-describedby={hasFieldError("phone") ? "phone-error" : undefined}
+                />
+                {hasFieldError("phone") ? (
+                  <span id="phone-error" className="form-field__error" role="alert">
+                    {getFieldError("phone")}
+                  </span>
+                ) : null}
+              </label>
+              <label className="form-field">
+                Fulfillment *
+                <select
+                  name="fulfillment"
+                  value={fulfillment}
+                  onChange={handleFulfillmentChange}
+                >
+                  <option value="ship">Ship to me</option>
+                  <option value="market">
+                    Pick up at Fulshear Farmers Market (Every Saturday)
+                  </option>
+                </select>
+              </label>
+            </div>
+
+            {requiresAddress ? (
+              <>
+                <label className={`form-field${hasFieldError("address1") ? " form-field--error" : ""}`}>
+                  Address line 1 *
                   <input
+                    ref={setFieldRef("address1")}
                     type="text"
-                    name="city"
-                    autoComplete="address-level2"
-                    onInput={handleFormattedInput}
+                    name="address1"
+                    value={formValues.address1}
+                    placeholder="Street address"
+                    autoComplete="address-line1"
+                    onChange={handleFieldChange}
+                    onBlur={handleFieldBlur}
+                    aria-invalid={hasFieldError("address1")}
+                    aria-describedby={hasFieldError("address1") ? "address1-error" : undefined}
                     required
                   />
+                  {hasFieldError("address1") ? (
+                    <span id="address1-error" className="form-field__error" role="alert">
+                      {getFieldError("address1")}
+                    </span>
+                  ) : null}
                 </label>
-                <label>
-                  State
+                <label className="form-field">
+                  Address line 2
                   <input
                     type="text"
-                    name="state"
-                    autoComplete="address-level1"
-                    inputMode="text"
-                    maxLength={2}
-                    onInput={handleFormattedInput}
-                    required
+                    name="address2"
+                    value={formValues.address2}
+                    placeholder="Apt, suite"
+                    autoComplete="address-line2"
+                    onChange={handleFieldChange}
+                    onBlur={handleFieldBlur}
                   />
                 </label>
-                <label>
-                  Postal code
-                  <input
-                    type="text"
-                    name="postalCode"
-                    autoComplete="postal-code"
-                    inputMode="numeric"
-                    maxLength={10}
-                    onInput={handleFormattedInput}
-                    required
-                  />
-                </label>
+                <div className="form__row">
+                  <label className={`form-field${hasFieldError("city") ? " form-field--error" : ""}`}>
+                    City *
+                    <input
+                      ref={setFieldRef("city")}
+                      type="text"
+                      name="city"
+                      value={formValues.city}
+                      autoComplete="address-level2"
+                      onChange={handleFieldChange}
+                      onBlur={handleFieldBlur}
+                      aria-invalid={hasFieldError("city")}
+                      aria-describedby={hasFieldError("city") ? "city-error" : undefined}
+                      required
+                    />
+                    {hasFieldError("city") ? (
+                      <span id="city-error" className="form-field__error" role="alert">
+                        {getFieldError("city")}
+                      </span>
+                    ) : null}
+                  </label>
+                  <label className={`form-field${hasFieldError("state") ? " form-field--error" : ""}`}>
+                    State *
+                    <input
+                      ref={setFieldRef("state")}
+                      type="text"
+                      name="state"
+                      value={formValues.state}
+                      autoComplete="address-level1"
+                      inputMode="text"
+                      maxLength={2}
+                      onChange={handleFieldChange}
+                      onBlur={handleFieldBlur}
+                      aria-invalid={hasFieldError("state")}
+                      aria-describedby={hasFieldError("state") ? "state-error" : undefined}
+                      required
+                    />
+                    {hasFieldError("state") ? (
+                      <span id="state-error" className="form-field__error" role="alert">
+                        {getFieldError("state")}
+                      </span>
+                    ) : null}
+                  </label>
+                  <label className={`form-field${hasFieldError("postalCode") ? " form-field--error" : ""}`}>
+                    Postal code *
+                    <input
+                      ref={setFieldRef("postalCode")}
+                      type="text"
+                      name="postalCode"
+                      value={formValues.postalCode}
+                      autoComplete="postal-code"
+                      inputMode="numeric"
+                      maxLength={10}
+                      onChange={handleFieldChange}
+                      onBlur={handleFieldBlur}
+                      aria-invalid={hasFieldError("postalCode")}
+                      aria-describedby={hasFieldError("postalCode") ? "postalCode-error" : undefined}
+                      required
+                    />
+                    {hasFieldError("postalCode") ? (
+                      <span id="postalCode-error" className="form-field__error" role="alert">
+                        {getFieldError("postalCode")}
+                      </span>
+                    ) : null}
+                  </label>
+                </div>
+              </>
+            ) : (
+              <div className="market-note">
+                Pickup available every Saturday at the Fulshear Farmers Market.
               </div>
-            </>
-          ) : (
-            <div className="market-note">
-              Pickup available Saturdays at the Fulshear Farmers Market.
-            </div>
-          )}
+            )}
 
-          <label>
-            Order note
-            <textarea
-              name="note"
-              rows={3}
-              placeholder="Dietary notes or pickup timing."
-            ></textarea>
-          </label>
+            <label className="form-field">
+              Order note
+              <textarea
+                name="note"
+                value={formValues.note}
+                rows={3}
+                placeholder="Dietary notes or pickup timing."
+                onChange={handleFieldChange}
+              ></textarea>
+            </label>
 
-          {notice ? (
-            <div
-              className={`form__status${
-                status === "error" ? " form__status--error" : ""
-              }`}
-              role="status"
-              aria-live="polite"
+            {notice ? (
+              <div
+                className={`form__status${
+                  status === "error" ? " form__status--error" : ""
+                }`}
+                role="status"
+                aria-live="polite"
+              >
+                {notice}
+              </div>
+            ) : null}
+
+            <button
+              className="button button--dark"
+              type="submit"
+              disabled={status === "submitting"}
+              aria-busy={status === "submitting"}
             >
-              {notice}
-            </div>
-          ) : null}
-
-          <button
-            className="button button--dark"
-            type="submit"
-            disabled={status === "submitting"}
-          >
-            {status === "submitting"
-              ? "Redirecting..."
-              : hasPreorder
-                ? "Place Preorder"
-                : "Place Order"}
-          </button>
-        </form>
-      </aside>
-    </div>
+              {status === "submitting"
+                ? "Redirecting..."
+                : hasPreorder
+                  ? "Place Preorder"
+                  : "Place Order"}
+            </button>
+          </form>
+        </aside>
+      </div>
+    </>
   );
 }

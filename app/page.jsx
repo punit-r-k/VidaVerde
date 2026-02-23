@@ -1,4 +1,7 @@
 import Storefront from "./components/Storefront";
+import EmailListPopup from "./components/EmailListPopup";
+import ScrollReveal from "./components/ScrollReveal";
+import Image from "next/image";
 import { getProducts } from "@/lib/products";
 import { getInventoryMap } from "@/lib/stock";
 
@@ -11,13 +14,99 @@ export default async function Home() {
     getProducts(),
     getInventoryMap()
   ]);
+  const marketAddress = "9035 Bois d'Arc Ln, Richmond, TX 77406";
 
-  const basePrice = products[0]?.priceCents
-    ? `$${(products[0].priceCents / 100).toFixed(2)}`
-    : "$11.99";
+  const partnerLogos = [
+    "Fulshear Farmers Market",
+    "Houston Wellness Co-op",
+    "Richmond Natural Grocers",
+    "Harvest House Cafe"
+  ];
+
+  const whyItWorks = [
+    {
+      step: "01",
+      title: "Live Cultures In A Real Food Matrix",
+      body:
+        "Unlike supplements, probiotics are delivered through naturally fermented vegetables. Fermented in natural vegetable juices and never pasteurized, each batch keeps live active cultures to support digestion, nutrient absorption, immune health, energy, mood, and mental clarity."
+    },
+    {
+      step: "02",
+      title: "Signs You May Need Gut Support",
+      body:
+        "Bloating, irregular digestion, fatigue, brain fog, skin issues, frequent colds, and sugar cravings can all point to an imbalanced gut."
+    },
+    {
+      step: "03",
+      title: "Easy Daily Routine",
+      body:
+        "Start with about 2 tablespoons daily. Enjoy it straight or add it to salads, sandwiches, eggs, grain bowls, and vegetables."
+    }
+  ];
+
+  const proofStats = [
+    {
+      value: "8 years",
+      label: "Fermentation craft"
+    },
+    {
+      value: "5 years",
+      label: "Farmers market service"
+    },
+    {
+      value: "Thousands",
+      label: "Jars enjoyed"
+    }
+  ];
+
+  const testimonials = [
+    {
+      quote:
+        "We started with one spoonful each day and now keep two jars in rotation. Digestion feels steadier and meals feel easier.",
+      name: "Market Customer",
+      meta: "Richmond, TX"
+    },
+    {
+      quote:
+        "Flavor is clean and fresh, never harsh. I like that it is actually raw and refrigerated from pickup to table.",
+      name: "Saturday Shopper",
+      meta: "Fulshear Farmers Market"
+    },
+    {
+      quote:
+        "The mild profile made it simple to build a daily habit. The consistency week-to-week is what keeps me coming back.",
+      name: "Repeat Buyer",
+      meta: "Houston Area"
+    }
+  ];
+
+  const faqs = [
+    {
+      q: "How much should I eat per day?",
+      a: "Start with 1 tablespoon daily for a few days, then move to about 2 tablespoons with meals. Add it straight, or use it on salads, sandwiches, eggs, bowls, and vegetables."
+    },
+    {
+      q: "What makes this different from probiotic supplements?",
+      a: "Our probiotics come in a natural food matrix, not a capsule. You get live cultures together with real fermented vegetables, flavor, and nutrients in one daily food."
+    },
+    {
+      q: "How do I know if I may need gut support?",
+      a: "Common signs include bloating, irregular digestion, fatigue, brain fog, skin issues, frequent colds, and sugar cravings."
+    },
+    {
+      q: "What standards do you follow?",
+      a: "We ferment in natural vegetable juices with no preservatives or shortcuts, and we never pasteurize. That keeps the cultures live and active."
+    },
+    {
+      q: "Can I pick up instead of shipping?",
+      a: "Yes. Reserve online and pick up at Fulshear Farmers Market every Saturday."
+    }
+  ];
 
   return (
     <>
+      <EmailListPopup />
+      <ScrollReveal />
       <header className="hero">
         <video
           className="hero__video"
@@ -35,40 +124,38 @@ export default async function Home() {
         <div className="hero__overlay"></div>
         <div className="hero__content">
           <div className="hero__brand reveal" style={{ "--delay": "0.05s" }}>
-            <img src="/logo.svg" alt="Vida Verde logo" />
+            <Image src="/logo.svg" alt="Vida Verde logo" width={46} height={46} />
             <span>Vida Verde</span>
           </div>
           <p className="eyebrow reveal" style={{ "--delay": "0.1s" }}>
-            Live fermentation for your gut health
+            Healthy Food for a Happy Life
           </p>
           <h1 className="reveal" style={{ "--delay": "0.2s" }}>
-            Healthy food supporting your happy gut.
+            Unpasteurized ferments made for daily meals.
           </h1>
           <p className="hero__subhead reveal" style={{ "--delay": "0.3s" }}>
-            Six small-batch ferments crafted in natural vegetable juices with no
-            added water and never pasteurized. Four sourkrout jars and two hot
-            sauces bring bold flavor, live cultures, and daily nourishment.
+            Small-batch live fermented sauerkraut and hot sauces made to help restore gut balance naturally. A healthier gut microbiome supports digestion, immunity, energy, mood, and overall well-being.
           </p>
           <div className="hero__actions reveal" style={{ "--delay": "0.4s" }}>
             <a className="button button--light" href="#shop">
               Shop The Jars
             </a>
-            <a className="button button--ghost" href="#market">
-              Find Us In Fulshear
+            <a className="button button--ghost" href="#proof">
+              Find us in person
             </a>
           </div>
           <div className="hero__metrics reveal" style={{ "--delay": "0.5s" }}>
             <div>
-              <span>4</span>
-              <small>Signature jars</small>
+              <span>6</span>
+              <small>Signature ferments</small>
             </div>
             <div>
               <span>100%</span>
               <small>Live cultures</small>
             </div>
             <div>
-              <span>0</span>
-              <small>Added sugar</small>
+              <span>2 tbsp</span>
+              <small>Daily habit</small>
             </div>
           </div>
         </div>
@@ -76,19 +163,106 @@ export default async function Home() {
       </header>
 
       <main>
-        <section id="shop" className="section shop">
-          <div className="section__intro section__intro--compact">
+        <nav className="jump-nav" aria-label="Page section navigation">
+          <a href="#proof">Proof</a>
+          <a href="#voices">Reviews</a>
+          <a href="#founder">Story</a>
+          <a href="#wellness">Why Live Fermented Foods Matter</a>
+          <a href="#shop">Shop</a>
+          <a href="#faq">FAQ</a>
+        </nav>
+
+        <section id="proof" className="section section--tight section--line signals">
+          <div className="signals__shell js-reveal">
+            <div className="signals__intro">
+              <p className="eyebrow">Trusted Around Houston</p>
+              <h2>Weekly market customers choose us for consistent raw fermentation.</h2>
+            </div>
+            <ul className="signals__logos" aria-label="Community partners and shoppers">
+              {partnerLogos.map((logo) => (
+                <li key={logo}>{logo}</li>
+              ))}
+            </ul>
+            <div className="signals__stats">
+              {proofStats.map((item) => (
+                <div key={item.value}>
+                  <strong>{item.value}</strong>
+                  <span>{item.label}</span>
+                </div>
+              ))}
+            </div>
+          </div>
+        </section>
+
+        <section id="voices" className="section section--compact section--fade voices">
+          <div className="voices__shell js-reveal" style={{ "--reveal-delay": "80ms" }}>
+            <div className="voices__intro">
+              <p className="eyebrow">Customer Voices</p>
+              <h2>Real feedback from weekly customers building a daily ferment routine.</h2>
+            </div>
+            <div className="voices__grid" aria-label="Customer testimonials">
+              {testimonials.map((item, index) => (
+                <article
+                  key={item.name}
+                  className={`voices-card ${index % 2 === 0 ? "voices-card--sage" : "voices-card--oat"}`}
+                >
+                  <p className="voices-card__quote">&quot;{item.quote}&quot;</p>
+                  <p className="voices-card__meta">
+                    <strong>{item.name}</strong>
+                    <span>{item.meta}</span>
+                  </p>
+                </article>
+              ))}
+            </div>
+          </div>
+        </section>
+
+        <section id="wellness" className="section section--compact section--fade pulse">
+          <div className="pulse__shell js-reveal" style={{ "--reveal-delay": "120ms" }}>
+            <div className="pulse__intro">
+              <p className="eyebrow">Why Live Fermented Foods Matter</p>
+              <h2>Food-first probiotics that support gut balance and daily well-being.</h2>
+            </div>
+            <div className="pulse__grid">
+              {whyItWorks.map((item) => (
+                <article key={item.step} className="pulse-card">
+                  <p className="pulse-card__step">{item.step}</p>
+                  <h3>{item.title}</h3>
+                  <p>{item.body}</p>
+                </article>
+              ))}
+            </div>
+          </div>
+        </section>
+
+        <section className="section section--tight section--line buy-cta">
+          <div className="buy-cta__shell js-reveal" style={{ "--reveal-delay": "140ms" }}>
+            <div className="buy-cta__copy">
+              <p className="eyebrow">Ready To Start</p>
+              <h2>Pick one jar and start with 1 to 2 tablespoons per meal.</h2>
+              <p>Choose a flavor you already enjoy so the routine sticks.</p>
+            </div>
+            <div className="buy-cta__actions">
+              <a className="button button--dark" href="#shop">
+                Shop The Collection
+              </a>
+              <a className="button button--light" href="#market">
+                Saturday Pickup Info
+              </a>
+            </div>
+          </div>
+        </section>
+
+        <section id="shop" className="section section--tight section--plain shop">
+          <div className="section__intro section__intro--compact js-reveal" style={{ "--reveal-delay": "120ms" }}>
             <p className="eyebrow">The Collection</p>
-            <h2>
-              Four sourkrout profiles plus two hot sauces, built for daily
-              nourishment.
-            </h2>
+            <h2>Six products: four sauerkraut profiles and two hot sauces.</h2>
             <p>
-              Fresh microgreens, slow fermentation, and premium ingredients make
-              each jar a daily ritual. Stock levels update in real time and
-              preorders open automatically when jars sell out.
+              Small-batch, refrigerated, and unpasteurized ferments made with a variety of fresh vegetables beyond cabbage for bold, complex flavor and higher nutrition.
+              Some offerings are infused with microgreens, with seasonal rotating batches released throughout the year.
             </p>
           </div>
+
           <div className="collection__bar" aria-label="Default dietary profile">
             <span className="collection__bar-title">Allergen-friendly</span>
             <ul className="collection__bar-list">
@@ -105,26 +279,27 @@ export default async function Home() {
               ))}
             </ul>
           </div>
+
           <Storefront products={products} inventory={inventory} />
         </section>
 
-        <section id="market" className="section market">
-          <div className="market__grid">
-            <div>
+        <section id="market" className="section section--tight section--line market">
+          <div className="market__grid js-reveal" style={{ "--reveal-delay": "160ms" }}>
+            <div className="market__copy">
               <p className="eyebrow">Fulshear Farmers Market</p>
               <h2>Find Vida Verde in person.</h2>
               <p>
-                Pick up your jars at the Fulshear Farmers Market, or meet the
-                team for weekly seasonal drops.
+                Reserve online, then pick up your jars every Saturday at the
+                Fulshear Farmers Market.
               </p>
               <div className="market__details">
                 <div>
                   <strong>When</strong>
-                  <span>Saturday, 9:00 AM - 1:00 PM</span>
+                  <span>Every Saturday, 9:00 AM - 1:00 PM</span>
                 </div>
                 <div>
                   <strong>Where</strong>
-                  <span>Fulshear Farmers Market, TX</span>
+                  <span>{marketAddress}</span>
                 </div>
                 <div>
                   <strong>Pickup</strong>
@@ -135,53 +310,84 @@ export default async function Home() {
             <div className="market__panel">
               <h3>Market Day Essentials</h3>
               <ul>
-                <li>Preorders are held for 48 hours.</li>
+                <li>Reserve online and pick up on site every Saturday.</li>
                 <li>Bring a cooler bag for peak freshness.</li>
-                <li>Ask about our seasonal microgreen bundles.</li>
+                <li>Ask which batches are newest this week.</li>
               </ul>
-              <a className="button button--dark" href="#shop">
+              <a className="button button--light" href="#shop">
                 Reserve A Jar
               </a>
             </div>
           </div>
         </section>
 
-        <section className="section story">
-          <div className="story__grid">
-            <div>
-              <p className="eyebrow">Rooted In Plants</p>
-              <h2>Microgreens, minerals, and fermentation in harmony.</h2>
+        <section id="founder" className="about-hero">
+          <div
+            className="about-hero__grid about-hero__grid--inline js-reveal"
+            style={{ "--reveal-delay": "100ms" }}
+          >
+            <div className="about-hero__copy">
+              <p className="eyebrow">Founder Story</p>
+              <h1>Built from a home fermentation practice in Richmond.</h1>
               <p>
-                Vida Verde exists to bring fresh, gut-healthy nourishment into
-                the homes of our community. Each jar blends farm-grown
-                microgreens with slow-fermented cabbage to support digestion,
-                energy, and everyday wellness.
+                Eight years ago, a personal challenge changed everything. Our
+                founder began making small-batch sauerkraut at home to help his
+                wife recover from serious digestive issues and a weakened immune
+                system. When she could not tolerate the smell or intensity of
+                classic kraut, he started blending cabbage with fresh
+                vegetables, herbs, and spices, fermenting only in natural
+                juices with no added water.
               </p>
-              <a className="text-link" href="/about">
-                Read the founder story
-              </a>
+              <p>
+                The results were a flavorful, truly live food that she could
+                enjoy daily. Over time her digestion improved and her immune
+                system grew stronger. For five years he supported his family at
+                farmers markets and natural food stores across Houston,
+                producing tons by hand and witnessing thousands of customer
+                transformations.
+              </p>
             </div>
-            <div className="story__panel">
-              <h3>Why We Ferment</h3>
-              <p>
-                We nurture every batch for 18 to 35 days to develop probiotics
-                naturally, without shortcuts or heat processing. The result is a
-                premium, live-culture product that stays crisp and vibrant.
-              </p>
-              <div className="story__stats">
-                <div>
-                  <strong>18-35</strong>
-                  <span>Day ferments</span>
-                </div>
-                <div>
-                  <strong>6</strong>
-                  <span>Microgreen blends</span>
-                </div>
-                <div>
-                  <strong>100%</strong>
-                  <span>Cold processed</span>
-                </div>
+            <div className="about-hero__media">
+              <div className="about__portrait about-hero__portrait">
+                <Image
+                  src="https://images.unsplash.com/photo-1524504388940-b1c1722653e1?auto=format&fit=crop&w=700&q=80"
+                  alt="Vida Verde founder portrait"
+                  width={700}
+                  height={1050}
+                  sizes="(max-width: 900px) 100vw, 400px"
+                />
               </div>
+              <div className="about-hero__quote">
+                <p>&quot;Raw. Refrigerated. Never pasteurized.&quot;</p>
+                <span>Vida Verde Founder</span>
+              </div>
+            </div>
+          </div>
+        </section>
+
+        <div className="founder-faq-divider" aria-hidden="true">
+          <Image
+            src="/ornament-divider-collectio.png"
+            alt=""
+            width={923}
+            height={215}
+            className="founder-faq-divider__img"
+          />
+        </div>
+
+        <section id="faq" className="section section--compact section--plain faq">
+          <div className="faq__shell js-reveal" style={{ "--reveal-delay": "180ms" }}>
+            <div className="faq__intro">
+              <p className="eyebrow">FAQ</p>
+              <h2>Quick answers before you place your first order.</h2>
+            </div>
+            <div className="faq__list">
+              {faqs.map((item) => (
+                <details key={item.q}>
+                  <summary>{item.q}</summary>
+                  <p>{item.a}</p>
+                </details>
+              ))}
             </div>
           </div>
         </section>
@@ -190,13 +396,14 @@ export default async function Home() {
       <footer className="footer">
         <div>
           <h3 className="footer__brand">
-            <img src="/logo.svg" alt="Vida Verde logo" />
+            <Image src="/logo.svg" alt="Vida Verde logo" width={32} height={32} />
             <span>Vida Verde</span>
           </h3>
-          <p>Premium sourkrout and microgreen nourishment.</p>
+          <p>Live fermented sauerkraut and hot sauce for daily nourishment.</p>
         </div>
         <div className="footer__meta">
-          <span>Fulshear, TX</span>
+          <span>{marketAddress}</span>
+          <span>Every Saturday, 9:00 AM - 1:00 PM</span>
           <span>hello@vidaverde.com</span>
         </div>
       </footer>

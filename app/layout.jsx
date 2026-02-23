@@ -14,9 +14,9 @@ const sora = Sora({
 });
 
 export const metadata = {
-  title: "Vida Verde | Premium Sourkrout + Microgreens",
+  title: "Vida Verde | Live Fermented Foods",
   description:
-    "Vida Verde offers premium, gut-healthy sourkrout jars infused with microgreens and botanical flavor."
+    "Live fermented sauerkraut and hot sauce crafted in small batches for daily gut nourishment."
 };
 
 export default function RootLayout({ children }) {
