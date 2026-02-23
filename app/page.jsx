@@ -27,15 +27,15 @@ export default async function Home() {
   const whyItWorks = [
     {
       step: "01",
-      title: "Live Cultures In A Real Food Matrix",
-      body:
-        "Unlike supplements, probiotics are delivered through naturally fermented vegetables. Fermented in natural vegetable juices and never pasteurized, each batch keeps live active cultures to support digestion, nutrient absorption, immune health, energy, mood, and mental clarity."
-    },
-    {
-      step: "02",
       title: "Signs You May Need Gut Support",
       body:
         "Bloating, irregular digestion, fatigue, brain fog, skin issues, frequent colds, and sugar cravings can all point to an imbalanced gut."
+    },
+    {
+      step: "02",
+      title: "Live Cultures In A Real Food Matrix",
+      body:
+        "Unlike supplements, probiotics are delivered through naturally fermented vegetables. Fermented in natural vegetable juices and never pasteurized, each batch keeps live active cultures to support digestion, nutrient absorption, immune health, energy, mood, and mental clarity."
     },
     {
       step: "03",
