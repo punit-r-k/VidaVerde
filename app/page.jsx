@@ -129,7 +129,7 @@ export default async function Home() {
             <span>Vida Verde</span>
           </div>
           <p className="eyebrow reveal" style={{ "--delay": "0.1s" }}>
-            Healthy Food for a Happy Life
+            Real food. Real cultures. Real results.
           </p>
           <h1 className="reveal" style={{ "--delay": "0.2s" }}>
             Unpasteurized ferments made for daily meals.
@@ -215,7 +215,7 @@ export default async function Home() {
           <div className="pulse__shell js-reveal" style={{ "--reveal-delay": "120ms" }}>
             <div className="pulse__intro">
               <p className="eyebrow">Why Live Fermented Foods Matter</p>
-              <h2>Food-first probiotics that support gut balance and daily well-being.</h2>
+              <h2>What Makes Our Sauerkraut Different?</h2>
             </div>
             <div className="pulse__grid">
               {whyItWorks.map((item) => (
@@ -233,7 +233,11 @@ export default async function Home() {
           <div className="buy-cta__shell js-reveal" style={{ "--reveal-delay": "140ms" }}>
             <div className="buy-cta__copy">
               <p className="eyebrow">Ready To Start</p>
-              <h2>Pick one jar and start with 1 to 2 tablespoons per meal.</h2>
+              <h2>
+                Daily Nourishment,
+                <br />
+                One Spoon at a Time
+              </h2>
               <p>Choose a flavor you already enjoy so the routine sticks.</p>
             </div>
             <div className="buy-cta__actions">
@@ -253,7 +257,7 @@ export default async function Home() {
             <h2>Six products: four sauerkraut profiles and two hot sauces.</h2>
             <p>
               Small-batch, refrigerated, and unpasteurized ferments made with a variety of fresh vegetables beyond cabbage for bold, complex flavor and higher nutrition.
-              Some offerings are infused with microgreens, with seasonal rotating batches released throughout the year.
+              Some offerings are infused with microgreens to add natural probiotics and prebiotics, with seasonal rotating batches released throughout the year.
             </p>
           </div>
 
@@ -344,11 +348,12 @@ export default async function Home() {
             <div className="about-hero__media">
               <div className="about__portrait about-hero__portrait">
                 <Image
-                  src="https://images.unsplash.com/photo-1524504388940-b1c1722653e1?auto=format&fit=crop&w=700&q=80"
+                  src="/founder-photo.jpg"
                   alt="Vida Verde founder portrait"
-                  width={700}
-                  height={1050}
-                  sizes="(max-width: 900px) 100vw, 400px"
+                  width={2048}
+                  height={1356}
+                  quality={95}
+                  sizes="(max-width: 600px) 100vw, (max-width: 900px) 85vw, 700px"
                 />
               </div>
               <div className="about-hero__quote">

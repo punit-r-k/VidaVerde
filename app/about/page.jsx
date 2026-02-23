@@ -51,11 +51,12 @@ export default function AboutPage() {
           <div className="about-hero__media">
             <div className="about__portrait about-hero__portrait">
               <Image
-                src="https://images.unsplash.com/photo-1524504388940-b1c1722653e1?auto=format&fit=crop&w=700&q=80"
+                src="/founder-photo.jpg"
                 alt="Vida Verde founder portrait"
-                width={700}
-                height={1050}
-                sizes="(max-width: 900px) 100vw, 560px"
+                width={2048}
+                height={1356}
+                quality={95}
+                sizes="(max-width: 600px) 100vw, (max-width: 900px) 85vw, 760px"
               />
             </div>
             <div className="about-hero__quote">
