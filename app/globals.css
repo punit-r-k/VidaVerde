@@ -108,7 +108,7 @@ img {
 
 .hero {
   position: relative;
-  min-height: 88vh;
+  min-height: 68vh;
   color: var(--white);
   overflow: hidden;
   border-bottom: 1px solid rgba(255, 255, 255, 0.15);
@@ -200,7 +200,7 @@ img {
   z-index: 2;
   width: min(760px, calc(100% - (var(--layout-inline) * 2)));
   margin-inline: auto;
-  padding: clamp(92px, 14vh, 144px) 0 clamp(56px, 9vh, 92px);
+  padding: clamp(62px, 9vh, 96px) 0 clamp(28px, 5vh, 46px);
   text-align: center;
 }
 
@@ -302,7 +302,7 @@ img {
   display: grid;
   grid-template-columns: repeat(3, minmax(0, 1fr));
   gap: 16px;
-  margin: 48px auto 0;
+  margin: 24px auto 0;
   max-width: 560px;
   text-align: center;
 }
@@ -2301,7 +2301,7 @@ select:focus {
   }
 
   .hero__content {
-    padding-top: 14vh;
+    padding-top: 10vh;
   }
 
   .dietary {
@@ -2318,7 +2318,7 @@ select:focus {
   }
 
   .hero__content {
-    padding: 12vh 0 8vh;
+    padding: 8.5vh 0 5.5vh;
   }
 
   .hero__metrics {
@@ -2354,7 +2354,7 @@ select:focus {
 
   .hero__content {
     width: 100%;
-    padding: calc(68px + env(safe-area-inset-top, 0px)) var(--layout-inline) 48px;
+    padding: calc(50px + env(safe-area-inset-top, 0px)) var(--layout-inline) 28px;
     text-align: left;
   }
 
