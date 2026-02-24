@@ -247,6 +247,10 @@ img {
   color: var(--accent);
 }
 
+.hero__mobile-break {
+  display: none;
+}
+
 .hero__subhead {
   font-size: 1.05rem;
   line-height: 1.7;
@@ -2564,6 +2568,10 @@ select:focus {
   .hero h1 {
     font-size: clamp(2rem, 9vw, 2.7rem);
     line-height: 1.06;
+  }
+
+  .hero__mobile-break {
+    display: block;
   }
 
   .hero__subhead {
