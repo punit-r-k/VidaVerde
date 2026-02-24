@@ -105,6 +105,29 @@ export default async function Home() {
     }
   ];
 
+  const allergenBadges = [
+    {
+      label: "Gluten-free",
+      icon: "gluten-free.svg"
+    },
+    {
+      label: "Dairy-free",
+      icon: "dairy-free.svg"
+    },
+    {
+      label: "Nut-free",
+      icon: "nut-free.svg"
+    },
+    {
+      label: "Soy-free",
+      icon: "soy-free.svg"
+    },
+    {
+      label: "Egg-free",
+      icon: "egg-free.svg"
+    }
+  ];
+
   return (
     <>
       <EmailListPopup />
@@ -265,15 +288,19 @@ export default async function Home() {
           <div className="collection__bar" aria-label="Default dietary profile">
             <span className="collection__bar-title">Allergen-friendly</span>
             <ul className="collection__bar-list">
-              {[
-                "Gluten-free",
-                "Dairy-free",
-                "Nut-free",
-                "Soy-free",
-                "Egg-free"
-              ].map((label) => (
+              {allergenBadges.map(({ label, icon }) => (
                 <li key={label}>
-                  <span className="collection__bar-pill">{label}</span>
+                  <span className="collection__bar-pill">
+                    <Image
+                      src={`/allergen-icons/${encodeURIComponent(icon)}`}
+                      alt=""
+                      aria-hidden="true"
+                      width={18}
+                      height={18}
+                      className="collection__bar-pill-icon"
+                    />
+                    <span className="collection__bar-pill-label">{label}</span>
+                  </span>
                 </li>
               ))}
             </ul>

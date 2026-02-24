@@ -434,6 +434,20 @@ img {
   letter-spacing: 0.16em;
   text-transform: uppercase;
   color: var(--ink);
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.collection__bar-pill-icon {
+  width: 18px;
+  height: 18px;
+  object-fit: contain;
+  flex-shrink: 0;
+}
+
+.collection__bar-pill-label {
+  line-height: 1;
 }
 
 .dietary {
@@ -2670,6 +2684,12 @@ select:focus {
     font-size: 0.58rem;
     letter-spacing: 0.12em;
     padding: 4px 8px;
+    gap: 5px;
+  }
+
+  .collection__bar-pill-icon {
+    width: 16px;
+    height: 16px;
   }
 
   .store {
