@@ -153,10 +153,12 @@ export default async function Home() {
             <span>Vida Verde</span>
           </div>
           <p className="eyebrow reveal" style={{ "--delay": "0.1s" }}>
-            Real food. Real cultures. Real results.
+            Unpasteurized ferments made for daily meals.
           </p>
           <h1 className="reveal" style={{ "--delay": "0.2s" }}>
-            Unpasteurized ferments made for daily meals.
+            Real food. Real cultures.
+            <br />
+            <span className="hero__headline-accent">Real results.</span>
           </h1>
           <p className="hero__subhead reveal" style={{ "--delay": "0.3s" }}>
             We make small-batch, live fermented sauerkraut and hot sauces made to help restore gut balance naturally. A healthier gut microbiome supports digestion, immunity, energy, mood, and overall well-being.
@@ -168,20 +170,6 @@ export default async function Home() {
             <a className="button button--ghost" href="#proof">
               Find us in person
             </a>
-          </div>
-          <div className="hero__metrics reveal" style={{ "--delay": "0.5s" }}>
-            <div>
-              <span>6</span>
-              <small>Signature ferments</small>
-            </div>
-            <div>
-              <span>100%</span>
-              <small>Live cultures</small>
-            </div>
-            <div>
-              <span>2 tbsp</span>
-              <small>Daily habit</small>
-            </div>
           </div>
         </div>
         <div className="hero__scroll">Scroll</div>
@@ -387,7 +375,7 @@ export default async function Home() {
             <div className="about-hero__media">
               <div className="about__portrait about-hero__portrait">
                 <Image
-                  src="/founder-photo.jpg"
+                  src="/founder-photo.webp"
                   alt="Vida Verde founder portrait"
                   width={2048}
                   height={1356}
@@ -396,8 +384,9 @@ export default async function Home() {
                 />
               </div>
               <div className="about-hero__quote">
-                <p>&quot;Raw. Refrigerated. Never pasteurized.&quot;</p>
-                <span>Vida Verde Founder</span>
+                <p>&quot;This is not just a product. It is a real story, lived,
+                tested, and proven.&quot;</p>
+                <span>— Edison Neto, Vida Verde Founder</span>
               </div>
             </div>
           </div>

@@ -51,7 +51,7 @@ export default function AboutPage() {
           <div className="about-hero__media">
             <div className="about__portrait about-hero__portrait">
               <Image
-                src="/founder-photo.jpg"
+                src="/founder-photo.webp"
                 alt="Vida Verde founder portrait"
                 width={2048}
                 height={1356}
@@ -64,7 +64,7 @@ export default function AboutPage() {
                 &quot;This is not just a product. It is a real story, lived,
                 tested, and proven.&quot;
               </p>
-              <span>Vida Verde Founder</span>
+              <span>— Edison Neto, Vida Verde Founder</span>
             </div>
           </div>
         </div>
