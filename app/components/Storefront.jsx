@@ -19,6 +19,34 @@ const formatCurrency = (amountInCents) => {
 };
 
 const INVENTORY_POLL_MS = 30000;
+const HEALTH_BENEFIT_PATTERN =
+  /(live cultures?|fiber(?:-rich)?|digestion|digestive|gut|probiotic|vitamin|antioxidant|health|wellness|immune|nutrient|plant variety)/i;
+
+const splitDescription = (description) => {
+  if (typeof description !== "string") {
+    return { lead: "", benefit: "", details: [] };
+  }
+
+  const trimmed = description.trim();
+  if (!trimmed) {
+    return { lead: "", benefit: "", details: [] };
+  }
+
+  const sentences = trimmed.match(/[^.!?]+[.!?]/g) || [trimmed];
+  const normalized = sentences.map((sentence) => sentence.trim()).filter(Boolean);
+  const details = normalized.slice(1);
+  const benefitSentences = details.filter((sentence) =>
+    HEALTH_BENEFIT_PATTERN.test(sentence)
+  );
+  const benefit = benefitSentences.join(" ");
+  const nextDetails = details.filter((sentence) => !HEALTH_BENEFIT_PATTERN.test(sentence));
+
+  return {
+    lead: normalized[0] || "",
+    benefit,
+    details: nextDetails
+  };
+};
 
 export default function Storefront({ products, inventory = {} }) {
   const searchParams = useSearchParams();
@@ -32,8 +60,6 @@ export default function Storefront({ products, inventory = {} }) {
   const [touchedFields, setTouchedFields] = useState({});
   const [submitAttempted, setSubmitAttempted] = useState(false);
   const fieldRefs = useRef({});
-
-  const basePriceCents = products[0]?.priceCents ?? 1199;
 
   const setFieldRef = useCallback((name) => {
     return (node) => {
@@ -492,6 +518,18 @@ export default function Storefront({ products, inventory = {} }) {
 
             const cartQty = cart[product.sku] || 0;
             const wouldPreorder = Math.max(0, cartQty + 1 - available) > 0;
+            const orderedSpecs = Array.isArray(product.specs)
+              ? [...product.specs].sort((a, b) => {
+                const aIsIngredients = typeof a === "string"
+                  && a.trim().toLowerCase().startsWith("ingredients:");
+                const bIsIngredients = typeof b === "string"
+                  && b.trim().toLowerCase().startsWith("ingredients:");
+
+                if (aIsIngredients === bIsIngredients) return 0;
+                return aIsIngredients ? -1 : 1;
+              })
+              : [];
+            const descriptionParts = splitDescription(product.description);
 
             return (
               <article className="product-card" key={product.sku}>
@@ -520,17 +558,44 @@ export default function Storefront({ products, inventory = {} }) {
                         ) : null}
                       </div>
                     ) : null}
-                    <p>{product.description}</p>
                     <ul>
-                      {product.specs.map((spec) => (
-                        <li key={spec}>{spec}</li>
-                      ))}
+                      {orderedSpecs.map((spec, index) => {
+                        const isIngredients = typeof spec === "string"
+                          && spec.trim().toLowerCase().startsWith("ingredients:");
+
+                        return (
+                          <li
+                            key={`${product.sku}-spec-${index}`}
+                            className={isIngredients ? "product-spec--ingredients" : undefined}
+                          >
+                            {spec}
+                          </li>
+                        );
+                      })}
                     </ul>
+                    {descriptionParts.lead ? (
+                      <p className="product-card__lead">{descriptionParts.lead}</p>
+                    ) : null}
+                    {descriptionParts.benefit ? (
+                      <p className="product-card__benefit">{descriptionParts.benefit}</p>
+                    ) : null}
+                    {descriptionParts.details.length > 0 ? (
+                      <ul className="product-card__description-list">
+                        {descriptionParts.details.map((detail, index) => (
+                          <li key={`${product.sku}-desc-${index}`}>{detail}</li>
+                        ))}
+                      </ul>
+                    ) : null}
                   </div>
 
                   <div className="product-card__footer">
                     <div>
-                      <div className="price">{formatCurrency(product.priceCents)}</div>
+                      <div className="price">
+                        <span>{formatCurrency(product.priceCents)}</span>
+                        {Number.isFinite(Number(product.sizeOz)) ? (
+                          <span className="price__size">{`${product.sizeOz}oz`}</span>
+                        ) : null}
+                      </div>
                     </div>
 
                     <button
@@ -572,8 +637,7 @@ export default function Storefront({ products, inventory = {} }) {
           <form id="checkout-form" className="order-form" onSubmit={handleSubmit} noValidate>
             <h3>Complete Your Order</h3>
             <p>
-              Each jar is {formatCurrency(basePriceCents)} plus shipping. Preorders
-              apply when demand exceeds current batch availability.
+              Preorders apply when demand exceeds current batch availability.
             </p>
             <p className="order-form__assist">
               Fields marked * are required. Checkout opens after details validate.

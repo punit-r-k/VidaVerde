@@ -77,7 +77,7 @@ export default function AboutPage() {
         <div>
           <h3 className="footer__brand">
             <Image src="/logo.svg" alt="Vida Verde logo" width={32} height={32} />
-            <span>Vida Verde</span>
+            <span>Vida Verde Microgreens</span>
           </h3>
           <p>Live fermented sauerkraut and hot sauce for daily nourishment.</p>
         </div>

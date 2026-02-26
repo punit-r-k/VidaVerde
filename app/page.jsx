@@ -12,11 +12,15 @@ export const runtime = "nodejs";
 export const revalidate = 0;
 
 export default async function Home() {
+  const medicalDisclaimer =
+    "Not intended as medical advice, consult your healthcare provider before dietary changes.";
+
   const [products, inventory] = await Promise.all([
     getProducts(),
     getInventoryMap()
   ]);
   const marketAddress = "9035 Bois d'Arc Ln, Richmond, TX 77406";
+  const showProofSection = false;
 
   const partnerLogos = [
     "Fulshear Farmers Market",
@@ -25,12 +29,19 @@ export default async function Home() {
     "Harvest House Cafe"
   ];
 
+  const sauerkrautDifferenceChecklist = [
+    "Fermented in natural vegetable juices",
+    "Never pasteurized",
+    "No preservatives or shortcuts",
+    "Rich in live, active cultures"
+  ];
+
   const whyItWorks = [
     {
       step: "01",
       title: "Signs You May Need Gut Support",
       body:
-        "Bloating, irregular digestion, fatigue, brain fog, skin issues, frequent colds, and sugar cravings can all point to an imbalanced gut."
+        "Bloating, irregular digestion, fatigue, brain fog, skin issues, frequent colds, and sugar cravings can all point to an imbalanced gut. If these patterns show up often, adding fermented foods consistently can be a simple first step to support better balance over time."
     },
     {
       step: "02",
@@ -42,7 +53,7 @@ export default async function Home() {
       step: "03",
       title: "Easy Daily Routine",
       body:
-        "Start with about 2 tablespoons daily. Enjoy it straight or add it to salads, sandwiches, eggs, grain bowls, and vegetables."
+        "Start with about 2 tablespoons daily. Enjoy it straight or add it to salads, sandwiches, eggs, grain bowls, and vegetables. Keep it uncooked and make it part of your regular meals so the habit is easy to sustain."
     }
   ];
 
@@ -89,7 +100,8 @@ export default async function Home() {
     },
     {
       q: "What makes this different from probiotic supplements?",
-      a: "Our probiotics come in a natural food matrix, not a capsule. You get live cultures together with real fermented vegetables, flavor, and nutrients in one daily food."
+      a: "Our probiotics come in a natural food matrix, not a capsule. You get live cultures together with real fermented vegetables, flavor, and nutrients in one daily food.",
+      disclaimer: medicalDisclaimer
     },
     {
       q: "How do I know if I may need gut support?",
@@ -150,7 +162,7 @@ export default async function Home() {
         <div className="hero__content">
           <div className="hero__brand reveal" style={{ "--delay": "0.05s" }}>
             <Image src="/logo.svg" alt="Vida Verde logo" width={46} height={46} />
-            <span>Vida Verde</span>
+            <span>vida verde microgreens</span>
           </div>
           <p className="eyebrow reveal" style={{ "--delay": "0.1s" }}>
             Unpasteurized ferments made for daily meals.
@@ -169,7 +181,7 @@ export default async function Home() {
             <a className="button button--light" href="#shop">
               Shop The Jars
             </a>
-            <a className="button button--ghost" href="#proof">
+            <a className="button button--ghost" href="#market">
               Find us in person
             </a>
           </div>
@@ -180,27 +192,29 @@ export default async function Home() {
       <main>
         <JumpNav />
 
-        <section id="proof" className="section section--tight section--line signals">
-          <div className="signals__shell js-reveal">
-            <div className="signals__intro">
-              <p className="eyebrow">Trusted Around Houston</p>
-              <h2>Weekly market customers choose us for consistent raw fermentation.</h2>
+        {showProofSection ? (
+          <section id="proof" className="section section--tight section--line signals">
+            <div className="signals__shell js-reveal">
+              <div className="signals__intro">
+                <p className="eyebrow">Trusted Around Houston</p>
+                <h2>Weekly market customers choose us for consistent raw fermentation.</h2>
+              </div>
+              <ul className="signals__logos" aria-label="Community partners and shoppers">
+                {partnerLogos.map((logo) => (
+                  <li key={logo}>{logo}</li>
+                ))}
+              </ul>
+              <div className="signals__stats">
+                {proofStats.map((item) => (
+                  <div key={item.value}>
+                    <strong>{item.value}</strong>
+                    <span>{item.label}</span>
+                  </div>
+                ))}
+              </div>
             </div>
-            <ul className="signals__logos" aria-label="Community partners and shoppers">
-              {partnerLogos.map((logo) => (
-                <li key={logo}>{logo}</li>
-              ))}
-            </ul>
-            <div className="signals__stats">
-              {proofStats.map((item) => (
-                <div key={item.value}>
-                  <strong>{item.value}</strong>
-                  <span>{item.label}</span>
-                </div>
-              ))}
-            </div>
-          </div>
-        </section>
+          </section>
+        ) : null}
 
         <section id="voices" className="section section--compact section--fade voices">
           <div className="voices__shell js-reveal" style={{ "--reveal-delay": "80ms" }}>
@@ -225,11 +239,18 @@ export default async function Home() {
           </div>
         </section>
 
-        <section id="wellness" className="section section--compact section--fade pulse">
+        <section id="wellness" className="section section--compact section--fade pulse pulse--why">
           <div className="pulse__shell js-reveal" style={{ "--reveal-delay": "120ms" }}>
-            <div className="pulse__intro">
-              <p className="eyebrow">Why Live Fermented Foods Matter</p>
-              <h2>What Makes Our Sauerkraut Different?</h2>
+            <div className="pulse__intro pulse__intro--why">
+              <p className="eyebrow">Foundation</p>
+              <h2>Why Live Fermented Foods Matter</h2>
+              <p className="pulse__bridge">
+                Live fermentation can support digestion, nutrient absorption, and daily resilience.
+                Next, see how we translate that into every jar.
+              </p>
+              <p className="section__disclaimer pulse__disclaimer">
+                <span>{medicalDisclaimer}</span>
+              </p>
             </div>
             <div className="pulse__grid">
               {whyItWorks.map((item) => (
@@ -239,6 +260,36 @@ export default async function Home() {
                   <p>{item.body}</p>
                 </article>
               ))}
+            </div>
+            <div className="pulse__continuity">
+              <span className="pulse__continuity-label">Next in the story</span>
+              <p>How we apply these live-food principles in every jar.</p>
+            </div>
+          </div>
+        </section>
+
+        <section className="section section--compact section--fade pulse pulse--difference">
+          <div className="pulse__shell pulse__shell--linked js-reveal" style={{ "--reveal-delay": "160ms" }}>
+            <div className="pulse__difference-layout">
+              <div className="pulse__intro pulse__intro--difference">
+                <p className="eyebrow">In Every Jar</p>
+                <h2>What Makes Our Sauerkraut Different?</h2>
+              </div>
+              <div className="pulse__answer pulse__answer--difference">
+                <p>
+                  Crafted with a variety of fresh vegetables, our sauerkraut is fermented with
+                  vegetables delivering elevated nutrition and bold, complex flavor.
+                </p>
+                <ul className="pulse__checklist" aria-label="What makes our sauerkraut different">
+                  {sauerkrautDifferenceChecklist.map((item) => (
+                    <li key={item}>
+                      <span className="pulse__check" aria-hidden="true">&#10004;</span>
+                      <span>{item}</span>
+                    </li>
+                  ))}
+                </ul>
+                <p>Every jar is alive, bringing together flavor and function.</p>
+              </div>
             </div>
           </div>
         </section>
@@ -270,8 +321,9 @@ export default async function Home() {
             <p className="eyebrow">The Collection</p>
             <h2>Six products: four sauerkraut profiles and two hot sauces.</h2>
             <p>
-              Small-batch, refrigerated, and unpasteurized ferments made with a variety of fresh vegetables beyond cabbage for bold, complex flavor and higher nutrition.
+              Fermented in natural vegetable juices, our small-batch, unpasteurized ferments with no preservatives are made with a variety of fresh vegetables for bold, complex flavor and higher nutrition.
               Some offerings are infused with microgreens to add natural probiotics and prebiotics, with seasonal rotating batches released throughout the year.
+              For optimal health benefits, enjoy them raw and refrain from cooking.
             </p>
           </div>
 
@@ -328,7 +380,7 @@ export default async function Home() {
               <ul>
                 <li>Reserve online and pick up on site every Saturday.</li>
                 <li>Bring a cooler bag for peak freshness.</li>
-                <li>Ask which batches are newest this week.</li>
+                <li>Ask which flavor pairs best with your usual meals.</li>
               </ul>
               <a className="button button--light" href="#shop">
                 Reserve A Jar
@@ -415,6 +467,11 @@ export default async function Home() {
                 <details key={item.q}>
                   <summary>{item.q}</summary>
                   <p>{item.a}</p>
+                  {item.disclaimer ? (
+                    <p className="faq__disclaimer">
+                      <span>{item.disclaimer}</span>
+                    </p>
+                  ) : null}
                 </details>
               ))}
             </div>
@@ -426,7 +483,7 @@ export default async function Home() {
         <div>
           <h3 className="footer__brand">
             <Image src="/logo.svg" alt="Vida Verde logo" width={32} height={32} />
-            <span>Vida Verde</span>
+            <span>Vida Verde Microgreens</span>
           </h3>
           <p>Live fermented sauerkraut and hot sauce for daily nourishment.</p>
         </div>

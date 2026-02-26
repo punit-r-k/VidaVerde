@@ -7,7 +7,7 @@ export default function SiteHeader({ variant = "overlay" }) {
     <nav className={navClass}>
       <div className="logo">
         <Image src="/logo.svg" alt="Vida Verde logo" width={44} height={44} />
-        <span>Vida Verde</span>
+        <span>Vida Verde Microgreens</span>
       </div>
       <div className="nav__links">
         <a href="/#shop">Shop</a>
