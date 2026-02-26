@@ -2507,6 +2507,30 @@ select:focus {
   transform: translateY(0) scale(1);
 }
 
+.js-reveal .section__disclaimer::before,
+.js-reveal .section__disclaimer::after,
+.js-reveal .section__disclaimer > span {
+  animation-play-state: paused;
+}
+
+.js-reveal.is-visible .section__disclaimer::before,
+.js-reveal.is-visible .section__disclaimer::after,
+.js-reveal.is-visible .section__disclaimer > span {
+  animation-play-state: running;
+}
+
+.faq__list details .faq__disclaimer::before,
+.faq__list details .faq__disclaimer::after,
+.faq__list details .faq__disclaimer > span {
+  animation-play-state: paused;
+}
+
+.js-reveal.is-visible .faq__list details[open] .faq__disclaimer::before,
+.js-reveal.is-visible .faq__list details[open] .faq__disclaimer::after,
+.js-reveal.is-visible .faq__list details[open] .faq__disclaimer > span {
+  animation-play-state: running;
+}
+
 @media (max-width: 900px) {
   .signals__shell,
   .buy-cta__shell,
