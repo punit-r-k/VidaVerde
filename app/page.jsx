@@ -162,7 +162,7 @@ export default async function Home() {
         <div className="hero__content">
           <div className="hero__brand reveal" style={{ "--delay": "0.05s" }}>
             <Image src="/logo.svg" alt="Vida Verde logo" width={46} height={46} />
-            <span>vida verde microgreens</span>
+            <span>vida verde sauerkraut</span>
           </div>
           <p className="eyebrow reveal" style={{ "--delay": "0.1s" }}>
             Unpasteurized ferments made for daily meals.
