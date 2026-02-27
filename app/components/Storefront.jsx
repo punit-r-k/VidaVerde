@@ -20,7 +20,7 @@ const formatCurrency = (amountInCents) => {
 
 const INVENTORY_POLL_MS = 30000;
 const HEALTH_BENEFIT_PATTERN =
-  /(live cultures?|fiber(?:-rich)?|digestion|digestive|gut|probiotic|vitamin|antioxidant|health|wellness|immune|nutrient|plant variety)/i;
+  /(live[-\s]?cultures?|active[-\s]?cultures?|fiber(?:-rich)?|digestion|digestive|gut|probiotic|vitamin|antioxidant|health|wellness|immune|nutrient|plant variety)/i;
 const SPICE_PROFILE_PATTERN =
   /(spice|hot|heat|mild|turmeric|cumin|pepper|jalapeno|habanero)/i;
 
