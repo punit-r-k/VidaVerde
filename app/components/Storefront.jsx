@@ -21,6 +21,14 @@ const formatCurrency = (amountInCents) => {
 const INVENTORY_POLL_MS = 30000;
 const HEALTH_BENEFIT_PATTERN =
   /(live cultures?|fiber(?:-rich)?|digestion|digestive|gut|probiotic|vitamin|antioxidant|health|wellness|immune|nutrient|plant variety)/i;
+const SPICE_PROFILE_PATTERN =
+  /(spice|hot|heat|mild|turmeric|cumin|pepper|jalapeno|habanero)/i;
+
+const getSpiceProfile = (profile) => {
+  const text = typeof profile === "string" ? profile.trim() : "";
+  if (!text) return "";
+  return SPICE_PROFILE_PATTERN.test(text) ? text : "";
+};
 
 const splitDescription = (description) => {
   if (typeof description !== "string") {
@@ -398,41 +406,45 @@ export default function Storefront({ products, inventory = {} }) {
         <p className="cart__empty">Select any item to begin your order.</p>
       ) : (
         <div className="cart__list">
-          {cartItems.map((item) => (
-            <div className="cart__item" key={`${keyPrefix}-${item.sku}`}>
-              <div>
-                <strong>{item.name}</strong>
-                <span>
-                  Qty: {item.quantity}
-                  {item.profile ? ` | ${item.profile}` : ""}
-                </span>
-                {shouldDisplayStock ? (
-                  <span className="cart__split">
-                    {item.inStockUnits} in stock | {item.preorderUnits} preorder
-                  </span>
-                ) : null}
-                <small className="cart__line-total">{formatCurrency(item.lineTotal)}</small>
-              </div>
+          {cartItems.map((item) => {
+            const spiceProfile = getSpiceProfile(item.profile);
 
-              <div className="cart__controls">
-                <button
-                  type="button"
-                  onClick={() => handleQuantityChange(item.sku, item.quantity - 1)}
-                  aria-label={`Decrease ${item.name} quantity`}
-                >
-                  -
-                </button>
-                <span>{item.quantity}</span>
-                <button
-                  type="button"
-                  onClick={() => handleQuantityChange(item.sku, item.quantity + 1)}
-                  aria-label={`Increase ${item.name} quantity`}
-                >
-                  +
-                </button>
+            return (
+              <div className="cart__item" key={`${keyPrefix}-${item.sku}`}>
+                <div>
+                  <strong>{item.name}</strong>
+                  <span>
+                    Qty: {item.quantity}
+                    {spiceProfile ? ` | ${spiceProfile}` : ""}
+                  </span>
+                  {shouldDisplayStock ? (
+                    <span className="cart__split">
+                      {item.inStockUnits} in stock | {item.preorderUnits} preorder
+                    </span>
+                  ) : null}
+                  <small className="cart__line-total">{formatCurrency(item.lineTotal)}</small>
+                </div>
+
+                <div className="cart__controls">
+                  <button
+                    type="button"
+                    onClick={() => handleQuantityChange(item.sku, item.quantity - 1)}
+                    aria-label={`Decrease ${item.name} quantity`}
+                  >
+                    -
+                  </button>
+                  <span>{item.quantity}</span>
+                  <button
+                    type="button"
+                    onClick={() => handleQuantityChange(item.sku, item.quantity + 1)}
+                    aria-label={`Increase ${item.name} quantity`}
+                  >
+                    +
+                  </button>
+                </div>
               </div>
-            </div>
-          ))}
+            );
+          })}
         </div>
       )}
 
@@ -530,6 +542,7 @@ export default function Storefront({ products, inventory = {} }) {
               })
               : [];
             const descriptionParts = splitDescription(product.description);
+            const spiceProfile = getSpiceProfile(product.profile);
 
             return (
               <article className="product-card" key={product.sku}>
@@ -544,7 +557,7 @@ export default function Storefront({ products, inventory = {} }) {
                   <div>
                     <div className="product-card__header">
                       <h3>{product.name}</h3>
-                      {product.profile ? <span>{product.profile}</span> : null}
+                      {spiceProfile ? <span>{spiceProfile}</span> : null}
                     </div>
                     {shouldDisplayStock || isBestSeller ? (
                       <div className="product-card__badges">

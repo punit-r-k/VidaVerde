@@ -468,7 +468,7 @@ insert into products (
     'VV2',
     'sunset',
     'Sunset',
-    'Turmeric + Cumin',
+    '',
     'Beyond the benefits of naturally fermented kraut rich in live probiotics that support digestion and gut balance, this blend is infused with turmeric and cumin seeds, two anti-inflammatory spices known to support digestion and overall wellness.',
     array[
       'Ingredients: cabbage, carrots, turmeric, cumin seeds, salt',
@@ -522,7 +522,7 @@ insert into products (
     'VV5',
     'green-kick',
     'Green Kick Hot Sauce',
-    'Herbal + Mild',
+    'Mild + Herbal',
     'A raw, fermented hot sauce crafted to preserve live probiotics and bold flavor. With a fresh, herbal profile and mild heat, it is a vibrant addition to scrambled eggs, tacos, wraps, and more. Naturally rich in probiotics, Green Kick delivers flavor and gut-supporting benefits in every spoonful.',
     array[
       'Ingredients: jalapeno pepper, onion, green onion, cilantro',
