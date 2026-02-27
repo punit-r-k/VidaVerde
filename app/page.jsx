@@ -379,7 +379,7 @@ export default async function Home() {
               <h3>Market Day Essentials</h3>
               <ul>
                 <li>Reserve online and pick up on site every Saturday.</li>
-                <li>Bring a cooler bag for peak freshness.</li>
+                <li>Bring a tote bag to carry jars safely and hands-free.</li>
                 <li>Ask which flavor pairs best with your usual meals.</li>
               </ul>
               <a className="button button--light" href="#shop">
