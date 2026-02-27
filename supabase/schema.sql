@@ -486,8 +486,8 @@ insert into products (
     'VV3',
     'caribbean-heat',
     'Caribbean Heat',
-    'Medium Spice',
-    'Beyond the benefits of naturally fermented sauerkraut rich in live probiotics that support digestion and gut balance, this medium-spice blend of cabbage and jalapeno delivers a vibrant kick. Jalapenos provide natural antioxidants and vitamin C, making this kraut a flavorful addition to sandwiches and wraps.',
+    'Mild Spice',
+    'Beyond the benefits of naturally fermented sauerkraut rich in live probiotics that support digestion and gut balance, this mild-spice blend of cabbage and jalapeno delivers a vibrant kick. Jalapenos provide natural antioxidants and vitamin C, making this kraut a flavorful addition to sandwiches and wraps.',
     array[
       'Ingredients: cabbage, jalapeno pepper, salt',
       'Medium heat with a vibrant kick',
