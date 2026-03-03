@@ -180,7 +180,11 @@ export default function Storefront({ products, inventory = {} }) {
     }
   }, [searchParams]);
 
-  const shouldDisplayStock = false;
+  const shouldDisplayStock = useMemo(() => {
+    const records = Object.values(liveInventory || {});
+    if (records.length === 0) return false;
+    return records.some((record) => record?.show_stock !== false);
+  }, [liveInventory]);
 
   const cartItems = useMemo(() => {
     return products

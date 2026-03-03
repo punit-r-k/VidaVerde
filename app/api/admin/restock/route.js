@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { supabaseAdmin } from "@/lib/supabaseAdmin";
 
 export const runtime = "nodejs";
+const normalizeSku = (value) => String(value || "").trim().toUpperCase();
 
 export async function POST(request) {
   const secret = request.headers.get("x-admin-secret");
@@ -24,7 +25,7 @@ export async function POST(request) {
   }
 
   const { sku, restock } = payload || {};
-  const cleanSku = String(sku || "").trim();
+  const cleanSku = normalizeSku(sku);
   const qty = Number.parseInt(restock, 10);
 
   if (!cleanSku || Number.isNaN(qty)) {

@@ -292,9 +292,18 @@ as $$
 declare
   v_remaining integer;
   v_fulfilled integer := 0;
+  v_existing_preorders integer := 0;
+  v_applied_to_preorders integer := 0;
+  v_queue_to_fulfill integer := 0;
   v_queue record;
 begin
-  if not exists (select 1 from inventory i where i.sku = p_sku for update) then
+  select coalesce(i.preorders_remaining, 0)
+    into v_existing_preorders
+    from inventory i
+    where i.sku = p_sku
+    for update;
+
+  if not found then
     raise exception 'Unknown SKU: %', p_sku;
   end if;
 
@@ -325,7 +334,10 @@ begin
     where i.sku = p_sku;
   end if;
 
-  v_remaining := p_restock;
+  v_applied_to_preorders := least(greatest(p_restock, 0), v_existing_preorders);
+  v_remaining := greatest(p_restock - v_applied_to_preorders, 0);
+  v_queue_to_fulfill := v_applied_to_preorders;
+  v_fulfilled := v_applied_to_preorders;
 
   for v_queue in
     select pq.id, pq.remaining
@@ -334,39 +346,27 @@ begin
     order by pq.created_at, pq.id
     for update
   loop
-    exit when v_remaining <= 0;
+    exit when v_queue_to_fulfill <= 0;
 
-    if v_queue.remaining <= v_remaining then
+    if v_queue.remaining <= v_queue_to_fulfill then
       update preorder_queue pq
         set remaining = 0,
             fulfilled_at = now()
         where pq.id = v_queue.id;
-      v_remaining := v_remaining - v_queue.remaining;
-      v_fulfilled := v_fulfilled + v_queue.remaining;
+      v_queue_to_fulfill := v_queue_to_fulfill - v_queue.remaining;
     else
       update preorder_queue pq
-        set remaining = pq.remaining - v_remaining
+        set remaining = pq.remaining - v_queue_to_fulfill
         where pq.id = v_queue.id;
-      v_fulfilled := v_fulfilled + v_remaining;
-      v_remaining := 0;
+      v_queue_to_fulfill := 0;
     end if;
   end loop;
 
-  if v_fulfilled > 0 then
-    update inventory i
-      set preorders_remaining = greatest(i.preorders_remaining - v_fulfilled, 0)
-      where i.sku = p_sku;
-  end if;
-
-  if v_remaining > 0 then
-    update inventory i
-      set on_hand = i.on_hand + v_remaining
-      where i.sku = p_sku;
-  end if;
-
   update inventory i
-    set expected_restock_date = case
-          when i.on_hand > 0 then null
+    set preorders_remaining = greatest(v_existing_preorders - v_fulfilled, 0),
+        on_hand = i.on_hand + v_remaining,
+        expected_restock_date = case
+          when (i.on_hand + v_remaining) > 0 then null
           else i.expected_restock_date
         end,
         updated_at = now()

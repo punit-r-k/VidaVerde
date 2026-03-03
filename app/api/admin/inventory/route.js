@@ -6,6 +6,7 @@ const requireSecret = (request) => {
   const secret = request.headers.get("x-admin-secret");
   return secret && secret === process.env.ADMIN_RESTOCK_SECRET;
 };
+const normalizeSku = (value) => String(value || "").trim().toUpperCase();
 
 export const runtime = "nodejs";
 
@@ -87,13 +88,64 @@ export async function PATCH(request) {
     }
   }
 
-  const cleanSku = String(payload?.sku || "").trim();
-  const rawDate = payload?.expected_restock_date;
+  const cleanSku = normalizeSku(payload?.sku);
+  const hasPreordersField = Object.prototype.hasOwnProperty.call(
+    payload || {},
+    "preorders_remaining"
+  );
+  const hasRestockDateField = Object.prototype.hasOwnProperty.call(
+    payload || {},
+    "expected_restock_date"
+  );
+
+  if (hasPreordersField) {
+    const parsedPreorders = Number.parseInt(payload?.preorders_remaining, 10);
+
+    if (!cleanSku || Number.isNaN(parsedPreorders) || parsedPreorders < 0) {
+      return NextResponse.json({ error: "Invalid payload." }, { status: 400 });
+    }
+
+    const { data, error } = await supabaseAdmin
+      .from("inventory")
+      .update({ preorders_remaining: parsedPreorders })
+      .eq("sku", cleanSku)
+      .select("sku, on_hand, preorders_remaining, units_sold, expected_restock_date")
+      .single();
+
+    if (error) {
+      console.error("preorders update error:", error);
+      return NextResponse.json(
+        { error: "Unable to update preorder count." },
+        { status: 500 }
+      );
+    }
+
+    if (!data) {
+      return NextResponse.json({ error: "SKU not found." }, { status: 404 });
+    }
+
+    return NextResponse.json({
+      ok: true,
+      inventory: {
+        sku: data.sku,
+        on_hand: data.on_hand ?? 0,
+        preorders_remaining: data.preorders_remaining ?? 0,
+        units_sold: data.units_sold ?? 0,
+        expected_restock_date: data.expected_restock_date || null,
+        status: (data.on_hand ?? 0) > 0 ? "In Stock" : "Out of Stock"
+      }
+    });
+  }
 
   if (!cleanSku) {
     return NextResponse.json({ error: "Invalid payload." }, { status: 400 });
   }
 
+  if (!hasRestockDateField) {
+    return NextResponse.json({ error: "Invalid payload." }, { status: 400 });
+  }
+
+  const rawDate = payload?.expected_restock_date;
   const dateValue = rawDate ? String(rawDate).trim() : null;
   const isValidDate = !dateValue || /^\d{4}-\d{2}-\d{2}$/.test(dateValue);
 

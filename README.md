@@ -35,7 +35,7 @@ Sheet columns:
 - Column C: Stock input (restock delta)
 - Column D: Stock Status (on_hand)
 - Column E: Status (In Stock / Out of Stock)
-- Column F: # of Preorders
+- Column F: # of Preorders (editable; syncs to backend `preorders_remaining`)
 - Column G: Expected restock date
 - Column H: Total Sales
 

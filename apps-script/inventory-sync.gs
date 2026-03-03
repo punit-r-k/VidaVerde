@@ -70,23 +70,25 @@ function handleInventoryEdit_(e) {
     handleRestockEdit_(sheet, row);
   }
 
+  if (col === CONFIG.COLS.PREORDERS) {
+    handlePreordersEdit_(sheet, row);
+  }
+
   if (col === CONFIG.COLS.RESTOCK_DATE) {
     handleRestockDateEdit_(sheet, row);
   }
 }
 
 function setupEditTrigger() {
-  const triggers = ScriptApp.getProjectTriggers();
-  const exists = triggers.some((trigger) => {
+  const triggers = ScriptApp.getProjectTriggers().filter((trigger) => {
     return (
       trigger.getHandlerFunction() === "onInventoryEdit" &&
       trigger.getEventType() === ScriptApp.EventType.ON_EDIT
     );
   });
 
-  if (exists) {
-    SpreadsheetApp.getUi().alert("Installable edit trigger already exists.");
-    return;
+  for (const trigger of triggers) {
+    ScriptApp.deleteTrigger(trigger);
   }
 
   ScriptApp.newTrigger("onInventoryEdit")
@@ -94,7 +96,7 @@ function setupEditTrigger() {
     .onEdit()
     .create();
 
-  SpreadsheetApp.getUi().alert("Installable edit trigger created.");
+  SpreadsheetApp.getUi().alert("Installable edit trigger reset.");
 }
 
 function syncInventory() {
@@ -109,7 +111,7 @@ function syncInventory() {
   const inventory = Array.isArray(response?.inventory) ? response.inventory : [];
   const map = inventory.reduce((acc, record) => {
     if (record && record.sku) {
-      acc[String(record.sku).trim()] = record;
+      acc[normalizeSku_(record.sku)] = record;
     }
     return acc;
   }, {});
@@ -124,7 +126,7 @@ function syncInventory() {
 
   const lastRow = sheet.getLastRow();
   for (let row = CONFIG.START_ROW; row <= lastRow; row += 1) {
-    const sku = String(sheet.getRange(row, CONFIG.COLS.SKU).getValue() || "").trim();
+    const sku = normalizeSku_(sheet.getRange(row, CONFIG.COLS.SKU).getValue());
     if (!sku) continue;
 
     const record = map[sku];
@@ -135,54 +137,66 @@ function syncInventory() {
 }
 
 function handleRestockEdit_(sheet, row) {
-  const rawValue = sheet.getRange(row, CONFIG.COLS.STOCK_INPUT).getValue();
-  if (rawValue === "" || rawValue === null) return;
+  const lock = LockService.getDocumentLock() || LockService.getScriptLock();
+  lock.waitLock(30000);
 
-  const restock = Number(rawValue);
-  if (!Number.isFinite(restock)) {
-    Logger.log("Invalid restock value: %s", rawValue);
-    return;
-  }
+  const inputCell = sheet.getRange(row, CONFIG.COLS.STOCK_INPUT);
+  const rawValue = inputCell.getValue();
 
-  const sku = String(sheet.getRange(row, CONFIG.COLS.SKU).getValue() || "").trim();
-  if (!sku) {
-    Logger.log("Missing SKU for row %s", row);
-    return;
-  }
+  try {
+    if (rawValue === "" || rawValue === null) return;
 
-  const settings = getSettings_();
-  const payload = {
-    sku,
-    restock: Math.trunc(restock)
-  };
+    const restock = Number(rawValue);
+    if (!Number.isFinite(restock)) {
+      Logger.log("Invalid restock value: %s", rawValue);
+      return;
+    }
 
-  const response = postJson_(
-    `${settings.apiBaseUrl}/api/admin/restock`,
-    settings.adminSecret,
-    payload
-  );
+    const sku = normalizeSku_(sheet.getRange(row, CONFIG.COLS.SKU).getValue());
+    if (!sku) {
+      Logger.log("Missing SKU for row %s", row);
+      return;
+    }
 
-  if (!response?.ok) {
-    Logger.log(
-      "Restock failed for %s (status: %s, error: %s)",
+    const settings = getSettings_();
+    const payload = {
       sku,
-      response?.status ?? "unknown",
-      response?.error || response?.message || response?.raw || "unknown"
+      restock: Math.trunc(restock)
+    };
+
+    // Clear input before posting so concurrent duplicate triggers do not submit twice.
+    inputCell.setValue("");
+    SpreadsheetApp.flush();
+
+    const response = postJson_(
+      `${settings.apiBaseUrl}/api/admin/restock`,
+      settings.adminSecret,
+      payload
     );
-    return;
-  }
 
-  sheet.getRange(row, CONFIG.COLS.STOCK_INPUT).setValue("");
+    if (!response?.ok) {
+      inputCell.setValue(rawValue);
+      Logger.log(
+        "Restock failed for %s (status: %s, error: %s)",
+        sku,
+        response?.status ?? "unknown",
+        response?.error || response?.message || response?.raw || "unknown"
+      );
+      return;
+    }
 
-  if (response.inventory) {
-    writeRow_(sheet, row, response.inventory);
-  } else {
-    syncInventoryRow_(sheet, row, sku, settings);
+    if (response.inventory) {
+      writeRow_(sheet, row, response.inventory);
+    } else {
+      syncInventoryRow_(sheet, row, sku, settings);
+    }
+  } finally {
+    lock.releaseLock();
   }
 }
 
 function handleRestockDateEdit_(sheet, row) {
-  const sku = String(sheet.getRange(row, CONFIG.COLS.SKU).getValue() || "").trim();
+  const sku = normalizeSku_(sheet.getRange(row, CONFIG.COLS.SKU).getValue());
   if (!sku) return;
 
   const rawValue = sheet.getRange(row, CONFIG.COLS.RESTOCK_DATE).getValue();
@@ -216,6 +230,65 @@ function handleRestockDateEdit_(sheet, row) {
 
   if (!response?.ok) {
     Logger.log("Restock date update failed for %s", sku);
+  }
+}
+
+function handlePreordersEdit_(sheet, row) {
+  const sku = normalizeSku_(sheet.getRange(row, CONFIG.COLS.SKU).getValue());
+  if (!sku) return;
+
+  const rawValue = sheet.getRange(row, CONFIG.COLS.PREORDERS).getValue();
+  const preorders = rawValue === "" || rawValue === null ? 0 : Number(rawValue);
+
+  if (!Number.isFinite(preorders) || preorders < 0) {
+    Logger.log("Invalid preorder value for %s: %s", sku, rawValue);
+    return;
+  }
+
+  const targetPreorders = Math.trunc(preorders);
+  const settings = getSettings_();
+  const payload = {
+    sku,
+    preorders_remaining: targetPreorders
+  };
+
+  const response = patchJson_(
+    `${settings.apiBaseUrl}/api/admin/inventory`,
+    settings.adminSecret,
+    payload
+  );
+
+  if (!response?.ok) {
+    Logger.log(
+      "Preorders update failed for %s (status: %s, error: %s)",
+      sku,
+      response?.status ?? "unknown",
+      response?.error || response?.message || response?.raw || "unknown"
+    );
+    return;
+  }
+
+  const returnedPreorders = Number(response?.inventory?.preorders_remaining);
+  if (!Number.isFinite(returnedPreorders) || returnedPreorders !== targetPreorders) {
+    Logger.log(
+      "Preorders mismatch for %s. Sent: %s, Returned: %s. Check API deploy at %s",
+      sku,
+      targetPreorders,
+      response?.inventory?.preorders_remaining,
+      settings.apiBaseUrl
+    );
+    SpreadsheetApp.getActive().toast(
+      `Preorders update not saved for ${sku}. Check API deployment.`,
+      "Vida Verde",
+      5
+    );
+    return;
+  }
+
+  if (response.inventory) {
+    writeRow_(sheet, row, response.inventory);
+  } else {
+    syncInventoryRow_(sheet, row, sku, settings);
   }
 }
 
@@ -256,7 +329,8 @@ function syncInventoryRow_(sheet, row, sku, settings) {
   );
 
   const inventory = Array.isArray(response?.inventory) ? response.inventory : [];
-  const record = inventory.find((item) => String(item.sku).trim() === sku);
+  const normalizedSku = normalizeSku_(sku);
+  const record = inventory.find((item) => normalizeSku_(item?.sku) === normalizedSku);
 
   if (record) {
     writeRow_(sheet, row, record);
@@ -337,6 +411,10 @@ function normalizeBoolean_(value, fallback) {
   if (text === "true" || text === "yes" || text === "on") return true;
   if (text === "false" || text === "no" || text === "off") return false;
   return fallback;
+}
+
+function normalizeSku_(value) {
+  return String(value || "").trim().toUpperCase();
 }
 
 function getSettings_() {
