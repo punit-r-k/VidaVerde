@@ -66,9 +66,7 @@ function StripePaymentForm({ onPaymentState }) {
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [paymentError, setPaymentError] = useState("");
 
-  const handleStripeSubmit = async (event) => {
-    event.preventDefault();
-
+  const handleStripeSubmit = async () => {
     if (!stripe || !elements) {
       const message = "Payment form is still loading. Please try again.";
       setPaymentError(message);
@@ -128,7 +126,7 @@ function StripePaymentForm({ onPaymentState }) {
   };
 
   return (
-    <form className="payment-form" onSubmit={handleStripeSubmit}>
+    <div className="payment-form">
       <PaymentElement options={{ layout: "tabs" }} />
       {paymentError ? (
         <div className="form__status form__status--error" role="status" aria-live="polite">
@@ -137,13 +135,14 @@ function StripePaymentForm({ onPaymentState }) {
       ) : null}
       <button
         className="button button--dark"
-        type="submit"
+        type="button"
+        onClick={handleStripeSubmit}
         disabled={isSubmitting || !stripe || !elements}
         aria-busy={isSubmitting}
       >
         {isSubmitting ? "Processing..." : "Pay Now"}
       </button>
-    </form>
+    </div>
   );
 }
 
@@ -159,7 +158,9 @@ export default function Storefront({ products, inventory = {} }) {
   const [fieldErrors, setFieldErrors] = useState({});
   const [touchedFields, setTouchedFields] = useState({});
   const [submitAttempted, setSubmitAttempted] = useState(false);
+  const [pendingFocusField, setPendingFocusField] = useState("");
   const fieldRefs = useRef({});
+  const isPaymentStep = Boolean(paymentClientSecret);
 
   const resetPaymentState = useCallback(() => {
     setPaymentClientSecret("");
@@ -336,11 +337,13 @@ export default function Storefront({ products, inventory = {} }) {
   ).length;
   const requiredFieldCompleted = requiredFieldNames.length - requiredFieldRemaining;
   const completionProgress = Math.round((requiredFieldCompleted / requiredFieldNames.length) * 100);
-  const checkoutReadinessText = itemCount === 0
-    ? "Add at least one jar to continue."
-    : requiredFieldRemaining === 0
-      ? "Ready for secure checkout."
-      : `${requiredFieldRemaining} required field${requiredFieldRemaining === 1 ? "" : "s"} left.`;
+  const checkoutReadinessText = isPaymentStep
+    ? "Review your order and complete secure payment."
+    : itemCount === 0
+      ? "Add at least one jar to continue."
+      : requiredFieldRemaining === 0
+        ? "Ready for secure checkout."
+        : `${requiredFieldRemaining} required field${requiredFieldRemaining === 1 ? "" : "s"} left.`;
 
   const handleMobileCheckoutJump = useCallback(() => {
     const cartSummary = document.getElementById("cart-summary");
@@ -438,6 +441,33 @@ export default function Storefront({ products, inventory = {} }) {
 
     setFieldErrors(validateCheckoutForm(formValues, nextFulfillment));
   };
+
+  const handleBackToEdit = useCallback((fieldName = "") => {
+    setPendingFocusField(String(fieldName || "").trim());
+    resetPaymentState();
+    setStatus("idle");
+    setNotice("Review your details, then proceed to payment again.");
+  }, [resetPaymentState]);
+
+  useEffect(() => {
+    if (isPaymentStep || !pendingFocusField) return;
+
+    const targetField = pendingFocusField;
+    setPendingFocusField("");
+
+    const focusNode = () => {
+      const node = fieldRefs.current[targetField];
+      if (!node) return;
+      node.focus();
+      node.scrollIntoView({ behavior: "smooth", block: "center" });
+    };
+
+    if (typeof window !== "undefined") {
+      window.requestAnimationFrame(focusNode);
+    } else {
+      focusNode();
+    }
+  }, [isPaymentStep, pendingFocusField]);
 
   const handlePaymentState = useCallback(
     ({ status: nextStatus, message }) => {
@@ -543,7 +573,7 @@ export default function Storefront({ products, inventory = {} }) {
     }
   };
 
-  const renderCartDetails = (keyPrefix) => (
+  const renderCartDetails = (keyPrefix, { allowQuantityEdit = true } = {}) => (
     <>
       {cartItems.length === 0 ? (
         <p className="cart__empty">Select any item to begin your order.</p>
@@ -568,23 +598,27 @@ export default function Storefront({ products, inventory = {} }) {
                   <small className="cart__line-total">{formatCurrency(item.lineTotal)}</small>
                 </div>
 
-                <div className="cart__controls">
-                  <button
-                    type="button"
-                    onClick={() => handleQuantityChange(item.sku, item.quantity - 1)}
-                    aria-label={`Decrease ${item.name} quantity`}
-                  >
-                    -
-                  </button>
-                  <span>{item.quantity}</span>
-                  <button
-                    type="button"
-                    onClick={() => handleQuantityChange(item.sku, item.quantity + 1)}
-                    aria-label={`Increase ${item.name} quantity`}
-                  >
-                    +
-                  </button>
-                </div>
+                {allowQuantityEdit ? (
+                  <div className="cart__controls">
+                    <button
+                      type="button"
+                      onClick={() => handleQuantityChange(item.sku, item.quantity - 1)}
+                      aria-label={`Decrease ${item.name} quantity`}
+                    >
+                      -
+                    </button>
+                    <span>{item.quantity}</span>
+                    <button
+                      type="button"
+                      onClick={() => handleQuantityChange(item.sku, item.quantity + 1)}
+                      aria-label={`Increase ${item.name} quantity`}
+                    >
+                      +
+                    </button>
+                  </div>
+                ) : (
+                  <span className="cart__qty-chip">x{item.quantity}</span>
+                )}
               </div>
             );
           })}
@@ -611,6 +645,46 @@ export default function Storefront({ products, inventory = {} }) {
       </div>
     </>
   );
+
+  const summarizeValue = (value, fallback = "Not provided") => {
+    const text = String(value || "").trim();
+    return text || fallback;
+  };
+
+  const reviewFields = [
+    { label: "Name", value: summarizeValue(formValues.name), editField: "name" },
+    { label: "Email", value: summarizeValue(formValues.email), editField: "email" },
+    { label: "Phone", value: summarizeValue(formValues.phone), editField: "phone" },
+    {
+      label: "Fulfillment",
+      value: fulfillment === "market"
+        ? "Pick up at Fulshear Farmers Market"
+        : "Ship to me",
+      editField: "fulfillment"
+    },
+    ...(fulfillment === "ship"
+      ? [
+          {
+            label: "Address line 1",
+            value: summarizeValue(formValues.address1),
+            editField: "address1"
+          },
+          {
+            label: "Address line 2",
+            value: summarizeValue(formValues.address2),
+            editField: "address2"
+          },
+          { label: "City", value: summarizeValue(formValues.city), editField: "city" },
+          { label: "State", value: summarizeValue(formValues.state), editField: "state" },
+          {
+            label: "Postal code",
+            value: summarizeValue(formValues.postalCode),
+            editField: "postalCode"
+          }
+        ]
+      : []),
+    { label: "Order note", value: summarizeValue(formValues.note), editField: "note" }
+  ];
 
   return (
     <>
@@ -776,7 +850,7 @@ export default function Storefront({ products, inventory = {} }) {
                 <h3>Your Cart</h3>
                 <span>{cartCountLabel}</span>
               </div>
-              {itemCount > 0 ? (
+              {itemCount > 0 && !isPaymentStep ? (
                 <button
                   type="button"
                   className="cart__clear"
@@ -787,232 +861,348 @@ export default function Storefront({ products, inventory = {} }) {
               ) : null}
             </div>
 
-            {renderCartDetails("desktop")}
+            {renderCartDetails("desktop", { allowQuantityEdit: !isPaymentStep })}
           </div>
 
           <form id="checkout-form" className="order-form" onSubmit={handleSubmit} noValidate>
-            <h3>Complete Your Order</h3>
+            <h3>{isPaymentStep ? "Review & Pay" : "Complete Your Order"}</h3>
             <p>
               Preorders apply when demand exceeds current batch availability.
             </p>
             <p className="order-form__assist">
-              Fields marked * are required. Payment opens after details validate.
+              {isPaymentStep
+                ? "Review your order details below. Use Back to Edit if anything needs changes."
+                : "Fields marked * are required. Payment opens after details validate."}
             </p>
             <div className="order-form__progress" aria-live="polite">
               <div className="order-form__progress-row">
                 <strong>
-                  {requiredFieldCompleted}/{requiredFieldNames.length} required complete
+                  {isPaymentStep
+                    ? "Review complete"
+                    : `${requiredFieldCompleted}/${requiredFieldNames.length} required complete`}
                 </strong>
                 <span>{checkoutReadinessText}</span>
               </div>
               <div className="order-form__progress-track" aria-hidden="true">
-                <span style={{ width: `${completionProgress}%` }}></span>
+                <span style={{ width: `${isPaymentStep ? 100 : completionProgress}%` }}></span>
               </div>
             </div>
 
-            <div className="form__row">
-              <label className={`form-field${hasFieldError("name") ? " form-field--error" : ""}`}>
-                Name *
-                <input
-                  ref={setFieldRef("name")}
-                  type="text"
-                  name="name"
-                  value={formValues.name}
-                  placeholder="Your name"
-                  autoComplete="name"
-                  autoCapitalize="words"
-                  onChange={handleFieldChange}
-                  onBlur={handleFieldBlur}
-                  aria-invalid={hasFieldError("name")}
-                  aria-describedby={hasFieldError("name") ? "name-error" : undefined}
-                  required
-                />
-                {hasFieldError("name") ? (
-                  <span id="name-error" className="form-field__error" role="alert">
-                    {getFieldError("name")}
-                  </span>
-                ) : null}
-              </label>
-              <label className={`form-field${hasFieldError("email") ? " form-field--error" : ""}`}>
-                Email *
-                <input
-                  ref={setFieldRef("email")}
-                  type="email"
-                  name="email"
-                  value={formValues.email}
-                  placeholder="you@vidaverde.com"
-                  autoComplete="email"
-                  inputMode="email"
-                  onChange={handleFieldChange}
-                  onBlur={handleFieldBlur}
-                  aria-invalid={hasFieldError("email")}
-                  aria-describedby={hasFieldError("email") ? "email-error" : undefined}
-                  required
-                />
-                {hasFieldError("email") ? (
-                  <span id="email-error" className="form-field__error" role="alert">
-                    {getFieldError("email")}
-                  </span>
-                ) : null}
-              </label>
-            </div>
-
-            <div className="form__row">
-              <label className={`form-field${hasFieldError("phone") ? " form-field--error" : ""}`}>
-                Phone
-                <input
-                  ref={setFieldRef("phone")}
-                  type="tel"
-                  name="phone"
-                  value={formValues.phone}
-                  placeholder="Optional"
-                  autoComplete="tel"
-                  inputMode="tel"
-                  maxLength={14}
-                  onChange={handleFieldChange}
-                  onBlur={handleFieldBlur}
-                  aria-invalid={hasFieldError("phone")}
-                  aria-describedby={hasFieldError("phone") ? "phone-error" : undefined}
-                />
-                {hasFieldError("phone") ? (
-                  <span id="phone-error" className="form-field__error" role="alert">
-                    {getFieldError("phone")}
-                  </span>
-                ) : null}
-              </label>
-              <label className="form-field">
-                Fulfillment *
-                <select
-                  name="fulfillment"
-                  value={fulfillment}
-                  onChange={handleFulfillmentChange}
-                >
-                  <option value="ship">Ship to me</option>
-                  <option value="market">
-                    Pick up at Fulshear Farmers Market (Every Saturday)
-                  </option>
-                </select>
-              </label>
-            </div>
-
-            {requiresAddress ? (
+            {!isPaymentStep ? (
               <>
-                <label className={`form-field${hasFieldError("address1") ? " form-field--error" : ""}`}>
-                  Address line 1 *
-                  <input
-                    ref={setFieldRef("address1")}
-                    type="text"
-                    name="address1"
-                    value={formValues.address1}
-                    placeholder="Street address"
-                    autoComplete="address-line1"
-                    onChange={handleFieldChange}
-                    onBlur={handleFieldBlur}
-                    aria-invalid={hasFieldError("address1")}
-                    aria-describedby={hasFieldError("address1") ? "address1-error" : undefined}
-                    required
-                  />
-                  {hasFieldError("address1") ? (
-                    <span id="address1-error" className="form-field__error" role="alert">
-                      {getFieldError("address1")}
-                    </span>
-                  ) : null}
-                </label>
-                <label className="form-field">
-                  Address line 2
-                  <input
-                    type="text"
-                    name="address2"
-                    value={formValues.address2}
-                    placeholder="Apt, suite"
-                    autoComplete="address-line2"
-                    onChange={handleFieldChange}
-                    onBlur={handleFieldBlur}
-                  />
-                </label>
                 <div className="form__row">
-                  <label className={`form-field${hasFieldError("city") ? " form-field--error" : ""}`}>
-                    City *
+                  <label className={`form-field${hasFieldError("name") ? " form-field--error" : ""}`}>
+                    Name *
                     <input
-                      ref={setFieldRef("city")}
+                      ref={setFieldRef("name")}
                       type="text"
-                      name="city"
-                      value={formValues.city}
-                      autoComplete="address-level2"
+                      name="name"
+                      value={formValues.name}
+                      placeholder="Your name"
+                      autoComplete="name"
+                      autoCapitalize="words"
                       onChange={handleFieldChange}
                       onBlur={handleFieldBlur}
-                      aria-invalid={hasFieldError("city")}
-                      aria-describedby={hasFieldError("city") ? "city-error" : undefined}
+                      aria-invalid={hasFieldError("name")}
+                      aria-describedby={hasFieldError("name") ? "name-error" : undefined}
                       required
                     />
-                    {hasFieldError("city") ? (
-                      <span id="city-error" className="form-field__error" role="alert">
-                        {getFieldError("city")}
+                    {hasFieldError("name") ? (
+                      <span id="name-error" className="form-field__error" role="alert">
+                        {getFieldError("name")}
                       </span>
                     ) : null}
                   </label>
-                  <label className={`form-field${hasFieldError("state") ? " form-field--error" : ""}`}>
-                    State *
+                  <label className={`form-field${hasFieldError("email") ? " form-field--error" : ""}`}>
+                    Email *
                     <input
-                      ref={setFieldRef("state")}
-                      type="text"
-                      name="state"
-                      value={formValues.state}
-                      autoComplete="address-level1"
-                      inputMode="text"
-                      maxLength={2}
+                      ref={setFieldRef("email")}
+                      type="email"
+                      name="email"
+                      value={formValues.email}
+                      placeholder="you@vidaverde.com"
+                      autoComplete="email"
+                      inputMode="email"
                       onChange={handleFieldChange}
                       onBlur={handleFieldBlur}
-                      aria-invalid={hasFieldError("state")}
-                      aria-describedby={hasFieldError("state") ? "state-error" : undefined}
+                      aria-invalid={hasFieldError("email")}
+                      aria-describedby={hasFieldError("email") ? "email-error" : undefined}
                       required
                     />
-                    {hasFieldError("state") ? (
-                      <span id="state-error" className="form-field__error" role="alert">
-                        {getFieldError("state")}
-                      </span>
-                    ) : null}
-                  </label>
-                  <label className={`form-field${hasFieldError("postalCode") ? " form-field--error" : ""}`}>
-                    Postal code *
-                    <input
-                      ref={setFieldRef("postalCode")}
-                      type="text"
-                      name="postalCode"
-                      value={formValues.postalCode}
-                      autoComplete="postal-code"
-                      inputMode="numeric"
-                      maxLength={10}
-                      onChange={handleFieldChange}
-                      onBlur={handleFieldBlur}
-                      aria-invalid={hasFieldError("postalCode")}
-                      aria-describedby={hasFieldError("postalCode") ? "postalCode-error" : undefined}
-                      required
-                    />
-                    {hasFieldError("postalCode") ? (
-                      <span id="postalCode-error" className="form-field__error" role="alert">
-                        {getFieldError("postalCode")}
+                    {hasFieldError("email") ? (
+                      <span id="email-error" className="form-field__error" role="alert">
+                        {getFieldError("email")}
                       </span>
                     ) : null}
                   </label>
                 </div>
+
+                <div className="form__row">
+                  <label className={`form-field${hasFieldError("phone") ? " form-field--error" : ""}`}>
+                    Phone
+                    <input
+                      ref={setFieldRef("phone")}
+                      type="tel"
+                      name="phone"
+                      value={formValues.phone}
+                      placeholder="Optional"
+                      autoComplete="tel"
+                      inputMode="tel"
+                      maxLength={14}
+                      onChange={handleFieldChange}
+                      onBlur={handleFieldBlur}
+                      aria-invalid={hasFieldError("phone")}
+                      aria-describedby={hasFieldError("phone") ? "phone-error" : undefined}
+                    />
+                    {hasFieldError("phone") ? (
+                      <span id="phone-error" className="form-field__error" role="alert">
+                        {getFieldError("phone")}
+                      </span>
+                    ) : null}
+                  </label>
+                  <label className="form-field form-field--select">
+                    Fulfillment *
+                    <div className="select-wrap">
+                      <select
+                        ref={setFieldRef("fulfillment")}
+                        name="fulfillment"
+                        value={fulfillment}
+                        onChange={handleFulfillmentChange}
+                      >
+                        <option value="ship">Ship to me</option>
+                        <option value="market">
+                          Pick up at Fulshear Farmers Market (Every Saturday)
+                        </option>
+                      </select>
+                      <span className="select-wrap__icon" aria-hidden="true">
+                        <svg viewBox="0 0 24 24" fill="none">
+                          <path
+                            d="M7 10l5 5 5-5"
+                            stroke="currentColor"
+                            strokeWidth="1.8"
+                            strokeLinecap="round"
+                            strokeLinejoin="round"
+                          />
+                        </svg>
+                      </span>
+                    </div>
+                  </label>
+                </div>
+
+                {requiresAddress ? (
+                  <>
+                    <label className={`form-field${hasFieldError("address1") ? " form-field--error" : ""}`}>
+                      Address line 1 *
+                      <input
+                        ref={setFieldRef("address1")}
+                        type="text"
+                        name="address1"
+                        value={formValues.address1}
+                        placeholder="Street address"
+                        autoComplete="address-line1"
+                        onChange={handleFieldChange}
+                        onBlur={handleFieldBlur}
+                        aria-invalid={hasFieldError("address1")}
+                        aria-describedby={hasFieldError("address1") ? "address1-error" : undefined}
+                        required
+                      />
+                      {hasFieldError("address1") ? (
+                        <span id="address1-error" className="form-field__error" role="alert">
+                          {getFieldError("address1")}
+                        </span>
+                      ) : null}
+                    </label>
+                    <label className="form-field">
+                      Address line 2
+                      <input
+                        ref={setFieldRef("address2")}
+                        type="text"
+                        name="address2"
+                        value={formValues.address2}
+                        placeholder="Apt, suite"
+                        autoComplete="address-line2"
+                        onChange={handleFieldChange}
+                        onBlur={handleFieldBlur}
+                      />
+                    </label>
+                    <div className="form__row">
+                      <label className={`form-field${hasFieldError("city") ? " form-field--error" : ""}`}>
+                        City *
+                        <input
+                          ref={setFieldRef("city")}
+                          type="text"
+                          name="city"
+                          value={formValues.city}
+                          autoComplete="address-level2"
+                          onChange={handleFieldChange}
+                          onBlur={handleFieldBlur}
+                          aria-invalid={hasFieldError("city")}
+                          aria-describedby={hasFieldError("city") ? "city-error" : undefined}
+                          required
+                        />
+                        {hasFieldError("city") ? (
+                          <span id="city-error" className="form-field__error" role="alert">
+                            {getFieldError("city")}
+                          </span>
+                        ) : null}
+                      </label>
+                      <label className={`form-field${hasFieldError("state") ? " form-field--error" : ""}`}>
+                        State *
+                        <input
+                          ref={setFieldRef("state")}
+                          type="text"
+                          name="state"
+                          value={formValues.state}
+                          autoComplete="address-level1"
+                          inputMode="text"
+                          maxLength={2}
+                          onChange={handleFieldChange}
+                          onBlur={handleFieldBlur}
+                          aria-invalid={hasFieldError("state")}
+                          aria-describedby={hasFieldError("state") ? "state-error" : undefined}
+                          required
+                        />
+                        {hasFieldError("state") ? (
+                          <span id="state-error" className="form-field__error" role="alert">
+                            {getFieldError("state")}
+                          </span>
+                        ) : null}
+                      </label>
+                      <label className={`form-field${hasFieldError("postalCode") ? " form-field--error" : ""}`}>
+                        Postal code *
+                        <input
+                          ref={setFieldRef("postalCode")}
+                          type="text"
+                          name="postalCode"
+                          value={formValues.postalCode}
+                          autoComplete="postal-code"
+                          inputMode="numeric"
+                          maxLength={10}
+                          onChange={handleFieldChange}
+                          onBlur={handleFieldBlur}
+                          aria-invalid={hasFieldError("postalCode")}
+                          aria-describedby={hasFieldError("postalCode") ? "postalCode-error" : undefined}
+                          required
+                        />
+                        {hasFieldError("postalCode") ? (
+                          <span id="postalCode-error" className="form-field__error" role="alert">
+                            {getFieldError("postalCode")}
+                          </span>
+                        ) : null}
+                      </label>
+                    </div>
+                  </>
+                ) : (
+                  <div className="market-note">
+                    Pickup available every Saturday at the Fulshear Farmers Market.
+                  </div>
+                )}
+
+                <label className="form-field">
+                  Order note
+                  <textarea
+                    ref={setFieldRef("note")}
+                    name="note"
+                    value={formValues.note}
+                    rows={3}
+                    placeholder="Dietary notes or pickup timing."
+                    onChange={handleFieldChange}
+                  ></textarea>
+                </label>
+
+                <button
+                  className="button button--dark"
+                  type="submit"
+                  disabled={status === "submitting"}
+                  aria-busy={status === "submitting"}
+                >
+                  {status === "submitting" ? "Preparing Payment..." : "Proceed to Payment"}
+                </button>
               </>
             ) : (
-              <div className="market-note">
-                Pickup available every Saturday at the Fulshear Farmers Market.
-              </div>
-            )}
+              <>
+                <div className="checkout-review">
+                  <details className="checkout-dropdown" open>
+                    <summary>
+                      <span>Items in your order</span>
+                      <strong>{cartCountLabel}</strong>
+                    </summary>
+                    <div className="checkout-dropdown__content">
+                      <ul className="checkout-review__items">
+                        {cartItems.map((item) => (
+                          <li key={`review-item-${item.sku}`}>
+                            <span>{item.name}</span>
+                            <span>
+                              x{item.quantity} | {formatCurrency(item.lineTotal)}
+                            </span>
+                          </li>
+                        ))}
+                      </ul>
+                      <div className="checkout-review__totals">
+                        <span>Subtotal</span>
+                        <strong>{formatCurrency(subtotal)}</strong>
+                      </div>
+                    </div>
+                  </details>
 
-            <label className="form-field">
-              Order note
-              <textarea
-                name="note"
-                value={formValues.note}
-                rows={3}
-                placeholder="Dietary notes or pickup timing."
-                onChange={handleFieldChange}
-              ></textarea>
-            </label>
+                  <details className="checkout-dropdown" open>
+                    <summary>
+                      <span>Customer details</span>
+                      <strong>{fulfillment === "ship" ? "Shipping" : "Pickup"}</strong>
+                    </summary>
+                    <div className="checkout-dropdown__content">
+                      <dl className="checkout-review__fields">
+                        {reviewFields.map((field) => (
+                          <div key={`review-field-${field.label}`} className="checkout-review__field-row">
+                            <div>
+                              <dt>{field.label}</dt>
+                              <dd>{field.value}</dd>
+                            </div>
+                            {field.editField ? (
+                              <button
+                                type="button"
+                                className="checkout-review__edit"
+                                onClick={() => handleBackToEdit(field.editField)}
+                              >
+                                Edit
+                              </button>
+                            ) : null}
+                          </div>
+                        ))}
+                      </dl>
+                    </div>
+                  </details>
+                </div>
+
+                <button className="button button--light" type="button" onClick={handleBackToEdit}>
+                  Back to Edit Information
+                </button>
+
+                <div className="payment-panel">
+                  <h4>Secure Payment</h4>
+                  <p>
+                    Card details are entered in Stripe secure fields and never stored on our
+                    servers.
+                  </p>
+                  {stripePromise ? (
+                    <Elements
+                      stripe={stripePromise}
+                      options={{
+                        clientSecret: paymentClientSecret
+                      }}
+                    >
+                      <StripePaymentForm onPaymentState={handlePaymentState} />
+                    </Elements>
+                  ) : (
+                    <div className="form__status form__status--error" role="status" aria-live="polite">
+                      Stripe publishable key is missing. Set
+                      {" "}
+                      NEXT_PUBLIC_STRIPE_PUBLISHABLE_KEY.
+                    </div>
+                  )}
+                </div>
+              </>
+            )}
 
             {notice ? (
               <div
@@ -1023,43 +1213,6 @@ export default function Storefront({ products, inventory = {} }) {
                 aria-live="polite"
               >
                 {notice}
-              </div>
-            ) : null}
-
-            <button
-              className="button button--dark"
-              type="submit"
-              disabled={status === "submitting"}
-              aria-busy={status === "submitting"}
-            >
-              {status === "submitting" ? "Preparing Payment..." : "Proceed to Payment"}
-            </button>
-
-            {paymentClientSecret ? (
-              <div className="payment-panel">
-                <h4>Secure Payment</h4>
-                <p>
-                  Card details are entered in Stripe secure fields and never stored on our
-                  servers.
-                </p>
-                {stripePromise ? (
-                  <Elements
-                    stripe={stripePromise}
-                    options={{
-                      clientSecret: paymentClientSecret
-                    }}
-                  >
-                    <StripePaymentForm
-                      onPaymentState={handlePaymentState}
-                    />
-                  </Elements>
-                ) : (
-                  <div className="form__status form__status--error" role="status" aria-live="polite">
-                    Stripe publishable key is missing. Set
-                    {" "}
-                    NEXT_PUBLIC_STRIPE_PUBLISHABLE_KEY.
-                  </div>
-                )}
               </div>
             ) : null}
           </form>
