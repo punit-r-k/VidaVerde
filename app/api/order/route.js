@@ -5,11 +5,13 @@ import {
   checkoutPayloadSchema,
   mapCheckoutIssuesToFieldErrors
 } from "@/lib/checkoutSchema";
-import crypto from "crypto";
-import { squareConfig, squareRequest } from "@/lib/square";
+import { stripeConfig, stripeRequest } from "@/lib/stripe";
 
 const CHECKOUT_WINDOW_MS = 60_000;
 const CHECKOUT_MAX = 6;
+
+const asMetadataValue = (value, maxLength = 500) =>
+  String(value || "").trim().slice(0, maxLength);
 
 const getClientId = (request) => {
   const forwardedFor = request.headers.get("x-forwarded-for");
@@ -23,9 +25,9 @@ const getClientId = (request) => {
 export const runtime = "nodejs";
 
 export async function POST(request) {
-  if (!squareConfig) {
+  if (!stripeConfig) {
     return NextResponse.json(
-      { error: "Square is not configured." },
+      { error: "Stripe is not configured." },
       { status: 500 }
     );
   }
@@ -89,19 +91,11 @@ export async function POST(request) {
       if (!product || !Number.isFinite(unitAmount) || unitAmount < 0) return null;
 
       return {
+        sku: item.sku,
+        name: product.name,
+        image: product.image_url || "",
         quantity: item.quantity,
-        price_data: {
-          currency: "usd",
-          unit_amount: unitAmount,
-          tax_behavior: "exclusive",
-          product_data: {
-            name: product.name,
-            images: product.image_url ? [product.image_url] : undefined,
-            metadata: {
-              sku: item.sku
-            }
-          }
-        }
+        unitAmount
       };
     })
     .filter(Boolean);
@@ -136,71 +130,72 @@ export async function POST(request) {
   });
 
   const metadata = {
-    fulfillment: normalizedFulfillment,
-    customer_name: name,
-    customer_email: email,
-    customer_phone: customer.phone,
-    address1: customer.address1,
-    address2: customer.address2,
-    city: customer.city,
-    state: customer.state,
-    postal_code: customer.postalCode,
-    note: customer.note,
-    items: JSON.stringify(itemsPayload)
+    fulfillment: asMetadataValue(normalizedFulfillment, 32),
+    customer_name: asMetadataValue(name, 120),
+    customer_email: asMetadataValue(email, 254),
+    customer_phone: asMetadataValue(customer.phone, 64),
+    address1: asMetadataValue(customer.address1, 120),
+    address2: asMetadataValue(customer.address2, 120),
+    city: asMetadataValue(customer.city, 120),
+    state: asMetadataValue(customer.state, 64),
+    postal_code: asMetadataValue(customer.postalCode, 32),
+    note: asMetadataValue(customer.note, 500)
   };
+  const serializedItems = JSON.stringify(itemsPayload);
+  if (serializedItems.length <= 500) {
+    metadata.items = serializedItems;
+  }
 
   try {
-    const locationId = process.env.SQUARE_LOCATION_ID;
-    if (!locationId) {
-      return NextResponse.json(
-        { error: "Square location is not configured." },
-        { status: 500 }
-      );
-    }
-
-    const squareLineItems = lineItems.map((item) => ({
-      name: item.price_data.product_data.name,
-      quantity: String(item.quantity),
-      base_price_money: {
-        amount: item.price_data.unit_amount,
-        currency: "USD"
+    const stripeLineItems = lineItems.map((item) => ({
+      quantity: item.quantity,
+      price_data: {
+        currency: "usd",
+        unit_amount: item.unitAmount,
+        product_data: {
+          name: item.name,
+          images: item.image ? [item.image] : undefined,
+          metadata: { sku: item.sku }
+        }
       }
     }));
 
-    const payload = {
-      idempotency_key: crypto.randomUUID(),
-      order: {
-        location_id: locationId,
-        line_items: squareLineItems,
-        metadata
-      },
-      checkout_options: {
-        redirect_url: `${siteUrl}/?checkout=success`,
-        ask_for_shipping_address: !isPickup,
-        allow_tipping: false
-      },
-      pre_populated_data: {
-        buyer_email: email
-      }
+    const stripePayload = {
+      mode: "payment",
+      success_url: `${siteUrl}/?checkout=success`,
+      cancel_url: `${siteUrl}/?checkout=cancel`,
+      customer_email: email,
+      line_items: stripeLineItems,
+      metadata
     };
 
-    const { ok, data, error } = await squareRequest(
-      "/v2/online-checkout/payment-links",
-      {
-        method: "POST",
-        body: payload
-      }
-    );
+    if (!isPickup) {
+      stripePayload.shipping_address_collection = {
+        allowed_countries: ["US"]
+      };
+    }
+
+    const { ok, data, error } = await stripeRequest("/v1/checkout/sessions", {
+      method: "POST",
+      body: stripePayload
+    });
 
     if (!ok) {
-      console.error("square payment link error:", error);
+      console.error("stripe checkout session error:", error);
       return NextResponse.json(
         { error: "Unable to start checkout." },
         { status: 500 }
       );
     }
 
-    return NextResponse.json({ url: data?.payment_link?.url }, { status: 200 });
+    if (!data?.url) {
+      return NextResponse.json(
+        { error: "Unable to start checkout." },
+        { status: 500 }
+      );
+    }
+
+    return NextResponse.json({ url: data.url }, { status: 200 });
   } catch (error) {
     console.error("checkout session error:", error);
     return NextResponse.json(

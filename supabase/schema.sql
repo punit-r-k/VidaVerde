@@ -43,7 +43,7 @@ create table if not exists orders (
   id uuid primary key default gen_random_uuid(),
   payment_session_id text not null unique,
   payment_reference text,
-  payment_provider text not null default 'square',
+  payment_provider text not null default 'stripe',
   status text not null default 'paid',
   fulfillment text not null check (fulfillment in ('ship', 'market')),
   customer_name text not null,
@@ -98,7 +98,9 @@ begin
     from information_schema.columns
     where table_name = 'orders' and column_name = 'payment_provider'
   ) then
-    alter table orders add column payment_provider text not null default 'square';
+    alter table orders add column payment_provider text not null default 'stripe';
+  else
+    alter table orders alter column payment_provider set default 'stripe';
   end if;
 end $$;
 
@@ -213,7 +215,7 @@ begin
   ) values (
     p_session_id,
     nullif(p_payment_reference, ''),
-    coalesce(nullif(p_payment_provider, ''), 'square'),
+    coalesce(nullif(p_payment_provider, ''), 'stripe'),
     'paid',
     p_fulfillment,
     coalesce(p_customer->>'name', ''),

@@ -75,14 +75,14 @@ export default async function Home() {
   const testimonials = [
     {
       quote:
-        "We started with one spoonful each day and now keep two jars in rotation. Digestion feels steadier and meals feel easier.",
-      name: "Market Customer",
-      meta: "Richmond, TX"
+        "This sauerkraut with cumin is truly a standout. The tangy brightness of the sauerkraut pairs beautifully with the warm, earthy flavor of cumin, creating a perfect balance of zest and depth. The cumin adds just the right touch of spice without overpowering the natural crispness and freshness of the cabbage. It's wonderfully seasoned, delicious on its own, and even better as a complement to a hearty meal.",
+      name: "Veronica Bradshaw",
+      meta: "Customer Review"
     },
     {
       quote:
-        "Flavor is clean and fresh, never harsh. I like that it is actually raw and refrigerated from pickup to table.",
-      name: "Saturday Shopper",
+        "VidaVerde has the best microgreens and gut healthy products I've found. I've been visiting Edison at the Fulshear Farmers market since 2021, and now I won't go anywhere else. I bravely tried various sauerkrauts and they are nothing like what I'd ever had before. My fave-Red Coral. The microgreens are in containers that make it extremely easy to keep fresh, and the containers can be returned for less waste.",
+      name: "Jennifer Hopkins",
       meta: "Fulshear Farmers Market"
     },
     {
