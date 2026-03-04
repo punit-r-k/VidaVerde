@@ -4,6 +4,7 @@ import { useId, useState } from "react";
 
 const DEFAULT_ERROR = "Unable to save your email right now. Please try again.";
 const SUCCESS_MESSAGE = "Thank you for joining our email list!";
+const EMAIL_REGEX = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 
 export default function EmailSignupForm({ source = "website_email_cta" }) {
   const inputId = useId();
@@ -18,7 +19,18 @@ export default function EmailSignupForm({ source = "website_email_cta" }) {
     if (isSubmitting || isSuccess) return;
 
     const normalizedEmail = email.trim().toLowerCase();
-    if (!normalizedEmail) return;
+    if (!normalizedEmail) {
+      setStatusMessage("Email is required.");
+      setHasError(true);
+      setIsSuccess(false);
+      return;
+    }
+    if (!EMAIL_REGEX.test(normalizedEmail)) {
+      setStatusMessage("Enter a valid email address.");
+      setHasError(true);
+      setIsSuccess(false);
+      return;
+    }
 
     setIsSubmitting(true);
     setStatusMessage("");
@@ -65,9 +77,17 @@ export default function EmailSignupForm({ source = "website_email_cta" }) {
           id={inputId}
           type="email"
           value={email}
-          onChange={(event) => setEmail(event.target.value)}
+          onChange={(event) => {
+            setEmail(event.target.value);
+            if (hasError) {
+              setStatusMessage("");
+              setHasError(false);
+            }
+          }}
           placeholder="you@vidaverde.com"
           autoComplete="email"
+          aria-invalid={hasError}
+          aria-describedby={statusMessage ? `${inputId}-status` : undefined}
           required
           disabled={isSubmitting || isSuccess}
         />
@@ -81,6 +101,7 @@ export default function EmailSignupForm({ source = "website_email_cta" }) {
       </div>
       {statusMessage ? (
         <p
+          id={`${inputId}-status`}
           className={`email-signup-form__status email-signup-form__status--animated${hasError ? " email-signup-form__status--error" : ""}${isSuccess ? " email-signup-form__status--success" : ""}`}
           role="status"
           aria-live="polite"

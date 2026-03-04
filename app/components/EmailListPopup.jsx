@@ -7,6 +7,7 @@ const DISMISS_KEY = "vidaverde-email-popup-dismissed-v1";
 const OPEN_DELAY_MS = 1200;
 const DEFAULT_ERROR = "Unable to save your email right now. Please try again.";
 const SUCCESS_MESSAGE = "Thank you. You are on the email list!";
+const EMAIL_REGEX = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 
 export default function EmailListPopup() {
   const [open, setOpen] = useState(false);
@@ -55,7 +56,14 @@ export default function EmailListPopup() {
     if (isSubmitting) return;
 
     const normalizedEmail = email.trim().toLowerCase();
-    if (!normalizedEmail) return;
+    if (!normalizedEmail) {
+      setErrorMessage("Email is required.");
+      return;
+    }
+    if (!EMAIL_REGEX.test(normalizedEmail)) {
+      setErrorMessage("Enter a valid email address.");
+      return;
+    }
 
     setIsSubmitting(true);
     setErrorMessage("");
@@ -128,9 +136,16 @@ export default function EmailListPopup() {
               id="popup-email"
               type="email"
               value={email}
-              onChange={(event) => setEmail(event.target.value)}
+              onChange={(event) => {
+                setEmail(event.target.value);
+                if (errorMessage) {
+                  setErrorMessage("");
+                }
+              }}
               placeholder="you@vidaverde.com"
               autoComplete="email"
+              aria-invalid={Boolean(errorMessage)}
+              aria-describedby={errorMessage ? "popup-email-error" : undefined}
               required
             />
             <button
@@ -146,7 +161,7 @@ export default function EmailListPopup() {
               </p>
             ) : null}
             {errorMessage ? (
-              <p className="email-popup__error" role="status" aria-live="polite">
+              <p id="popup-email-error" className="email-popup__error" role="status" aria-live="polite">
                 {errorMessage}
               </p>
             ) : null}

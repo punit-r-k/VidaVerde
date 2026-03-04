@@ -1039,6 +1039,10 @@ img {
   gap: 18px;
 }
 
+.form__row--city-state {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
 label {
   display: grid;
   gap: 8px;

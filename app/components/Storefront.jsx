@@ -9,6 +9,8 @@ import {
   FORM_FIELD_ORDER,
   INITIAL_FORM_VALUES,
   SHIPPING_FIELDS,
+  US_CITY_OPTIONS,
+  US_STATE_OPTIONS,
   formatCheckoutInputValue,
   getCheckoutFieldErrors,
   normalizeFulfillment
@@ -346,6 +348,15 @@ export default function Storefront({ products, inventory = {} }) {
       : requiredFieldRemaining === 0
         ? "Ready for secure checkout."
         : `${requiredFieldRemaining} required field${requiredFieldRemaining === 1 ? "" : "s"} left.`;
+  const cityOptions = useMemo(() => {
+    const selectedCity = String(formValues.city || "").trim();
+    if (!selectedCity) return US_CITY_OPTIONS;
+
+    const hasMatch = US_CITY_OPTIONS.some(
+      (city) => city.toLowerCase() === selectedCity.toLowerCase()
+    );
+    return hasMatch ? US_CITY_OPTIONS : [selectedCity, ...US_CITY_OPTIONS];
+  }, [formValues.city]);
 
   const handleMobileCheckoutJump = useCallback(() => {
     const cartSummary = document.getElementById("cart-summary");
@@ -1010,72 +1021,106 @@ export default function Storefront({ products, inventory = {} }) {
                         onBlur={handleFieldBlur}
                       />
                     </label>
-                    <div className="form__row">
-                      <label className={`form-field${hasFieldError("city") ? " form-field--error" : ""}`}>
+                    <div className="form__row form__row--city-state">
+                      <label className={`form-field form-field--select${hasFieldError("city") ? " form-field--error" : ""}`}>
                         City *
-                        <input
-                          ref={setFieldRef("city")}
-                          type="text"
-                          name="city"
-                          value={formValues.city}
-                          autoComplete="address-level2"
-                          onChange={handleFieldChange}
-                          onBlur={handleFieldBlur}
-                          aria-invalid={hasFieldError("city")}
-                          aria-describedby={hasFieldError("city") ? "city-error" : undefined}
-                          required
-                        />
+                        <div className="select-wrap">
+                          <select
+                            ref={setFieldRef("city")}
+                            name="city"
+                            value={formValues.city}
+                            onChange={handleFieldChange}
+                            onBlur={handleFieldBlur}
+                            aria-invalid={hasFieldError("city")}
+                            aria-describedby={hasFieldError("city") ? "city-error" : undefined}
+                            required
+                          >
+                            <option value="">Select city</option>
+                            {cityOptions.map((city) => (
+                              <option key={city} value={city}>
+                                {city}
+                              </option>
+                            ))}
+                          </select>
+                          <span className="select-wrap__icon" aria-hidden="true">
+                            <svg viewBox="0 0 24 24" fill="none">
+                              <path
+                                d="M7 10l5 5 5-5"
+                                stroke="currentColor"
+                                strokeWidth="1.8"
+                                strokeLinecap="round"
+                                strokeLinejoin="round"
+                              />
+                            </svg>
+                          </span>
+                        </div>
                         {hasFieldError("city") ? (
                           <span id="city-error" className="form-field__error" role="alert">
                             {getFieldError("city")}
                           </span>
                         ) : null}
                       </label>
-                      <label className={`form-field${hasFieldError("state") ? " form-field--error" : ""}`}>
+                      <label className={`form-field form-field--select${hasFieldError("state") ? " form-field--error" : ""}`}>
                         State *
-                        <input
-                          ref={setFieldRef("state")}
-                          type="text"
-                          name="state"
-                          value={formValues.state}
-                          autoComplete="address-level1"
-                          inputMode="text"
-                          maxLength={2}
-                          onChange={handleFieldChange}
-                          onBlur={handleFieldBlur}
-                          aria-invalid={hasFieldError("state")}
-                          aria-describedby={hasFieldError("state") ? "state-error" : undefined}
-                          required
-                        />
+                        <div className="select-wrap">
+                          <select
+                            ref={setFieldRef("state")}
+                            name="state"
+                            value={formValues.state}
+                            onChange={handleFieldChange}
+                            onBlur={handleFieldBlur}
+                            aria-invalid={hasFieldError("state")}
+                            aria-describedby={hasFieldError("state") ? "state-error" : undefined}
+                            required
+                          >
+                            <option value="">Select state</option>
+                            {US_STATE_OPTIONS.map((stateOption) => (
+                              <option key={stateOption.code} value={stateOption.code}>
+                                {stateOption.name}
+                              </option>
+                            ))}
+                          </select>
+                          <span className="select-wrap__icon" aria-hidden="true">
+                            <svg viewBox="0 0 24 24" fill="none">
+                              <path
+                                d="M7 10l5 5 5-5"
+                                stroke="currentColor"
+                                strokeWidth="1.8"
+                                strokeLinecap="round"
+                                strokeLinejoin="round"
+                              />
+                            </svg>
+                          </span>
+                        </div>
                         {hasFieldError("state") ? (
                           <span id="state-error" className="form-field__error" role="alert">
                             {getFieldError("state")}
                           </span>
                         ) : null}
                       </label>
-                      <label className={`form-field${hasFieldError("postalCode") ? " form-field--error" : ""}`}>
-                        Postal code *
-                        <input
-                          ref={setFieldRef("postalCode")}
-                          type="text"
-                          name="postalCode"
-                          value={formValues.postalCode}
-                          autoComplete="postal-code"
-                          inputMode="numeric"
-                          maxLength={10}
-                          onChange={handleFieldChange}
-                          onBlur={handleFieldBlur}
-                          aria-invalid={hasFieldError("postalCode")}
-                          aria-describedby={hasFieldError("postalCode") ? "postalCode-error" : undefined}
-                          required
-                        />
-                        {hasFieldError("postalCode") ? (
-                          <span id="postalCode-error" className="form-field__error" role="alert">
-                            {getFieldError("postalCode")}
-                          </span>
-                        ) : null}
-                      </label>
                     </div>
+                    <label className={`form-field${hasFieldError("postalCode") ? " form-field--error" : ""}`}>
+                      Postal code *
+                      <input
+                        ref={setFieldRef("postalCode")}
+                        type="text"
+                        name="postalCode"
+                        value={formValues.postalCode}
+                        autoComplete="postal-code"
+                        inputMode="numeric"
+                        maxLength={10}
+                        onChange={handleFieldChange}
+                        onBlur={handleFieldBlur}
+                        aria-invalid={hasFieldError("postalCode")}
+                        aria-describedby={hasFieldError("postalCode") ? "postalCode-error" : undefined}
+                        required
+                      />
+                      {hasFieldError("postalCode") ? (
+                        <span id="postalCode-error" className="form-field__error" role="alert">
+                          {getFieldError("postalCode")}
+                        </span>
+                      ) : null}
+                    </label>
                   </>
                 ) : (
                   <div className="market-note">
