@@ -158,7 +158,6 @@ export default function Storefront({ products, inventory = {} }) {
   const [fieldErrors, setFieldErrors] = useState({});
   const [touchedFields, setTouchedFields] = useState({});
   const [submitAttempted, setSubmitAttempted] = useState(false);
-  const [pendingFocusField, setPendingFocusField] = useState("");
   const fieldRefs = useRef({});
   const isPaymentStep = Boolean(paymentClientSecret);
 
@@ -442,32 +441,11 @@ export default function Storefront({ products, inventory = {} }) {
     setFieldErrors(validateCheckoutForm(formValues, nextFulfillment));
   };
 
-  const handleBackToEdit = useCallback((fieldName = "") => {
-    setPendingFocusField(String(fieldName || "").trim());
+  const handleBackToEdit = useCallback(() => {
     resetPaymentState();
     setStatus("idle");
     setNotice("Review your details, then proceed to payment again.");
   }, [resetPaymentState]);
-
-  useEffect(() => {
-    if (isPaymentStep || !pendingFocusField) return;
-
-    const targetField = pendingFocusField;
-    setPendingFocusField("");
-
-    const focusNode = () => {
-      const node = fieldRefs.current[targetField];
-      if (!node) return;
-      node.focus();
-      node.scrollIntoView({ behavior: "smooth", block: "center" });
-    };
-
-    if (typeof window !== "undefined") {
-      window.requestAnimationFrame(focusNode);
-    } else {
-      focusNode();
-    }
-  }, [isPaymentStep, pendingFocusField]);
 
   const handlePaymentState = useCallback(
     ({ status: nextStatus, message }) => {
@@ -652,38 +630,34 @@ export default function Storefront({ products, inventory = {} }) {
   };
 
   const reviewFields = [
-    { label: "Name", value: summarizeValue(formValues.name), editField: "name" },
-    { label: "Email", value: summarizeValue(formValues.email), editField: "email" },
-    { label: "Phone", value: summarizeValue(formValues.phone), editField: "phone" },
+    { label: "Name", value: summarizeValue(formValues.name) },
+    { label: "Email", value: summarizeValue(formValues.email) },
+    { label: "Phone", value: summarizeValue(formValues.phone) },
     {
       label: "Fulfillment",
       value: fulfillment === "market"
         ? "Pick up at Fulshear Farmers Market"
-        : "Ship to me",
-      editField: "fulfillment"
+        : "Ship to me"
     },
     ...(fulfillment === "ship"
       ? [
           {
             label: "Address line 1",
-            value: summarizeValue(formValues.address1),
-            editField: "address1"
+            value: summarizeValue(formValues.address1)
           },
           {
             label: "Address line 2",
-            value: summarizeValue(formValues.address2),
-            editField: "address2"
+            value: summarizeValue(formValues.address2)
           },
-          { label: "City", value: summarizeValue(formValues.city), editField: "city" },
-          { label: "State", value: summarizeValue(formValues.state), editField: "state" },
+          { label: "City", value: summarizeValue(formValues.city) },
+          { label: "State", value: summarizeValue(formValues.state) },
           {
             label: "Postal code",
-            value: summarizeValue(formValues.postalCode),
-            editField: "postalCode"
+            value: summarizeValue(formValues.postalCode)
           }
         ]
       : []),
-    { label: "Order note", value: summarizeValue(formValues.note), editField: "note" }
+    { label: "Order note", value: summarizeValue(formValues.note) }
   ];
 
   return (
@@ -1130,20 +1104,9 @@ export default function Storefront({ products, inventory = {} }) {
                     <div className="checkout-dropdown__content">
                       <dl className="checkout-review__fields">
                         {reviewFields.map((field) => (
-                          <div key={`review-field-${field.label}`} className="checkout-review__field-row">
-                            <div>
-                              <dt>{field.label}</dt>
-                              <dd>{field.value}</dd>
-                            </div>
-                            {field.editField ? (
-                              <button
-                                type="button"
-                                className="checkout-review__edit"
-                                onClick={() => handleBackToEdit(field.editField)}
-                              >
-                                Edit
-                              </button>
-                            ) : null}
+                          <div key={`review-field-${field.label}`}>
+                            <dt>{field.label}</dt>
+                            <dd>{field.value}</dd>
                           </div>
                         ))}
                       </dl>

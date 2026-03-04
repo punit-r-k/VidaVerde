@@ -1261,19 +1261,6 @@ select:focus {
   gap: 10px;
 }
 
-.checkout-review__field-row {
-  display: flex;
-  align-items: flex-start;
-  justify-content: space-between;
-  gap: 12px;
-}
-
-.checkout-review__field-row > div {
-  display: grid;
-  gap: 4px;
-  min-width: 0;
-}
-
 .checkout-review__fields dt {
   margin: 0;
   font-size: 0.68rem;
@@ -1288,24 +1275,6 @@ select:focus {
   line-height: 1.45;
   color: var(--ink);
   word-break: break-word;
-}
-
-.checkout-review__edit {
-  border: 1px solid var(--line);
-  background: var(--surface-elevated);
-  color: var(--green-900);
-  font-size: 0.66rem;
-  letter-spacing: 0.12em;
-  text-transform: uppercase;
-  font-weight: 700;
-  border-radius: var(--radius);
-  padding: 6px 9px;
-  cursor: pointer;
-  flex-shrink: 0;
-}
-
-.checkout-review__edit:hover {
-  border-color: var(--green-900);
 }
 
 .cart-drawer-toggle {
