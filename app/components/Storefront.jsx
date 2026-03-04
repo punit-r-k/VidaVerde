@@ -514,7 +514,7 @@ export default function Storefront({ products, inventory = {} }) {
 
     if (paymentClientSecret) {
       setStatus("idle");
-      setNotice("Enter your payment details below to complete payment.");
+      setNotice("");
       return;
     }
 
@@ -561,7 +561,7 @@ export default function Storefront({ products, inventory = {} }) {
       if (result?.clientSecret) {
         setPaymentClientSecret(result.clientSecret);
         setStatus("idle");
-        setNotice("Enter your payment details below to complete payment.");
+        setNotice("");
         return;
       }
 
@@ -874,19 +874,19 @@ export default function Storefront({ products, inventory = {} }) {
                 ? "Review your order details below. Use Back to Edit if anything needs changes."
                 : "Fields marked * are required. Payment opens after details validate."}
             </p>
-            <div className="order-form__progress" aria-live="polite">
-              <div className="order-form__progress-row">
-                <strong>
-                  {isPaymentStep
-                    ? "Review complete"
-                    : `${requiredFieldCompleted}/${requiredFieldNames.length} required complete`}
-                </strong>
-                <span>{checkoutReadinessText}</span>
+            {!isPaymentStep ? (
+              <div className="order-form__progress" aria-live="polite">
+                <div className="order-form__progress-row">
+                  <strong>
+                    {requiredFieldCompleted}/{requiredFieldNames.length} required complete
+                  </strong>
+                  <span>{checkoutReadinessText}</span>
+                </div>
+                <div className="order-form__progress-track" aria-hidden="true">
+                  <span style={{ width: `${completionProgress}%` }}></span>
+                </div>
               </div>
-              <div className="order-form__progress-track" aria-hidden="true">
-                <span style={{ width: `${isPaymentStep ? 100 : completionProgress}%` }}></span>
-              </div>
-            </div>
+            ) : null}
 
             {!isPaymentStep ? (
               <>
@@ -1122,29 +1122,6 @@ export default function Storefront({ products, inventory = {} }) {
             ) : (
               <>
                 <div className="checkout-review">
-                  <details className="checkout-dropdown" open>
-                    <summary>
-                      <span>Items in your order</span>
-                      <strong>{cartCountLabel}</strong>
-                    </summary>
-                    <div className="checkout-dropdown__content">
-                      <ul className="checkout-review__items">
-                        {cartItems.map((item) => (
-                          <li key={`review-item-${item.sku}`}>
-                            <span>{item.name}</span>
-                            <span>
-                              x{item.quantity} | {formatCurrency(item.lineTotal)}
-                            </span>
-                          </li>
-                        ))}
-                      </ul>
-                      <div className="checkout-review__totals">
-                        <span>Subtotal</span>
-                        <strong>{formatCurrency(subtotal)}</strong>
-                      </div>
-                    </div>
-                  </details>
-
                   <details className="checkout-dropdown" open>
                     <summary>
                       <span>Customer details</span>
