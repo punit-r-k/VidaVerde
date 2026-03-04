@@ -1277,6 +1277,10 @@ select:focus {
   word-break: break-word;
 }
 
+.checkout-review__value-line {
+  display: block;
+}
+
 .cart-drawer-toggle {
   display: none;
 }

@@ -632,6 +632,24 @@ export default function Storefront({ products, inventory = {} }) {
     return text || fallback;
   };
 
+  const shippingAddressLines = useMemo(() => {
+    const lineOne = [formValues.address1, formValues.address2]
+      .map((value) => String(value || "").trim())
+      .filter(Boolean)
+      .join(", ");
+    const lineTwo = [
+      String(formValues.city || "").trim(),
+      [String(formValues.state || "").trim(), String(formValues.postalCode || "").trim()]
+        .filter(Boolean)
+        .join(" ")
+    ]
+      .filter(Boolean)
+      .join(", ");
+
+    const lines = [lineOne, lineTwo].filter(Boolean);
+    return lines.length > 0 ? lines : ["Not provided"];
+  }, [formValues.address1, formValues.address2, formValues.city, formValues.postalCode, formValues.state]);
+
   const reviewFields = [
     { label: "Name", value: summarizeValue(formValues.name) },
     { label: "Email", value: summarizeValue(formValues.email) },
@@ -645,18 +663,8 @@ export default function Storefront({ products, inventory = {} }) {
     ...(fulfillment === "ship"
       ? [
           {
-            label: "Address line 1",
-            value: summarizeValue(formValues.address1)
-          },
-          {
-            label: "Address line 2",
-            value: summarizeValue(formValues.address2)
-          },
-          { label: "City", value: summarizeValue(formValues.city) },
-          { label: "State", value: summarizeValue(formValues.state) },
-          {
-            label: "Postal code",
-            value: summarizeValue(formValues.postalCode)
+            label: "Address",
+            value: shippingAddressLines
           }
         ]
       : []),
@@ -1109,7 +1117,15 @@ export default function Storefront({ products, inventory = {} }) {
                         {reviewFields.map((field) => (
                           <div key={`review-field-${field.label}`}>
                             <dt>{field.label}</dt>
-                            <dd>{field.value}</dd>
+                            <dd>
+                              {Array.isArray(field.value)
+                                ? field.value.map((line, index) => (
+                                    <span key={`${field.label}-${index}`} className="checkout-review__value-line">
+                                      {line}
+                                    </span>
+                                  ))
+                                : field.value}
+                            </dd>
                           </div>
                         ))}
                       </dl>
