@@ -60,11 +60,14 @@ const splitDescription = (description) => {
   };
 };
 
-function StripePaymentForm({ onPaymentState }) {
+function StripePaymentForm({ onPaymentState, grossTotalCents }) {
   const stripe = useStripe();
   const elements = useElements();
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [paymentError, setPaymentError] = useState("");
+  const payNowLabel = Number.isFinite(Number(grossTotalCents)) && Number(grossTotalCents) > 0
+    ? `Pay Now | ${formatCurrency(grossTotalCents)}`
+    : "Pay Now";
 
   const handleStripeSubmit = async () => {
     if (!stripe || !elements) {
@@ -140,7 +143,7 @@ function StripePaymentForm({ onPaymentState }) {
         disabled={isSubmitting || !stripe || !elements}
         aria-busy={isSubmitting}
       >
-        {isSubmitting ? "Processing..." : "Pay Now"}
+        {isSubmitting ? "Processing..." : payNowLabel}
       </button>
     </div>
   );
@@ -919,10 +922,10 @@ export default function Storefront({ products, inventory = {} }) {
                       type="tel"
                       name="phone"
                       value={formValues.phone}
-                      placeholder="Optional"
+                      placeholder="+1 (555) 123-4567"
                       autoComplete="tel"
                       inputMode="tel"
-                      maxLength={14}
+                      maxLength={24}
                       onChange={handleFieldChange}
                       onBlur={handleFieldBlur}
                       aria-invalid={hasFieldError("phone")}
@@ -1131,7 +1134,10 @@ export default function Storefront({ products, inventory = {} }) {
                         clientSecret: paymentClientSecret
                       }}
                     >
-                      <StripePaymentForm onPaymentState={handlePaymentState} />
+                      <StripePaymentForm
+                        onPaymentState={handlePaymentState}
+                        grossTotalCents={subtotal}
+                      />
                     </Elements>
                   ) : (
                     <div className="form__status form__status--error" role="status" aria-live="polite">
