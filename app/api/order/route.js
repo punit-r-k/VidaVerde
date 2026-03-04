@@ -1,4 +1,4 @@
-import { NextResponse } from "next/server";
+﻿import { NextResponse } from "next/server";
 import { getProductMap } from "@/lib/products";
 import { rateLimit } from "@/lib/rateLimit";
 import {
@@ -92,8 +92,6 @@ export async function POST(request) {
 
       return {
         sku: item.sku,
-        name: product.name,
-        image: product.image_url || "",
         quantity: item.quantity,
         unitAmount
       };
@@ -119,6 +117,18 @@ export async function POST(request) {
     );
   }
 
+  const subtotal = lineItems.reduce(
+    (sum, item) => sum + item.quantity * item.unitAmount,
+    0
+  );
+
+  if (!Number.isFinite(subtotal) || subtotal <= 0) {
+    return NextResponse.json(
+      { error: "Invalid order total." },
+      { status: 400 }
+    );
+  }
+
   const itemsPayload = normalizedItems.map((item) => {
     const product = productMap.get(item.sku);
 
@@ -141,65 +151,74 @@ export async function POST(request) {
     postal_code: asMetadataValue(customer.postalCode, 32),
     note: asMetadataValue(customer.note, 500)
   };
+
   const serializedItems = JSON.stringify(itemsPayload);
-  if (serializedItems.length <= 500) {
-    metadata.items = serializedItems;
+  if (serializedItems.length > 500) {
+    return NextResponse.json(
+      { error: "Cart is too large to process online. Please split into multiple orders." },
+      { status: 400 }
+    );
   }
+  metadata.items = serializedItems;
 
   try {
-    const stripeLineItems = lineItems.map((item) => ({
-      quantity: item.quantity,
-      price_data: {
-        currency: "usd",
-        unit_amount: item.unitAmount,
-        product_data: {
-          name: item.name,
-          images: item.image ? [item.image] : undefined,
-          metadata: { sku: item.sku }
-        }
-      }
-    }));
-
     const stripePayload = {
-      mode: "payment",
-      success_url: `${siteUrl}/?checkout=success`,
-      cancel_url: `${siteUrl}/?checkout=cancel`,
-      customer_email: email,
-      line_items: stripeLineItems,
+      amount: subtotal,
+      currency: "usd",
+      automatic_payment_methods: {
+        enabled: true
+      },
+      receipt_email: email,
       metadata
     };
 
     if (!isPickup) {
-      stripePayload.shipping_address_collection = {
-        allowed_countries: ["US"]
+      stripePayload.shipping = {
+        name: asMetadataValue(name, 120),
+        phone: asMetadataValue(customer.phone, 64) || undefined,
+        address: {
+          line1: asMetadataValue(customer.address1, 120),
+          line2: asMetadataValue(customer.address2, 120) || undefined,
+          city: asMetadataValue(customer.city, 120),
+          state: asMetadataValue(customer.state, 64),
+          postal_code: asMetadataValue(customer.postalCode, 32),
+          country: "US"
+        }
       };
     }
 
-    const { ok, data, error } = await stripeRequest("/v1/checkout/sessions", {
+    const { ok, data, error } = await stripeRequest("/v1/payment_intents", {
       method: "POST",
       body: stripePayload
     });
 
     if (!ok) {
-      console.error("stripe checkout session error:", error);
+      console.error("stripe payment_intent error:", error);
       return NextResponse.json(
-        { error: "Unable to start checkout." },
+        { error: "Unable to start payment." },
         { status: 500 }
       );
     }
 
-    if (!data?.url) {
+    if (!data?.client_secret || !data?.id) {
       return NextResponse.json(
-        { error: "Unable to start checkout." },
+        { error: "Unable to start payment." },
         { status: 500 }
       );
     }
 
-    return NextResponse.json({ url: data.url }, { status: 200 });
-  } catch (error) {
-    console.error("checkout session error:", error);
     return NextResponse.json(
-      { error: "Unable to start checkout." },
+      {
+        clientSecret: data.client_secret,
+        paymentIntentId: data.id,
+        returnUrl: `${siteUrl}/?checkout=success`
+      },
+      { status: 200 }
+    );
+  } catch (error) {
+    console.error("payment_intent create error:", error);
+    return NextResponse.json(
+      { error: "Unable to start payment." },
       { status: 500 }
     );
   }

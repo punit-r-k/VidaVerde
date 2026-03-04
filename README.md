@@ -53,13 +53,16 @@ RPC functions:
 - `apply_restock` (restock delta)
 - `set_expected_restock_date`
 
-## Stripe Checkout
+## Stripe Payments
 
-Checkout sessions are created in `app/api/order/route.js`.
+PaymentIntents are created in `app/api/order/route.js`.
+The storefront renders Stripe Elements on your domain, so card details are collected by Stripe and never stored by this app.
 Stripe webhooks are handled in `app/api/stripe/webhook/route.js`.
+Configure your Stripe webhook endpoint to listen to `payment_intent.succeeded` (and optionally keep `checkout.session.*` only if you still use hosted checkout).
 
 Required environment variables:
 - `STRIPE_SECRET_KEY`
+- `NEXT_PUBLIC_STRIPE_PUBLISHABLE_KEY`
 - `STRIPE_WEBHOOK_SECRET`
 - `SITE_URL`
 

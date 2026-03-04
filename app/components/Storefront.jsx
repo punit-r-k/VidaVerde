@@ -3,6 +3,8 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useSearchParams } from "next/navigation";
 import Image from "next/image";
+import { Elements, PaymentElement, useElements, useStripe } from "@stripe/react-stripe-js";
+import { loadStripe } from "@stripe/stripe-js";
 import {
   FORM_FIELD_ORDER,
   INITIAL_FORM_VALUES,
@@ -23,6 +25,8 @@ const HEALTH_BENEFIT_PATTERN =
   /(live[-\s]?cultures?|active[-\s]?cultures?|fiber(?:-rich)?|digestion|digestive|gut|probiotic|vitamin|antioxidant|health|wellness|immune|nutrient|plant variety)/i;
 const SPICE_PROFILE_PATTERN =
   /(spice|hot|heat|mild|turmeric|cumin|pepper|jalapeno|habanero)/i;
+const STRIPE_PUBLISHABLE_KEY = process.env.NEXT_PUBLIC_STRIPE_PUBLISHABLE_KEY || "";
+const stripePromise = STRIPE_PUBLISHABLE_KEY ? loadStripe(STRIPE_PUBLISHABLE_KEY) : null;
 
 const getSpiceProfile = (profile) => {
   const text = typeof profile === "string" ? profile.trim() : "";
@@ -56,11 +60,99 @@ const splitDescription = (description) => {
   };
 };
 
+function StripePaymentForm({ onPaymentState }) {
+  const stripe = useStripe();
+  const elements = useElements();
+  const [isSubmitting, setIsSubmitting] = useState(false);
+  const [paymentError, setPaymentError] = useState("");
+
+  const handleStripeSubmit = async (event) => {
+    event.preventDefault();
+
+    if (!stripe || !elements) {
+      const message = "Payment form is still loading. Please try again.";
+      setPaymentError(message);
+      onPaymentState({ status: "error", message });
+      return;
+    }
+
+    setIsSubmitting(true);
+    setPaymentError("");
+    onPaymentState({
+      status: "processing",
+      message: "Processing payment securely..."
+    });
+
+    const returnUrl =
+      typeof window !== "undefined"
+        ? `${window.location.origin}/?checkout=success`
+        : undefined;
+
+    const { error, paymentIntent } = await stripe.confirmPayment({
+      elements,
+      confirmParams: returnUrl ? { return_url: returnUrl } : {},
+      redirect: "if_required"
+    });
+
+    if (error) {
+      const message = error.message || "Payment could not be completed.";
+      setPaymentError(message);
+      onPaymentState({ status: "error", message });
+      setIsSubmitting(false);
+      return;
+    }
+
+    const intentStatus = paymentIntent?.status;
+    if (intentStatus === "succeeded") {
+      onPaymentState({
+        status: "success",
+        message: "Payment received. We will email fulfillment details shortly."
+      });
+      setIsSubmitting(false);
+      return;
+    }
+
+    if (intentStatus === "processing" || intentStatus === "requires_capture") {
+      onPaymentState({
+        status: "success",
+        message: "Payment is processing. We will email fulfillment details shortly."
+      });
+      setIsSubmitting(false);
+      return;
+    }
+
+    const message = "Payment was not completed. Please try again.";
+    setPaymentError(message);
+    onPaymentState({ status: "error", message });
+    setIsSubmitting(false);
+  };
+
+  return (
+    <form className="payment-form" onSubmit={handleStripeSubmit}>
+      <PaymentElement options={{ layout: "tabs" }} />
+      {paymentError ? (
+        <div className="form__status form__status--error" role="status" aria-live="polite">
+          {paymentError}
+        </div>
+      ) : null}
+      <button
+        className="button button--dark"
+        type="submit"
+        disabled={isSubmitting || !stripe || !elements}
+        aria-busy={isSubmitting}
+      >
+        {isSubmitting ? "Processing..." : "Pay Now"}
+      </button>
+    </form>
+  );
+}
+
 export default function Storefront({ products, inventory = {} }) {
   const searchParams = useSearchParams();
   const [cart, setCart] = useState({});
   const [status, setStatus] = useState("idle");
   const [notice, setNotice] = useState("");
+  const [paymentClientSecret, setPaymentClientSecret] = useState("");
   const [fulfillment, setFulfillment] = useState("ship");
   const [liveInventory, setLiveInventory] = useState(inventory);
   const [formValues, setFormValues] = useState(INITIAL_FORM_VALUES);
@@ -68,6 +160,20 @@ export default function Storefront({ products, inventory = {} }) {
   const [touchedFields, setTouchedFields] = useState({});
   const [submitAttempted, setSubmitAttempted] = useState(false);
   const fieldRefs = useRef({});
+
+  const resetPaymentState = useCallback(() => {
+    setPaymentClientSecret("");
+  }, []);
+
+  const resetCheckoutAfterSuccess = useCallback(() => {
+    setCart({});
+    setFulfillment("ship");
+    setFormValues(INITIAL_FORM_VALUES);
+    setFieldErrors({});
+    setTouchedFields({});
+    setSubmitAttempted(false);
+    setPaymentClientSecret("");
+  }, []);
 
   const setFieldRef = useCallback((name) => {
     return (node) => {
@@ -162,23 +268,22 @@ export default function Storefront({ products, inventory = {} }) {
     if (checkoutStatus === "success") {
       setStatus("success");
       setNotice("Payment received. We will email fulfillment details shortly.");
-      setCart({});
-      setFulfillment("ship");
-      setFormValues(INITIAL_FORM_VALUES);
-      setFieldErrors({});
-      setTouchedFields({});
-      setSubmitAttempted(false);
+      resetCheckoutAfterSuccess();
     } else if (checkoutStatus === "cancel") {
       setStatus("error");
-      setNotice("Checkout canceled. Your cart is still saved below.");
+      setNotice("Payment canceled. Your cart is still saved below.");
+      resetPaymentState();
     }
 
     if (typeof window !== "undefined") {
       const url = new URL(window.location.href);
       url.searchParams.delete("checkout");
+      url.searchParams.delete("payment_intent");
+      url.searchParams.delete("payment_intent_client_secret");
+      url.searchParams.delete("redirect_status");
       window.history.replaceState({}, "", url.toString());
     }
-  }, [searchParams]);
+  }, [resetCheckoutAfterSuccess, resetPaymentState, searchParams]);
 
   const shouldDisplayStock = useMemo(() => {
     const records = Object.values(liveInventory || {});
@@ -217,7 +322,6 @@ export default function Storefront({ products, inventory = {} }) {
 
   const itemCount = cartItems.reduce((sum, item) => sum + item.quantity, 0);
   const subtotal = cartItems.reduce((sum, item) => sum + item.lineTotal, 0);
-  const hasPreorder = cartItems.some((item) => item.preorderUnits > 0);
   const requiresAddress = fulfillment === "ship";
   const cartCountLabel = `${itemCount} item${itemCount === 1 ? "" : "s"}`;
   const requiredFieldNames = requiresAddress
@@ -245,6 +349,7 @@ export default function Storefront({ products, inventory = {} }) {
   }, []);
 
   const handleAdd = (product) => {
+    resetPaymentState();
     setCart((prev) => {
       const currentQty = prev[product.sku] || 0;
       return {
@@ -255,6 +360,7 @@ export default function Storefront({ products, inventory = {} }) {
   };
 
   const handleClearCart = () => {
+    resetPaymentState();
     setCart({});
 
     if (status !== "idle") {
@@ -264,6 +370,7 @@ export default function Storefront({ products, inventory = {} }) {
   };
 
   const handleQuantityChange = (sku, nextQty) => {
+    resetPaymentState();
     setCart((prev) => {
       if (nextQty <= 0) {
         const { [sku]: _, ...rest } = prev;
@@ -286,6 +393,7 @@ export default function Storefront({ products, inventory = {} }) {
     };
 
     setFormValues(nextValues);
+    resetPaymentState();
 
     if (status !== "idle") {
       setStatus("idle");
@@ -320,6 +428,7 @@ export default function Storefront({ products, inventory = {} }) {
 
   const handleFulfillmentChange = (event) => {
     const nextFulfillment = normalizeFulfillment(event.target.value);
+    resetPaymentState();
     setFulfillment(nextFulfillment);
 
     if (status !== "idle") {
@@ -329,6 +438,27 @@ export default function Storefront({ products, inventory = {} }) {
 
     setFieldErrors(validateCheckoutForm(formValues, nextFulfillment));
   };
+
+  const handlePaymentState = useCallback(
+    ({ status: nextStatus, message }) => {
+      if (nextStatus === "processing") {
+        setStatus("submitting");
+        setNotice(message || "Processing payment securely...");
+        return;
+      }
+
+      if (nextStatus === "success") {
+        setStatus("success");
+        setNotice(message || "Payment received. We will email fulfillment details shortly.");
+        resetCheckoutAfterSuccess();
+        return;
+      }
+
+      setStatus("error");
+      setNotice(message || "Payment could not be completed.");
+    },
+    [resetCheckoutAfterSuccess]
+  );
 
   const handleSubmit = async (event) => {
     event.preventDefault();
@@ -352,8 +482,14 @@ export default function Storefront({ products, inventory = {} }) {
       return;
     }
 
+    if (paymentClientSecret) {
+      setStatus("idle");
+      setNotice("Enter your payment details below to complete payment.");
+      return;
+    }
+
     setStatus("submitting");
-    setNotice("Looks good. Redirecting to secure checkout...");
+    setNotice("Looks good. Preparing secure payment...");
 
     const payload = {
       fulfillment: normalizeFulfillment(fulfillment),
@@ -389,16 +525,19 @@ export default function Storefront({ products, inventory = {} }) {
           setFieldErrors((prev) => ({ ...prev, ...result.fieldErrors }));
           focusFirstInvalidField(result.fieldErrors, fulfillment);
         }
-        throw new Error(result.error || "Unable to start checkout.");
+        throw new Error(result.error || "Unable to start payment.");
       }
 
-      if (result?.url) {
-        window.location.assign(result.url);
+      if (result?.clientSecret) {
+        setPaymentClientSecret(result.clientSecret);
+        setStatus("idle");
+        setNotice("Enter your payment details below to complete payment.");
         return;
       }
 
-      throw new Error("Checkout session did not return a URL.");
+      throw new Error("Payment session did not return a client secret.");
     } catch (error) {
+      setPaymentClientSecret("");
       setStatus("error");
       setNotice(error?.message || "Something went wrong.");
     }
@@ -657,7 +796,7 @@ export default function Storefront({ products, inventory = {} }) {
               Preorders apply when demand exceeds current batch availability.
             </p>
             <p className="order-form__assist">
-              Fields marked * are required. Checkout opens after details validate.
+              Fields marked * are required. Payment opens after details validate.
             </p>
             <div className="order-form__progress" aria-live="polite">
               <div className="order-form__progress-row">
@@ -893,12 +1032,36 @@ export default function Storefront({ products, inventory = {} }) {
               disabled={status === "submitting"}
               aria-busy={status === "submitting"}
             >
-              {status === "submitting"
-                ? "Redirecting..."
-                : hasPreorder
-                  ? "Place Preorder"
-                  : "Place Order"}
+              {status === "submitting" ? "Preparing Payment..." : "Proceed to Payment"}
             </button>
+
+            {paymentClientSecret ? (
+              <div className="payment-panel">
+                <h4>Secure Payment</h4>
+                <p>
+                  Card details are entered in Stripe secure fields and never stored on our
+                  servers.
+                </p>
+                {stripePromise ? (
+                  <Elements
+                    stripe={stripePromise}
+                    options={{
+                      clientSecret: paymentClientSecret
+                    }}
+                  >
+                    <StripePaymentForm
+                      onPaymentState={handlePaymentState}
+                    />
+                  </Elements>
+                ) : (
+                  <div className="form__status form__status--error" role="status" aria-live="polite">
+                    Stripe publishable key is missing. Set
+                    {" "}
+                    NEXT_PUBLIC_STRIPE_PUBLISHABLE_KEY.
+                  </div>
+                )}
+              </div>
+            ) : null}
           </form>
         </aside>
       </div>
