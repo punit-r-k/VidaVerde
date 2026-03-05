@@ -609,10 +609,12 @@ function formatShipmentItems_(shipment) {
   const items = Array.isArray(shipment?.items_json) ? shipment.items_json : [];
   const fallbackSummary = items
     .map((item) => {
+      const name = String(item?.name || "").trim();
       const sku = normalizeSku_(item?.sku);
+      const label = name || sku;
       const quantity = Number(item?.quantity || 0);
-      if (!sku || quantity <= 0) return "";
-      return `${sku} x${quantity}`;
+      if (!label || quantity <= 0) return "";
+      return `${label} x${quantity}`;
     })
     .filter(Boolean)
     .join(", ");

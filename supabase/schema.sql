@@ -350,6 +350,7 @@ begin
       jsonb_agg(
         jsonb_build_object(
           'sku', oi.sku,
+          'name', coalesce(p.name, oi.sku),
           'quantity', oi.quantity,
           'price_cents', oi.price_cents,
           'line_total_cents', oi.quantity * oi.price_cents
@@ -360,7 +361,7 @@ begin
     ),
     coalesce(
       string_agg(
-        format('%s x%s', oi.sku, oi.quantity),
+        format('%s x%s', coalesce(p.name, oi.sku), oi.quantity),
         ', '
         order by oi.created_at, oi.id
       ),
@@ -369,6 +370,7 @@ begin
     coalesce(sum(oi.quantity), 0)
     into v_items_json, v_items_summary, v_item_count
     from order_items oi
+    left join products p on p.sku = oi.sku
     where oi.order_id = v_order.id;
 
   insert into shipments (
