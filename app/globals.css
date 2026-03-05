@@ -1156,21 +1156,28 @@ img {
 
 .preorder-acknowledgement {
   display: flex;
-  align-items: flex-start;
+  align-items: center;
   gap: 10px;
   font-size: 0.8rem;
   line-height: 1.45;
   color: var(--green-900);
 }
 
+.preorder-acknowledgement__notice {
+  margin: 0;
+  font-size: 0.78rem;
+  line-height: 1.45;
+  color: var(--green-900);
+}
+
 .preorder-acknowledgement input[type="checkbox"] {
-  margin-top: 1px;
+  margin-top: 0;
   width: 22px;
   height: 22px;
   flex: 0 0 22px;
   appearance: none;
   border: 1.5px solid rgba(41, 54, 47, 0.45);
-  border-radius: 6px;
+  border-radius: 3px;
   background: var(--surface-elevated);
   cursor: pointer;
   transition: border-color 0.2s ease, background-color 0.2s ease, box-shadow 0.2s ease;

@@ -25,6 +25,7 @@ const formatCurrency = (amountInCents) => {
 const INVENTORY_POLL_MS = 30000;
 const PREORDER_TIMING_NOTICE =
   "Pre-orders are not guaranteed to be filled for the next Fulshear Farmers Market. Kraut can take up to 15 days to be ready. It may be ready sooner, but that is not guaranteed.";
+const PREORDER_ACKNOWLEDGEMENT_LABEL = "Accept preorder terms & conditions.";
 const HEALTH_BENEFIT_PATTERN =
   /(live[-\s]?cultures?|active[-\s]?cultures?|fiber(?:-rich)?|digestion|digestive|gut|probiotic|vitamin|antioxidant|health|wellness|immune|nutrient|plant variety)/i;
 const SPICE_PROFILE_PATTERN =
@@ -1371,8 +1372,9 @@ export default function Storefront({ products, inventory = {} }) {
                         }
                         required
                       />
-                      <span>{PREORDER_TIMING_NOTICE}</span>
+                      <span>{PREORDER_ACKNOWLEDGEMENT_LABEL}</span>
                     </label>
+                    <p className="preorder-acknowledgement__notice">{PREORDER_TIMING_NOTICE}</p>
                     {preorderAcknowledgementError ? (
                       <span
                         id="preorder-acknowledgement-error"
@@ -1449,7 +1451,7 @@ export default function Storefront({ products, inventory = {} }) {
                         }
                         required
                       />
-                      <span>I acknowledge the preorder timing above.</span>
+                      <span>{PREORDER_ACKNOWLEDGEMENT_LABEL}</span>
                     </label>
                     {preorderAcknowledgementError ? (
                       <span

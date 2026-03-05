@@ -46,10 +46,7 @@ function onOpen() {
 
   SpreadsheetApp.getUi()
     .createMenu("Vida Verde")
-    .addItem("Sync Inventory", "syncInventory")
-    .addItem("Sync Weekly Prep", "syncWeeklyPrep")
-    .addItem("Sync Orders", "syncOrders")
-    .addItem("Sync Shipments", "syncShipments")
+    .addItem("Master Sync", "masterSync")
     .addItem("Setup Edit Trigger", "setupEditTrigger")
     .addToUi();
 }
@@ -116,6 +113,38 @@ function setupEditTrigger() {
     .create();
 
   SpreadsheetApp.getUi().alert("Installable edit trigger reset.");
+}
+
+function masterSync() {
+  const ui = SpreadsheetApp.getUi();
+  const steps = [
+    { name: "Inventory", run: syncInventory },
+    { name: "Weekly Prep", run: syncWeeklyPrep },
+    { name: "Orders", run: syncOrders },
+    { name: "Shipments", run: syncShipments }
+  ];
+  const failed = [];
+
+  for (const step of steps) {
+    try {
+      step.run();
+    } catch (error) {
+      const message = error && error.message ? error.message : String(error);
+      failed.push(`${step.name}: ${message}`);
+      Logger.log("Master sync failed for %s: %s", step.name, message);
+    }
+  }
+
+  if (failed.length > 0) {
+    ui.alert(`Master sync completed with errors:\n\n${failed.join("\n")}`);
+    return;
+  }
+
+  SpreadsheetApp.getActive().toast(
+    "Inventory, prep, orders, and shipments synced.",
+    "Vida Verde",
+    5
+  );
 }
 
 function syncInventory() {
