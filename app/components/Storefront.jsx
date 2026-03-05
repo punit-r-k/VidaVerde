@@ -3,7 +3,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useSearchParams } from "next/navigation";
 import Image from "next/image";
-import { Elements, PaymentElement, useElements, useStripe } from "@stripe/react-stripe-js";
+import { CardElement, Elements, useElements, useStripe } from "@stripe/react-stripe-js";
 import { loadStripe } from "@stripe/stripe-js";
 import {
   FORM_FIELD_ORDER,
@@ -62,7 +62,7 @@ const splitDescription = (description) => {
   };
 };
 
-function StripePaymentForm({ onPaymentState, grossTotalCents }) {
+function StripePaymentForm({ onPaymentState, grossTotalCents, billingDetails, createPaymentIntent }) {
   const stripe = useStripe();
   const elements = useElements();
   const [isSubmitting, setIsSubmitting] = useState(false);
@@ -71,9 +71,22 @@ function StripePaymentForm({ onPaymentState, grossTotalCents }) {
     ? `Pay Now | ${formatCurrency(grossTotalCents)}`
     : "Pay Now";
 
+  const toOptional = (value) => {
+    const text = String(value || "").trim();
+    return text || undefined;
+  };
+
   const handleStripeSubmit = async () => {
     if (!stripe || !elements) {
       const message = "Payment form is still loading. Please try again.";
+      setPaymentError(message);
+      onPaymentState({ status: "error", message });
+      return;
+    }
+
+    const cardElement = elements.getElement(CardElement);
+    if (!cardElement) {
+      const message = "Card input is not ready yet. Please try again.";
       setPaymentError(message);
       onPaymentState({ status: "error", message });
       return;
@@ -86,15 +99,45 @@ function StripePaymentForm({ onPaymentState, grossTotalCents }) {
       message: "Processing payment securely..."
     });
 
-    const returnUrl =
-      typeof window !== "undefined"
-        ? `${window.location.origin}/?checkout=success`
-        : undefined;
+    const { error: paymentMethodError, paymentMethod } = await stripe.createPaymentMethod({
+      type: "card",
+      card: cardElement,
+      billing_details: {
+        name: toOptional(billingDetails?.name),
+        email: toOptional(billingDetails?.email),
+        phone: toOptional(billingDetails?.phone),
+        address: {
+          line1: toOptional(billingDetails?.address1),
+          line2: toOptional(billingDetails?.address2),
+          city: toOptional(billingDetails?.city),
+          state: toOptional(billingDetails?.state),
+          postal_code: toOptional(billingDetails?.postalCode),
+          country: "US"
+        }
+      }
+    });
 
-    const { error, paymentIntent } = await stripe.confirmPayment({
-      elements,
-      confirmParams: returnUrl ? { return_url: returnUrl } : {},
-      redirect: "if_required"
+    if (paymentMethodError || !paymentMethod?.id) {
+      const message = paymentMethodError?.message || "Enter valid card details to continue.";
+      setPaymentError(message);
+      onPaymentState({ status: "error", message });
+      setIsSubmitting(false);
+      return;
+    }
+
+    let clientSecret;
+    try {
+      clientSecret = await createPaymentIntent();
+    } catch (error) {
+      const message = error?.message || "Unable to initialize payment.";
+      setPaymentError(message);
+      onPaymentState({ status: "error", message });
+      setIsSubmitting(false);
+      return;
+    }
+
+    const { error, paymentIntent } = await stripe.confirmCardPayment(clientSecret, {
+      payment_method: paymentMethod.id
     });
 
     if (error) {
@@ -132,7 +175,25 @@ function StripePaymentForm({ onPaymentState, grossTotalCents }) {
 
   return (
     <div className="payment-form">
-      <PaymentElement options={{ layout: "tabs" }} />
+      <div className="card-element-wrap">
+        <CardElement
+          options={{
+            hidePostalCode: true,
+            style: {
+              base: {
+                fontSize: "16px",
+                color: "#29362f",
+                "::placeholder": {
+                  color: "rgba(41, 54, 47, 0.54)"
+                }
+              },
+              invalid: {
+                color: "#a9383c"
+              }
+            }
+          }}
+        />
+      </div>
       {paymentError ? (
         <div className="form__status form__status--error" role="status" aria-live="polite">
           {paymentError}
@@ -156,7 +217,6 @@ export default function Storefront({ products, inventory = {} }) {
   const [cart, setCart] = useState({});
   const [status, setStatus] = useState("idle");
   const [notice, setNotice] = useState("");
-  const [paymentClientSecret, setPaymentClientSecret] = useState("");
   const [checkoutStep, setCheckoutStep] = useState("details");
   const [fulfillment, setFulfillment] = useState("ship");
   const [liveInventory, setLiveInventory] = useState(inventory);
@@ -168,18 +228,13 @@ export default function Storefront({ products, inventory = {} }) {
   const [showOrderSuccessPopup, setShowOrderSuccessPopup] = useState(false);
   const [orderSuccessPopupKey, setOrderSuccessPopupKey] = useState(0);
   const fieldRefs = useRef({});
-  const paymentRefreshRequestRef = useRef(0);
-  const paymentCartSignatureRef = useRef("");
   const addPulseTimeoutsRef = useRef({});
   const orderSuccessPopupTimeoutRef = useRef(null);
   const isPaymentStep = checkoutStep === "payment";
 
   const resetPaymentState = useCallback((options = {}) => {
     const keepPaymentStep = options.keepPaymentStep === true;
-    paymentRefreshRequestRef.current += 1;
-    setPaymentClientSecret("");
     if (!keepPaymentStep) {
-      paymentCartSignatureRef.current = "";
       setCheckoutStep("details");
     }
   }, []);
@@ -191,9 +246,6 @@ export default function Storefront({ products, inventory = {} }) {
     setFieldErrors({});
     setTouchedFields({});
     setSubmitAttempted(false);
-    paymentRefreshRequestRef.current += 1;
-    paymentCartSignatureRef.current = "";
-    setPaymentClientSecret("");
     setCheckoutStep("details");
   }, []);
 
@@ -375,10 +427,6 @@ export default function Storefront({ products, inventory = {} }) {
         };
       });
   }, [cart, products, liveInventory]);
-  const cartSignature = useMemo(
-    () => cartItems.map((item) => `${item.sku}:${item.quantity}`).join("|"),
-    [cartItems]
-  );
 
   const itemCount = cartItems.reduce((sum, item) => sum + item.quantity, 0);
   const subtotal = cartItems.reduce((sum, item) => sum + item.lineTotal, 0);
@@ -441,65 +489,6 @@ export default function Storefront({ products, inventory = {} }) {
     };
   }, [cartItems, formValues, fulfillment]);
 
-  const requestPaymentClientSecret = useCallback(
-    async ({
-      loadingMessage = "Looks good. Preparing secure payment...",
-      includeFieldErrors = false
-    } = {}) => {
-      const requestId = paymentRefreshRequestRef.current + 1;
-      paymentRefreshRequestRef.current = requestId;
-
-      setStatus("submitting");
-      setNotice(loadingMessage);
-
-      try {
-        const response = await fetch("/api/order", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify(buildOrderPayload())
-        });
-
-        const result = await response.json();
-
-        if (paymentRefreshRequestRef.current !== requestId) {
-          return { ok: false, stale: true };
-        }
-
-        if (!response.ok) {
-          if (
-            includeFieldErrors &&
-            result?.fieldErrors &&
-            typeof result.fieldErrors === "object"
-          ) {
-            setFieldErrors((prev) => ({ ...prev, ...result.fieldErrors }));
-            focusFirstInvalidField(result.fieldErrors, fulfillment);
-          }
-          throw new Error(result.error || "Unable to start payment.");
-        }
-
-        if (!result?.clientSecret) {
-          throw new Error("Payment session did not return a client secret.");
-        }
-
-        paymentCartSignatureRef.current = cartSignature;
-        setPaymentClientSecret(result.clientSecret);
-        setStatus("idle");
-        setNotice("");
-        return { ok: true };
-      } catch (error) {
-        if (paymentRefreshRequestRef.current !== requestId) {
-          return { ok: false, stale: true };
-        }
-
-        setPaymentClientSecret("");
-        setStatus("error");
-        setNotice(error?.message || "Something went wrong.");
-        return { ok: false, error };
-      }
-    },
-    [buildOrderPayload, cartSignature, focusFirstInvalidField, fulfillment]
-  );
-
   const handleAdd = (product) => {
     const existingTimeoutId = addPulseTimeoutsRef.current[product.sku];
     if (existingTimeoutId) {
@@ -521,8 +510,10 @@ export default function Storefront({ products, inventory = {} }) {
 
     if (isPaymentStep) {
       resetPaymentState({ keepPaymentStep: true });
-      setStatus("submitting");
-      setNotice("Item added. Updating payment total...");
+      if (status !== "idle") {
+        setStatus("idle");
+        setNotice("");
+      }
     } else {
       resetPaymentState();
     }
@@ -559,27 +550,6 @@ export default function Storefront({ products, inventory = {} }) {
       };
     });
   };
-
-  useEffect(() => {
-    if (!isPaymentStep) return;
-    if (itemCount <= 0) {
-      resetPaymentState();
-      setStatus("error");
-      setNotice("Your cart is empty. Add jars to continue.");
-      return;
-    }
-    if (cartSignature === paymentCartSignatureRef.current) return;
-
-    requestPaymentClientSecret({
-      loadingMessage: "Cart updated. Updating payment total..."
-    });
-  }, [
-    cartSignature,
-    isPaymentStep,
-    itemCount,
-    requestPaymentClientSecret,
-    resetPaymentState
-  ]);
 
   const handleFieldChange = (event) => {
     const { name, value } = event.currentTarget;
@@ -642,6 +612,30 @@ export default function Storefront({ products, inventory = {} }) {
     setNotice("Review your details, then proceed to payment again.");
   }, [resetPaymentState]);
 
+  const createPaymentIntent = useCallback(async () => {
+    const response = await fetch("/api/order", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(buildOrderPayload())
+    });
+
+    const result = await response.json();
+
+    if (!response.ok) {
+      if (result?.fieldErrors && typeof result.fieldErrors === "object") {
+        setFieldErrors((prev) => ({ ...prev, ...result.fieldErrors }));
+        focusFirstInvalidField(result.fieldErrors, fulfillment);
+      }
+      throw new Error(result?.error || "Unable to start payment.");
+    }
+
+    if (!result?.clientSecret) {
+      throw new Error("Payment session did not return a client secret.");
+    }
+
+    return result.clientSecret;
+  }, [buildOrderPayload, focusFirstInvalidField, fulfillment]);
+
   const handlePaymentState = useCallback(
     ({ status: nextStatus, message }) => {
       if (nextStatus === "processing") {
@@ -664,7 +658,7 @@ export default function Storefront({ products, inventory = {} }) {
     [resetCheckoutAfterSuccess, triggerOrderSuccessPopup]
   );
 
-  const handleSubmit = async (event) => {
+  const handleSubmit = (event) => {
     event.preventDefault();
 
     if (status === "submitting") return;
@@ -686,20 +680,9 @@ export default function Storefront({ products, inventory = {} }) {
       return;
     }
 
-    if (paymentClientSecret) {
-      setCheckoutStep("payment");
-      setStatus("idle");
-      setNotice("");
-      return;
-    }
-
-    const result = await requestPaymentClientSecret({
-      loadingMessage: "Looks good. Preparing secure payment...",
-      includeFieldErrors: true
-    });
-    if (result?.ok) {
-      setCheckoutStep("payment");
-    }
+    setCheckoutStep("payment");
+    setStatus("idle");
+    setNotice("");
   };
 
   const renderCartDetails = (keyPrefix, { allowQuantityEdit = true } = {}) => (
@@ -1360,23 +1343,23 @@ export default function Storefront({ products, inventory = {} }) {
                     servers.
                   </p>
                   {stripePromise ? (
-                    paymentClientSecret ? (
-                      <Elements
-                        stripe={stripePromise}
-                        options={{
-                          clientSecret: paymentClientSecret
+                    <Elements stripe={stripePromise}>
+                      <StripePaymentForm
+                        onPaymentState={handlePaymentState}
+                        grossTotalCents={subtotal}
+                        createPaymentIntent={createPaymentIntent}
+                        billingDetails={{
+                          name: formValues.name,
+                          email: formValues.email,
+                          phone: formValues.phone,
+                          address1: formValues.address1,
+                          address2: formValues.address2,
+                          city: formValues.city,
+                          state: formValues.state,
+                          postalCode: formValues.postalCode
                         }}
-                      >
-                        <StripePaymentForm
-                          onPaymentState={handlePaymentState}
-                          grossTotalCents={subtotal}
-                        />
-                      </Elements>
-                    ) : (
-                      <div className="form__status" role="status" aria-live="polite">
-                        Updating secure payment details...
-                      </div>
-                    )
+                      />
+                    </Elements>
                   ) : (
                     <div className="form__status form__status--error" role="status" aria-live="polite">
                       Stripe publishable key is missing. Set

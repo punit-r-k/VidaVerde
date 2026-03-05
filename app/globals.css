@@ -1298,6 +1298,20 @@ select:focus {
   gap: 12px;
 }
 
+.card-element-wrap {
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  background: var(--surface-elevated);
+  padding: 12px 14px;
+  min-height: 46px;
+  display: flex;
+  align-items: center;
+}
+
+.card-element-wrap .StripeElement {
+  width: 100%;
+}
+
 .checkout-review {
   display: grid;
   gap: 10px;
