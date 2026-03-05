@@ -165,10 +165,13 @@ export default function Storefront({ products, inventory = {} }) {
   const [touchedFields, setTouchedFields] = useState({});
   const [submitAttempted, setSubmitAttempted] = useState(false);
   const [addPulse, setAddPulse] = useState({});
+  const [showOrderSuccessPopup, setShowOrderSuccessPopup] = useState(false);
+  const [orderSuccessPopupKey, setOrderSuccessPopupKey] = useState(0);
   const fieldRefs = useRef({});
   const paymentRefreshRequestRef = useRef(0);
   const paymentCartSignatureRef = useRef("");
   const addPulseTimeoutsRef = useRef({});
+  const orderSuccessPopupTimeoutRef = useRef(null);
   const isPaymentStep = checkoutStep === "payment";
 
   const resetPaymentState = useCallback((options = {}) => {
@@ -192,6 +195,20 @@ export default function Storefront({ products, inventory = {} }) {
     paymentCartSignatureRef.current = "";
     setPaymentClientSecret("");
     setCheckoutStep("details");
+  }, []);
+
+  const triggerOrderSuccessPopup = useCallback(() => {
+    setOrderSuccessPopupKey((prev) => prev + 1);
+    setShowOrderSuccessPopup(true);
+
+    if (orderSuccessPopupTimeoutRef.current) {
+      clearTimeout(orderSuccessPopupTimeoutRef.current);
+    }
+
+    orderSuccessPopupTimeoutRef.current = setTimeout(() => {
+      setShowOrderSuccessPopup(false);
+      orderSuccessPopupTimeoutRef.current = null;
+    }, 3800);
   }, []);
 
   const setFieldRef = useCallback((name) => {
@@ -285,6 +302,11 @@ export default function Storefront({ products, inventory = {} }) {
         clearTimeout(timeoutId);
       });
       addPulseTimeoutsRef.current = {};
+
+      if (orderSuccessPopupTimeoutRef.current) {
+        clearTimeout(orderSuccessPopupTimeoutRef.current);
+        orderSuccessPopupTimeoutRef.current = null;
+      }
     };
   }, []);
 
@@ -296,6 +318,7 @@ export default function Storefront({ products, inventory = {} }) {
     if (checkoutStatus === "success") {
       setStatus("success");
       setNotice("Payment received. We will email fulfillment details shortly.");
+      triggerOrderSuccessPopup();
       resetCheckoutAfterSuccess();
     } else if (checkoutStatus === "cancel") {
       setStatus("error");
@@ -311,7 +334,12 @@ export default function Storefront({ products, inventory = {} }) {
       url.searchParams.delete("redirect_status");
       window.history.replaceState({}, "", url.toString());
     }
-  }, [resetCheckoutAfterSuccess, resetPaymentState, searchParams]);
+  }, [
+    resetCheckoutAfterSuccess,
+    resetPaymentState,
+    searchParams,
+    triggerOrderSuccessPopup
+  ]);
 
   const shouldDisplayStock = useMemo(() => {
     const records = Object.values(liveInventory || {});
@@ -625,6 +653,7 @@ export default function Storefront({ products, inventory = {} }) {
       if (nextStatus === "success") {
         setStatus("success");
         setNotice(message || "Payment received. We will email fulfillment details shortly.");
+        triggerOrderSuccessPopup();
         resetCheckoutAfterSuccess();
         return;
       }
@@ -632,7 +661,7 @@ export default function Storefront({ products, inventory = {} }) {
       setStatus("error");
       setNotice(message || "Payment could not be completed.");
     },
-    [resetCheckoutAfterSuccess]
+    [resetCheckoutAfterSuccess, triggerOrderSuccessPopup]
   );
 
   const handleSubmit = async (event) => {
@@ -792,6 +821,26 @@ export default function Storefront({ products, inventory = {} }) {
 
   return (
     <>
+      {showOrderSuccessPopup ? (
+        <div className="order-success-overlay" role="status" aria-live="polite">
+          <div key={orderSuccessPopupKey} className="order-success-popup">
+            <div className="order-success-popup__icon" aria-hidden="true">
+              <svg viewBox="0 0 24 24" fill="none" role="presentation">
+                <path
+                  d="M6 12.5l4 4 8-8"
+                  stroke="currentColor"
+                  strokeWidth="2.2"
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                />
+              </svg>
+            </div>
+            <h4>Thank you for your order!</h4>
+            <p>Your payment was received. Confirmation details are on the way.</p>
+          </div>
+        </div>
+      ) : null}
+
       {itemCount > 0 ? (
         <button
           type="button"
