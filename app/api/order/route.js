@@ -13,6 +13,12 @@ const CHECKOUT_MAX = 6;
 const asMetadataValue = (value, maxLength = 500) =>
   String(value || "").trim().slice(0, maxLength);
 
+const buildOrderSummary = (lineItems) =>
+  lineItems.map((item) => `${item.name} x${item.quantity}`).join(", ");
+
+const buildSkuSummary = (lineItems) =>
+  lineItems.map((item) => `${item.sku}x${item.quantity}`).join(", ");
+
 const getClientId = (request) => {
   const forwardedFor = request.headers.get("x-forwarded-for");
   if (forwardedFor) {
@@ -93,7 +99,8 @@ export async function POST(request) {
       return {
         sku: item.sku,
         quantity: item.quantity,
-        unitAmount
+        unitAmount,
+        name: String(product.name || item.sku).trim()
       };
     })
     .filter(Boolean);
@@ -139,6 +146,10 @@ export async function POST(request) {
     };
   });
 
+  const orderSummary = buildOrderSummary(lineItems);
+  const skuSummary = buildSkuSummary(lineItems);
+  const totalUnits = lineItems.reduce((sum, item) => sum + item.quantity, 0);
+
   const metadata = {
     fulfillment: asMetadataValue(normalizedFulfillment, 32),
     customer_name: asMetadataValue(name, 120),
@@ -149,7 +160,10 @@ export async function POST(request) {
     city: asMetadataValue(customer.city, 120),
     state: asMetadataValue(customer.state, 64),
     postal_code: asMetadataValue(customer.postalCode, 32),
-    note: asMetadataValue(customer.note, 500)
+    note: asMetadataValue(customer.note, 500),
+    order_summary: asMetadataValue(orderSummary, 500),
+    order_skus: asMetadataValue(skuSummary, 500),
+    order_item_count: asMetadataValue(totalUnits, 32)
   };
 
   const serializedItems = JSON.stringify(itemsPayload);
@@ -169,6 +183,10 @@ export async function POST(request) {
         enabled: true
       },
       receipt_email: email,
+      description: asMetadataValue(
+        `Vida Verde ${isPickup ? "pickup" : "shipping"} order: ${orderSummary}`,
+        500
+      ),
       metadata
     };
 
