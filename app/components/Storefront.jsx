@@ -23,6 +23,8 @@ const formatCurrency = (amountInCents) => {
 };
 
 const INVENTORY_POLL_MS = 30000;
+const PREORDER_TIMING_NOTICE =
+  "Pre-orders are not guaranteed to be filled for the next Fulshear Farmers Market. Kraut can take up to 15 days to be ready. It may be ready sooner, but that is not guaranteed.";
 const HEALTH_BENEFIT_PATTERN =
   /(live[-\s]?cultures?|active[-\s]?cultures?|fiber(?:-rich)?|digestion|digestive|gut|probiotic|vitamin|antioxidant|health|wellness|immune|nutrient|plant variety)/i;
 const SPICE_PROFILE_PATTERN =
@@ -227,6 +229,8 @@ export default function Storefront({ products, inventory = {} }) {
   const [addPulse, setAddPulse] = useState({});
   const [showOrderSuccessPopup, setShowOrderSuccessPopup] = useState(false);
   const [orderSuccessPopupKey, setOrderSuccessPopupKey] = useState(0);
+  const [preorderAcknowledged, setPreorderAcknowledged] = useState(false);
+  const [preorderTouched, setPreorderTouched] = useState(false);
   const fieldRefs = useRef({});
   const addPulseTimeoutsRef = useRef({});
   const orderSuccessPopupTimeoutRef = useRef(null);
@@ -246,6 +250,8 @@ export default function Storefront({ products, inventory = {} }) {
     setFieldErrors({});
     setTouchedFields({});
     setSubmitAttempted(false);
+    setPreorderAcknowledged(false);
+    setPreorderTouched(false);
     setCheckoutStep("details");
   }, []);
 
@@ -260,7 +266,7 @@ export default function Storefront({ products, inventory = {} }) {
     orderSuccessPopupTimeoutRef.current = setTimeout(() => {
       setShowOrderSuccessPopup(false);
       orderSuccessPopupTimeoutRef.current = null;
-    }, 3800);
+    }, 6500);
   }, []);
 
   const setFieldRef = useCallback((name) => {
@@ -292,6 +298,13 @@ export default function Storefront({ products, inventory = {} }) {
     node.scrollIntoView({ behavior: "smooth", block: "center" });
   }, []);
 
+  const focusPreorderAcknowledgement = useCallback(() => {
+    const node = fieldRefs.current.preorderAcknowledgement;
+    if (!node) return;
+    node.focus();
+    node.scrollIntoView({ behavior: "smooth", block: "center" });
+  }, []);
+
   const getFieldError = useCallback((name) => {
     const hasError = Boolean(fieldErrors[name]);
     const shouldShow = submitAttempted || touchedFields[name];
@@ -299,6 +312,7 @@ export default function Storefront({ products, inventory = {} }) {
   }, [fieldErrors, submitAttempted, touchedFields]);
 
   const hasFieldError = useCallback((name) => Boolean(getFieldError(name)), [getFieldError]);
+  const showGlobalNotice = Boolean(notice) && !(isPaymentStep && status === "error");
 
   const applyInventory = (nextInventory) => {
     if (nextInventory && typeof nextInventory === "object") {
@@ -430,6 +444,11 @@ export default function Storefront({ products, inventory = {} }) {
 
   const itemCount = cartItems.reduce((sum, item) => sum + item.quantity, 0);
   const subtotal = cartItems.reduce((sum, item) => sum + item.lineTotal, 0);
+  const preorderUnitsInCart = cartItems.reduce((sum, item) => sum + item.preorderUnits, 0);
+  const hasPreorderItems = preorderUnitsInCart > 0;
+  const preorderAcknowledgementError = hasPreorderItems &&
+    !preorderAcknowledged &&
+    (submitAttempted || preorderTouched);
   const requiresAddress = fulfillment === "ship";
   const cartCountLabel = `${itemCount} item${itemCount === 1 ? "" : "s"}`;
   const requiredFieldNames = requiresAddress
@@ -460,6 +479,13 @@ export default function Storefront({ products, inventory = {} }) {
     );
     return hasMatch ? US_CITY_OPTIONS : [selectedCity, ...US_CITY_OPTIONS];
   }, [formValues.city]);
+
+  useEffect(() => {
+    if (!hasPreorderItems) {
+      setPreorderAcknowledged(false);
+      setPreorderTouched(false);
+    }
+  }, [hasPreorderItems]);
 
   const handleMobileCheckoutJump = useCallback(() => {
     const cartSummary = document.getElementById("cart-summary");
@@ -529,6 +555,8 @@ export default function Storefront({ products, inventory = {} }) {
   const handleClearCart = () => {
     resetPaymentState();
     setCart({});
+    setPreorderAcknowledged(false);
+    setPreorderTouched(false);
 
     if (status !== "idle") {
       setStatus("idle");
@@ -599,7 +627,22 @@ export default function Storefront({ products, inventory = {} }) {
     setNotice("Review your details, then proceed to payment again.");
   }, [resetPaymentState]);
 
+  const handlePreorderAcknowledgementChange = (event) => {
+    const isChecked = Boolean(event.currentTarget.checked);
+    setPreorderAcknowledged(isChecked);
+    setPreorderTouched(true);
+  };
+
   const createPaymentIntent = useCallback(async () => {
+    if (hasPreorderItems && !preorderAcknowledged) {
+      const message = "Please acknowledge the pre-order notice before payment.";
+      setPreorderTouched(true);
+      setStatus("error");
+      setNotice(message);
+      focusPreorderAcknowledgement();
+      throw new Error(message);
+    }
+
     const response = await fetch("/api/order", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
@@ -621,7 +664,14 @@ export default function Storefront({ products, inventory = {} }) {
     }
 
     return result.clientSecret;
-  }, [buildOrderPayload, focusFirstInvalidField, fulfillment]);
+  }, [
+    buildOrderPayload,
+    focusFirstInvalidField,
+    focusPreorderAcknowledgement,
+    fulfillment,
+    hasPreorderItems,
+    preorderAcknowledged
+  ]);
 
   const handlePaymentState = useCallback(
     ({ status: nextStatus, message }) => {
@@ -664,6 +714,14 @@ export default function Storefront({ products, inventory = {} }) {
       setStatus("error");
       setNotice("Please fix the highlighted fields before checkout.");
       focusFirstInvalidField(nextErrors, fulfillment);
+      return;
+    }
+
+    if (hasPreorderItems && !preorderAcknowledged) {
+      setPreorderTouched(true);
+      setStatus("error");
+      setNotice("Please acknowledge the pre-order notice before proceeding to payment.");
+      focusPreorderAcknowledgement();
       return;
     }
 
@@ -723,6 +781,14 @@ export default function Storefront({ products, inventory = {} }) {
           })}
         </div>
       )}
+
+      {hasPreorderItems ? (
+        <div className="preorder-disclaimer">
+          <strong>Pre-order notice:</strong>
+          {" "}
+          {PREORDER_TIMING_NOTICE}
+        </div>
+      ) : null}
 
       <div className="cart__summary">
         <div>
@@ -868,7 +934,9 @@ export default function Storefront({ products, inventory = {} }) {
 
             const cartQty = cart[product.sku] || 0;
             const isAddPulseActive = Boolean(addPulse[product.sku]);
-            const wouldPreorder = Math.max(0, cartQty + 1 - available) > 0;
+            const cartPreorderUnits = Math.max(0, cartQty - available);
+            const nextPreorderUnits = Math.max(0, cartQty + 1 - available);
+            const wouldPreorder = nextPreorderUnits > 0;
             const orderedSpecs = Array.isArray(product.specs)
               ? [...product.specs].sort((a, b) => {
                 const aIsIngredients = typeof a === "string"
@@ -940,26 +1008,35 @@ export default function Storefront({ products, inventory = {} }) {
                     ) : null}
                   </div>
 
-                  <div className="product-card__footer">
-                    <div>
-                      <div className="price">
-                        <span>{formatCurrency(product.priceCents)}</span>
-                        {Number.isFinite(Number(product.sizeOz)) ? (
-                          <span className="price__size">{`${product.sizeOz}oz`}</span>
-                        ) : null}
+                  <div className="product-card__purchase">
+                    <div className="product-card__footer">
+                      <div>
+                        <div className="price">
+                          <span>{formatCurrency(product.priceCents)}</span>
+                          {Number.isFinite(Number(product.sizeOz)) ? (
+                            <span className="price__size">{`${product.sizeOz}oz`}</span>
+                          ) : null}
+                        </div>
+                      </div>
+
+                      <div className="product-card__actions">
+                        <button
+                          className={`button button--dark${isAddPulseActive ? " button--add-pulse" : ""}`}
+                          type="button"
+                          onClick={() => handleAdd(product)}
+                          aria-label={`Add ${product.name} to cart`}
+                        >
+                          {isOut ? "Preorder" : wouldPreorder ? (
+                            <span className="product-card__button-label-stack">
+                              <span>Add as</span>
+                              <span>Pre-order</span>
+                            </span>
+                          ) : "Add To Cart"}
+                        </button>
                       </div>
                     </div>
-
-                    <div className="product-card__actions">
-                      <button
-                        className={`button button--dark${isAddPulseActive ? " button--add-pulse" : ""}`}
-                        type="button"
-                        onClick={() => handleAdd(product)}
-                        aria-label={`Add ${product.name} to cart`}
-                      >
-                        {isOut || wouldPreorder ? "Preorder" : "Add To Cart"}
-                      </button>
-                      {cartQty > 0 ? (
+                    {cartQty > 0 ? (
+                      <div className="product-card__cart-counter-row">
                         <span
                           className={`product-card__cart-counter${
                             isAddPulseActive ? " product-card__cart-counter--pulse" : ""
@@ -968,9 +1045,16 @@ export default function Storefront({ products, inventory = {} }) {
                           aria-live="polite"
                         >
                           In cart: {cartQty}
+                          {cartPreorderUnits > 0 ? ` (${cartPreorderUnits} preorder)` : ""}
                         </span>
-                      ) : null}
-                    </div>
+                      </div>
+                    ) : null}
+                    {wouldPreorder ? (
+                      <p className="product-card__preorder-note">
+                        Next unit is a pre-order. Not guaranteed for next farmers market; kraut can
+                        take up to 15 days.
+                      </p>
+                    ) : null}
                   </div>
                 </div>
               </article>
@@ -1002,7 +1086,9 @@ export default function Storefront({ products, inventory = {} }) {
           <form id="checkout-form" className="order-form" onSubmit={handleSubmit} noValidate>
             <h3>{isPaymentStep ? "Review & Pay" : "Complete Your Order"}</h3>
             <p>
-              Preorders apply when demand exceeds current batch availability.
+              {hasPreorderItems
+                ? `Pre-order notice: ${PREORDER_TIMING_NOTICE}`
+                : "Preorders apply when demand exceeds current batch availability."}
             </p>
             <p className="order-form__assist">
               {isPaymentStep
@@ -1265,6 +1351,40 @@ export default function Storefront({ products, inventory = {} }) {
                   ></textarea>
                 </label>
 
+                {hasPreorderItems ? (
+                  <div className={`preorder-acknowledgement-wrap${
+                    preorderAcknowledgementError ? " preorder-acknowledgement-wrap--error" : ""
+                  }`}>
+                    <label className="preorder-acknowledgement">
+                      <input
+                        ref={setFieldRef("preorderAcknowledgement")}
+                        type="checkbox"
+                        name="preorderAcknowledgement"
+                        checked={preorderAcknowledged}
+                        onChange={handlePreorderAcknowledgementChange}
+                        onBlur={() => setPreorderTouched(true)}
+                        aria-invalid={preorderAcknowledgementError}
+                        aria-describedby={
+                          preorderAcknowledgementError
+                            ? "preorder-acknowledgement-error"
+                            : undefined
+                        }
+                        required
+                      />
+                      <span>{PREORDER_TIMING_NOTICE}</span>
+                    </label>
+                    {preorderAcknowledgementError ? (
+                      <span
+                        id="preorder-acknowledgement-error"
+                        className="form-field__error"
+                        role="alert"
+                      >
+                        Please check this box to acknowledge preorder timing.
+                      </span>
+                    ) : null}
+                  </div>
+                ) : null}
+
                 <button
                   className="button button--dark"
                   type="submit"
@@ -1302,6 +1422,46 @@ export default function Storefront({ products, inventory = {} }) {
                     </div>
                   </details>
                 </div>
+
+                {hasPreorderItems ? (
+                  <div className="preorder-disclaimer preorder-disclaimer--checkout">
+                    {PREORDER_TIMING_NOTICE}
+                  </div>
+                ) : null}
+
+                {hasPreorderItems ? (
+                  <div className={`preorder-acknowledgement-wrap${
+                    preorderAcknowledgementError ? " preorder-acknowledgement-wrap--error" : ""
+                  }`}>
+                    <label className="preorder-acknowledgement">
+                      <input
+                        ref={setFieldRef("preorderAcknowledgement")}
+                        type="checkbox"
+                        name="preorderAcknowledgement"
+                        checked={preorderAcknowledged}
+                        onChange={handlePreorderAcknowledgementChange}
+                        onBlur={() => setPreorderTouched(true)}
+                        aria-invalid={preorderAcknowledgementError}
+                        aria-describedby={
+                          preorderAcknowledgementError
+                            ? "preorder-acknowledgement-error"
+                            : undefined
+                        }
+                        required
+                      />
+                      <span>I acknowledge the preorder timing above.</span>
+                    </label>
+                    {preorderAcknowledgementError ? (
+                      <span
+                        id="preorder-acknowledgement-error"
+                        className="form-field__error"
+                        role="alert"
+                      >
+                        Please check this box to acknowledge preorder timing.
+                      </span>
+                    ) : null}
+                  </div>
+                ) : null}
 
                 <button className="button button--light" type="button" onClick={handleBackToEdit}>
                   Back to Edit Information
@@ -1342,7 +1502,7 @@ export default function Storefront({ products, inventory = {} }) {
               </>
             )}
 
-            {notice ? (
+            {showGlobalNotice ? (
               <div
                 className={`form__status${
                   status === "error" ? " form__status--error" : ""
