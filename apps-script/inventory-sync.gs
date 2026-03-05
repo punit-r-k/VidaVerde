@@ -1,5 +1,6 @@
 const CONFIG = {
   SHEET_NAME: "Inventory",
+  PREP_SHEET_NAME: "Prepare for this week",
   SETTINGS_SHEET_NAME: "Settings",
   HEADER_ROW: 1,
   START_ROW: 2,
@@ -22,6 +23,11 @@ const CONFIG = {
     SHOW_STOCK_LABEL_COL: 1,
     SHOW_STOCK_VALUE_ROW: 2,
     SHOW_STOCK_VALUE_COL: 2
+  },
+  PREP: {
+    META_ROW: 1,
+    HEADER_ROW: 2,
+    START_ROW: 3
   }
 };
 
@@ -31,6 +37,7 @@ function onOpen() {
   SpreadsheetApp.getUi()
     .createMenu("Vida Verde")
     .addItem("Sync Inventory", "syncInventory")
+    .addItem("Sync Weekly Prep", "syncWeeklyPrep")
     .addItem("Setup Edit Trigger", "setupEditTrigger")
     .addToUi();
 }
@@ -134,6 +141,85 @@ function syncInventory() {
 
     writeRow_(sheet, row, record);
   }
+}
+
+function syncWeeklyPrep() {
+  ensureSettingsSheet_();
+
+  const settings = getSettings_();
+  const response = getJson_(
+    `${settings.apiBaseUrl}/api/admin/prep`,
+    settings.adminSecret
+  );
+
+  const prepRows = Array.isArray(response?.prep) ? response.prep : [];
+  const weekInfo = response?.week || {};
+  const timezone = String(response?.timezone || "America/Chicago");
+
+  const sheet = ensurePrepSheet_();
+  sheet.clearContents();
+
+  const metaValues = [[
+    "Week Start",
+    weekInfo.week_start_date || "",
+    "Week End",
+    weekInfo.week_end_date || "",
+    "Market Date (Saturday)",
+    weekInfo.market_date || "",
+    "Timezone",
+    timezone
+  ]];
+  sheet.getRange(CONFIG.PREP.META_ROW, 1, 1, metaValues[0].length).setValues(metaValues);
+
+  const headerValues = [[
+    "SKU",
+    "Product",
+    "Ship This Week",
+    "Market This Saturday",
+    "Total To Prepare"
+  ]];
+  sheet
+    .getRange(CONFIG.PREP.HEADER_ROW, 1, 1, headerValues[0].length)
+    .setValues(headerValues);
+
+  if (prepRows.length === 0) {
+    sheet
+      .getRange(CONFIG.PREP.START_ROW, 1)
+      .setValue("No paid orders for this week yet.");
+  } else {
+    const rows = prepRows.map((row) => ([
+      normalizeSku_(row?.sku),
+      String(row?.name || ""),
+      Number(row?.shipping_qty || 0),
+      Number(row?.market_qty || 0),
+      Number(row?.total_qty || 0)
+    ]));
+
+    sheet
+      .getRange(CONFIG.PREP.START_ROW, 1, rows.length, rows[0].length)
+      .setValues(rows);
+
+    const shipTotal = rows.reduce((sum, row) => sum + row[2], 0);
+    const marketTotal = rows.reduce((sum, row) => sum + row[3], 0);
+    const totalToPrepare = rows.reduce((sum, row) => sum + row[4], 0);
+    const totalsRow = CONFIG.PREP.START_ROW + rows.length;
+
+    sheet
+      .getRange(totalsRow, 1, 1, 5)
+      .setValues([["TOTAL", "", shipTotal, marketTotal, totalToPrepare]]);
+    sheet
+      .getRange(CONFIG.PREP.START_ROW, 3, rows.length + 1, 3)
+      .setNumberFormat("0");
+  }
+
+  sheet
+    .getRange(CONFIG.PREP.META_ROW, 1, 1, 8)
+    .setFontWeight("bold");
+  sheet
+    .getRange(CONFIG.PREP.HEADER_ROW, 1, 1, 5)
+    .setFontWeight("bold");
+  sheet.setFrozenRows(2);
+  sheet.autoResizeColumns(1, 5);
 }
 
 function handleRestockEdit_(sheet, row) {
@@ -382,6 +468,17 @@ function ensureSettingsSheet_() {
 
   if (toggleCell.getValue() === "") {
     toggleCell.setValue(true);
+  }
+
+  return sheet;
+}
+
+function ensurePrepSheet_() {
+  const book = SpreadsheetApp.getActive();
+  let sheet = book.getSheetByName(CONFIG.PREP_SHEET_NAME);
+
+  if (!sheet) {
+    sheet = book.insertSheet(CONFIG.PREP_SHEET_NAME);
   }
 
   return sheet;
