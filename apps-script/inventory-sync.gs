@@ -1,6 +1,7 @@
 const CONFIG = {
   SHEET_NAME: "Inventory",
   PREP_SHEET_NAME: "Prepare for this week",
+  ORDERS_SHEET_NAME: "Orders",
   SHIPMENTS_SHEET_NAME: "Shipments",
   SETTINGS_SHEET_NAME: "Settings",
   HEADER_ROW: 1,
@@ -30,6 +31,10 @@ const CONFIG = {
     HEADER_ROW: 2,
     START_ROW: 3
   },
+  ORDERS: {
+    HEADER_ROW: 1,
+    START_ROW: 2
+  },
   SHIPMENTS: {
     HEADER_ROW: 1,
     START_ROW: 2
@@ -43,6 +48,7 @@ function onOpen() {
     .createMenu("Vida Verde")
     .addItem("Sync Inventory", "syncInventory")
     .addItem("Sync Weekly Prep", "syncWeeklyPrep")
+    .addItem("Sync Orders", "syncOrders")
     .addItem("Sync Shipments", "syncShipments")
     .addItem("Setup Edit Trigger", "setupEditTrigger")
     .addToUi();
@@ -228,6 +234,93 @@ function syncWeeklyPrep() {
   sheet.autoResizeColumns(1, 5);
 }
 
+function syncOrders() {
+  ensureSettingsSheet_();
+
+  const settings = getSettings_();
+  const response = getJson_(
+    `${settings.apiBaseUrl}/api/admin/orders?status=paid&limit=1000`,
+    settings.adminSecret
+  );
+
+  const orders = Array.isArray(response?.orders) ? response.orders : [];
+  const sheet = ensureOrdersSheet_();
+  sheet.clearContents();
+
+  const headerValues = [[
+    "Created At",
+    "Order ID",
+    "Fulfillment",
+    "Customer",
+    "Email",
+    "Phone",
+    "Address",
+    "Items",
+    "Units",
+    "Subtotal",
+    "Tax",
+    "Shipping",
+    "Total",
+    "Order Note",
+    "Status",
+    "Payment Session"
+  ]];
+  sheet
+    .getRange(CONFIG.ORDERS.HEADER_ROW, 1, 1, headerValues[0].length)
+    .setValues(headerValues);
+
+  if (orders.length === 0) {
+    sheet
+      .getRange(CONFIG.ORDERS.START_ROW, 1)
+      .setValue("No paid orders yet.");
+  } else {
+    const rows = orders.map((order) => {
+      const createdAt = order?.created_at
+        ? new Date(order.created_at)
+        : "";
+
+      return [
+        createdAt,
+        String(order?.id || ""),
+        formatOrderFulfillment_(order?.fulfillment),
+        String(order?.customer_name || ""),
+        String(order?.customer_email || ""),
+        String(order?.customer_phone || ""),
+        formatOrderAddress_(order),
+        formatOrderItems_(order),
+        Number(order?.item_count || 0),
+        Number(order?.amount_subtotal || 0) / 100,
+        Number(order?.amount_tax || 0) / 100,
+        Number(order?.amount_shipping || 0) / 100,
+        Number(order?.amount_total || 0) / 100,
+        String(order?.note || ""),
+        String(order?.status || ""),
+        String(order?.payment_session_id || "")
+      ];
+    });
+
+    sheet
+      .getRange(CONFIG.ORDERS.START_ROW, 1, rows.length, rows[0].length)
+      .setValues(rows);
+
+    sheet
+      .getRange(CONFIG.ORDERS.START_ROW, 1, rows.length, 1)
+      .setNumberFormat("yyyy-mm-dd hh:mm");
+    sheet
+      .getRange(CONFIG.ORDERS.START_ROW, 9, rows.length, 1)
+      .setNumberFormat("0");
+    sheet
+      .getRange(CONFIG.ORDERS.START_ROW, 10, rows.length, 4)
+      .setNumberFormat("$#,##0.00");
+  }
+
+  sheet
+    .getRange(CONFIG.ORDERS.HEADER_ROW, 1, 1, 16)
+    .setFontWeight("bold");
+  sheet.setFrozenRows(1);
+  sheet.autoResizeColumns(1, 16);
+}
+
 function syncShipments() {
   ensureSettingsSheet_();
 
@@ -252,6 +345,7 @@ function syncShipments() {
     "Items",
     "Units",
     "Order Total",
+    "Order Note",
     "Status",
     "Carrier",
     "Service",
@@ -285,6 +379,7 @@ function syncShipments() {
         formatShipmentItems_(shipment),
         Number(shipment?.item_count || 0),
         amountDollars,
+        String(shipment?.notes || ""),
         String(shipment?.status || ""),
         String(shipment?.carrier || ""),
         String(shipment?.service || ""),
@@ -309,10 +404,10 @@ function syncShipments() {
   }
 
   sheet
-    .getRange(CONFIG.SHIPMENTS.HEADER_ROW, 1, 1, 15)
+    .getRange(CONFIG.SHIPMENTS.HEADER_ROW, 1, 1, 16)
     .setFontWeight("bold");
   sheet.setFrozenRows(1);
-  sheet.autoResizeColumns(1, 15);
+  sheet.autoResizeColumns(1, 16);
 }
 
 function handleRestockEdit_(sheet, row) {
@@ -577,6 +672,17 @@ function ensurePrepSheet_() {
   return sheet;
 }
 
+function ensureOrdersSheet_() {
+  const book = SpreadsheetApp.getActive();
+  let sheet = book.getSheetByName(CONFIG.ORDERS_SHEET_NAME);
+
+  if (!sheet) {
+    sheet = book.insertSheet(CONFIG.ORDERS_SHEET_NAME);
+  }
+
+  return sheet;
+}
+
 function ensureShipmentsSheet_() {
   const book = SpreadsheetApp.getActive();
   let sheet = book.getSheetByName(CONFIG.SHIPMENTS_SHEET_NAME);
@@ -600,6 +706,49 @@ function formatShipmentAddress_(shipment) {
   ].filter(Boolean);
 
   return addressParts.join(" | ");
+}
+
+function formatOrderAddress_(order) {
+  const addressParts = [
+    String(order?.address1 || "").trim(),
+    String(order?.address2 || "").trim(),
+    [order?.city, order?.state, order?.postal_code]
+      .map((value) => String(value || "").trim())
+      .filter(Boolean)
+      .join(", ")
+  ].filter(Boolean);
+
+  if (addressParts.length === 0) {
+    return order?.fulfillment === "market"
+      ? "Pickup at Fulshear Farmers Market"
+      : "";
+  }
+
+  return addressParts.join(" | ");
+}
+
+function formatOrderItems_(order) {
+  const summary = String(order?.items_summary || "").trim();
+  if (summary) return summary;
+
+  const items = Array.isArray(order?.items_json) ? order.items_json : [];
+  return items
+    .map((item) => {
+      const name = String(item?.name || "").trim();
+      const sku = normalizeSku_(item?.sku);
+      const label = name || sku;
+      const quantity = Number(item?.quantity || 0);
+      if (!label || quantity <= 0) return "";
+      return `${label} x${quantity}`;
+    })
+    .filter(Boolean)
+    .join(", ");
+}
+
+function formatOrderFulfillment_(value) {
+  return value === "market"
+    ? "Pickup at Fulshear Farmers Market"
+    : "Ship to me";
 }
 
 function formatShipmentItems_(shipment) {

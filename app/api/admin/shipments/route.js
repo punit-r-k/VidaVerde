@@ -54,7 +54,7 @@ export async function GET(request) {
   let query = supabaseAdmin
     .from("shipments")
     .select(
-      "id, order_id, payment_session_id, payment_reference, status, label_provider, label_url, tracking_number, carrier, service, customer_name, customer_email, customer_phone, address1, address2, city, state, postal_code, country, items_summary, items_json, item_count, amount_total, currency, notes, label_purchased_at, shipped_at, created_at, updated_at"
+      "id, order_id, payment_session_id, payment_reference, status, label_provider, label_url, tracking_number, carrier, service, customer_name, customer_email, customer_phone, address1, address2, city, state, postal_code, country, items_summary, items_json, item_count, amount_total, currency, notes, label_purchased_at, shipped_at, created_at, updated_at, orders(note)"
     )
     .order("created_at", { ascending: false })
     .limit(limit);
@@ -97,7 +97,11 @@ export async function GET(request) {
     item_count: toInt(row.item_count, 0),
     amount_total: toInt(row.amount_total, 0),
     currency: toUpperText(row.currency, "USD"),
-    notes: String(row.notes || ""),
+    notes: String(
+      row.notes ||
+      (Array.isArray(row.orders) ? row.orders[0]?.note : row.orders?.note) ||
+      ""
+    ),
     label_purchased_at: row.label_purchased_at || null,
     shipped_at: row.shipped_at || null,
     created_at: row.created_at,
