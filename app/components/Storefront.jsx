@@ -157,17 +157,28 @@ export default function Storefront({ products, inventory = {} }) {
   const [status, setStatus] = useState("idle");
   const [notice, setNotice] = useState("");
   const [paymentClientSecret, setPaymentClientSecret] = useState("");
+  const [checkoutStep, setCheckoutStep] = useState("details");
   const [fulfillment, setFulfillment] = useState("ship");
   const [liveInventory, setLiveInventory] = useState(inventory);
   const [formValues, setFormValues] = useState(INITIAL_FORM_VALUES);
   const [fieldErrors, setFieldErrors] = useState({});
   const [touchedFields, setTouchedFields] = useState({});
   const [submitAttempted, setSubmitAttempted] = useState(false);
+  const [addPulse, setAddPulse] = useState({});
   const fieldRefs = useRef({});
-  const isPaymentStep = Boolean(paymentClientSecret);
+  const paymentRefreshRequestRef = useRef(0);
+  const paymentCartSignatureRef = useRef("");
+  const addPulseTimeoutsRef = useRef({});
+  const isPaymentStep = checkoutStep === "payment";
 
-  const resetPaymentState = useCallback(() => {
+  const resetPaymentState = useCallback((options = {}) => {
+    const keepPaymentStep = options.keepPaymentStep === true;
+    paymentRefreshRequestRef.current += 1;
     setPaymentClientSecret("");
+    if (!keepPaymentStep) {
+      paymentCartSignatureRef.current = "";
+      setCheckoutStep("details");
+    }
   }, []);
 
   const resetCheckoutAfterSuccess = useCallback(() => {
@@ -177,7 +188,10 @@ export default function Storefront({ products, inventory = {} }) {
     setFieldErrors({});
     setTouchedFields({});
     setSubmitAttempted(false);
+    paymentRefreshRequestRef.current += 1;
+    paymentCartSignatureRef.current = "";
     setPaymentClientSecret("");
+    setCheckoutStep("details");
   }, []);
 
   const setFieldRef = useCallback((name) => {
@@ -266,6 +280,15 @@ export default function Storefront({ products, inventory = {} }) {
   }, [inventory]);
 
   useEffect(() => {
+    return () => {
+      Object.values(addPulseTimeoutsRef.current).forEach((timeoutId) => {
+        clearTimeout(timeoutId);
+      });
+      addPulseTimeoutsRef.current = {};
+    };
+  }, []);
+
+  useEffect(() => {
     const checkoutStatus = searchParams?.get("checkout");
 
     if (!checkoutStatus) return;
@@ -324,6 +347,10 @@ export default function Storefront({ products, inventory = {} }) {
         };
       });
   }, [cart, products, liveInventory]);
+  const cartSignature = useMemo(
+    () => cartItems.map((item) => `${item.sku}:${item.quantity}`).join("|"),
+    [cartItems]
+  );
 
   const itemCount = cartItems.reduce((sum, item) => sum + item.quantity, 0);
   const subtotal = cartItems.reduce((sum, item) => sum + item.lineTotal, 0);
@@ -364,8 +391,113 @@ export default function Storefront({ products, inventory = {} }) {
     cartSummary.scrollIntoView({ behavior: "smooth", block: "start" });
   }, []);
 
+  const buildOrderPayload = useCallback(() => {
+    return {
+      fulfillment: normalizeFulfillment(fulfillment),
+      customer: {
+        name: String(formValues.name || "").trim(),
+        email: String(formValues.email || "").trim(),
+        phone: String(formValues.phone || "").trim(),
+        address1: String(formValues.address1 || "").trim(),
+        address2: String(formValues.address2 || "").trim(),
+        city: String(formValues.city || "").trim(),
+        state: String(formValues.state || "").trim(),
+        postalCode: String(formValues.postalCode || "").trim(),
+        note: String(formValues.note || "").trim()
+      },
+      // Only send sku + quantity. Server decides sold vs preorder.
+      items: cartItems.map((item) => ({
+        sku: item.sku,
+        quantity: item.quantity
+      }))
+    };
+  }, [cartItems, formValues, fulfillment]);
+
+  const requestPaymentClientSecret = useCallback(
+    async ({
+      loadingMessage = "Looks good. Preparing secure payment...",
+      includeFieldErrors = false
+    } = {}) => {
+      const requestId = paymentRefreshRequestRef.current + 1;
+      paymentRefreshRequestRef.current = requestId;
+
+      setStatus("submitting");
+      setNotice(loadingMessage);
+
+      try {
+        const response = await fetch("/api/order", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(buildOrderPayload())
+        });
+
+        const result = await response.json();
+
+        if (paymentRefreshRequestRef.current !== requestId) {
+          return { ok: false, stale: true };
+        }
+
+        if (!response.ok) {
+          if (
+            includeFieldErrors &&
+            result?.fieldErrors &&
+            typeof result.fieldErrors === "object"
+          ) {
+            setFieldErrors((prev) => ({ ...prev, ...result.fieldErrors }));
+            focusFirstInvalidField(result.fieldErrors, fulfillment);
+          }
+          throw new Error(result.error || "Unable to start payment.");
+        }
+
+        if (!result?.clientSecret) {
+          throw new Error("Payment session did not return a client secret.");
+        }
+
+        paymentCartSignatureRef.current = cartSignature;
+        setPaymentClientSecret(result.clientSecret);
+        setStatus("idle");
+        setNotice("");
+        return { ok: true };
+      } catch (error) {
+        if (paymentRefreshRequestRef.current !== requestId) {
+          return { ok: false, stale: true };
+        }
+
+        setPaymentClientSecret("");
+        setStatus("error");
+        setNotice(error?.message || "Something went wrong.");
+        return { ok: false, error };
+      }
+    },
+    [buildOrderPayload, cartSignature, focusFirstInvalidField, fulfillment]
+  );
+
   const handleAdd = (product) => {
-    resetPaymentState();
+    const existingTimeoutId = addPulseTimeoutsRef.current[product.sku];
+    if (existingTimeoutId) {
+      clearTimeout(existingTimeoutId);
+    }
+
+    setAddPulse((prev) => ({
+      ...prev,
+      [product.sku]: true
+    }));
+    addPulseTimeoutsRef.current[product.sku] = setTimeout(() => {
+      setAddPulse((prev) => {
+        if (!prev[product.sku]) return prev;
+        const { [product.sku]: _, ...rest } = prev;
+        return rest;
+      });
+      delete addPulseTimeoutsRef.current[product.sku];
+    }, 520);
+
+    if (isPaymentStep) {
+      resetPaymentState({ keepPaymentStep: true });
+      setStatus("submitting");
+      setNotice("Item added. Updating payment total...");
+    } else {
+      resetPaymentState();
+    }
     setCart((prev) => {
       const currentQty = prev[product.sku] || 0;
       return {
@@ -386,7 +518,7 @@ export default function Storefront({ products, inventory = {} }) {
   };
 
   const handleQuantityChange = (sku, nextQty) => {
-    resetPaymentState();
+    resetPaymentState({ keepPaymentStep: isPaymentStep });
     setCart((prev) => {
       if (nextQty <= 0) {
         const { [sku]: _, ...rest } = prev;
@@ -399,6 +531,27 @@ export default function Storefront({ products, inventory = {} }) {
       };
     });
   };
+
+  useEffect(() => {
+    if (!isPaymentStep) return;
+    if (itemCount <= 0) {
+      resetPaymentState();
+      setStatus("error");
+      setNotice("Your cart is empty. Add jars to continue.");
+      return;
+    }
+    if (cartSignature === paymentCartSignatureRef.current) return;
+
+    requestPaymentClientSecret({
+      loadingMessage: "Cart updated. Updating payment total..."
+    });
+  }, [
+    cartSignature,
+    isPaymentStep,
+    itemCount,
+    requestPaymentClientSecret,
+    resetPaymentState
+  ]);
 
   const handleFieldChange = (event) => {
     const { name, value } = event.currentTarget;
@@ -505,63 +658,18 @@ export default function Storefront({ products, inventory = {} }) {
     }
 
     if (paymentClientSecret) {
+      setCheckoutStep("payment");
       setStatus("idle");
       setNotice("");
       return;
     }
 
-    setStatus("submitting");
-    setNotice("Looks good. Preparing secure payment...");
-
-    const payload = {
-      fulfillment: normalizeFulfillment(fulfillment),
-      customer: {
-        name: String(formValues.name || "").trim(),
-        email: String(formValues.email || "").trim(),
-        phone: String(formValues.phone || "").trim(),
-        address1: String(formValues.address1 || "").trim(),
-        address2: String(formValues.address2 || "").trim(),
-        city: String(formValues.city || "").trim(),
-        state: String(formValues.state || "").trim(),
-        postalCode: String(formValues.postalCode || "").trim(),
-        note: String(formValues.note || "").trim()
-      },
-      // Only send sku + quantity. Server decides sold vs preorder.
-      items: cartItems.map((item) => ({
-        sku: item.sku,
-        quantity: item.quantity
-      }))
-    };
-
-    try {
-      const response = await fetch("/api/order", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(payload)
-      });
-
-      const result = await response.json();
-
-      if (!response.ok) {
-        if (result?.fieldErrors && typeof result.fieldErrors === "object") {
-          setFieldErrors((prev) => ({ ...prev, ...result.fieldErrors }));
-          focusFirstInvalidField(result.fieldErrors, fulfillment);
-        }
-        throw new Error(result.error || "Unable to start payment.");
-      }
-
-      if (result?.clientSecret) {
-        setPaymentClientSecret(result.clientSecret);
-        setStatus("idle");
-        setNotice("");
-        return;
-      }
-
-      throw new Error("Payment session did not return a client secret.");
-    } catch (error) {
-      setPaymentClientSecret("");
-      setStatus("error");
-      setNotice(error?.message || "Something went wrong.");
+    const result = await requestPaymentClientSecret({
+      loadingMessage: "Looks good. Preparing secure payment...",
+      includeFieldErrors: true
+    });
+    if (result?.ok) {
+      setCheckoutStep("payment");
     }
   };
 
@@ -742,6 +850,7 @@ export default function Storefront({ products, inventory = {} }) {
                 : "product-pill product-pill--in";
 
             const cartQty = cart[product.sku] || 0;
+            const isAddPulseActive = Boolean(addPulse[product.sku]);
             const wouldPreorder = Math.max(0, cartQty + 1 - available) > 0;
             const orderedSpecs = Array.isArray(product.specs)
               ? [...product.specs].sort((a, b) => {
@@ -824,14 +933,27 @@ export default function Storefront({ products, inventory = {} }) {
                       </div>
                     </div>
 
-                    <button
-                      className="button button--dark"
-                      type="button"
-                      onClick={() => handleAdd(product)}
-                      aria-label={`Add ${product.name} to cart`}
-                    >
-                      {isOut || wouldPreorder ? "Preorder" : "Add To Cart"}
-                    </button>
+                    <div className="product-card__actions">
+                      <button
+                        className={`button button--dark${isAddPulseActive ? " button--add-pulse" : ""}`}
+                        type="button"
+                        onClick={() => handleAdd(product)}
+                        aria-label={`Add ${product.name} to cart`}
+                      >
+                        {isOut || wouldPreorder ? "Preorder" : "Add To Cart"}
+                      </button>
+                      {cartQty > 0 ? (
+                        <span
+                          className={`product-card__cart-counter${
+                            isAddPulseActive ? " product-card__cart-counter--pulse" : ""
+                          }`}
+                          role="status"
+                          aria-live="polite"
+                        >
+                          In cart: {cartQty}
+                        </span>
+                      ) : null}
+                    </div>
                   </div>
                 </div>
               </article>
@@ -1189,17 +1311,23 @@ export default function Storefront({ products, inventory = {} }) {
                     servers.
                   </p>
                   {stripePromise ? (
-                    <Elements
-                      stripe={stripePromise}
-                      options={{
-                        clientSecret: paymentClientSecret
-                      }}
-                    >
-                      <StripePaymentForm
-                        onPaymentState={handlePaymentState}
-                        grossTotalCents={subtotal}
-                      />
-                    </Elements>
+                    paymentClientSecret ? (
+                      <Elements
+                        stripe={stripePromise}
+                        options={{
+                          clientSecret: paymentClientSecret
+                        }}
+                      >
+                        <StripePaymentForm
+                          onPaymentState={handlePaymentState}
+                          grossTotalCents={subtotal}
+                        />
+                      </Elements>
+                    ) : (
+                      <div className="form__status" role="status" aria-live="polite">
+                        Updating secure payment details...
+                      </div>
+                    )
                   ) : (
                     <div className="form__status form__status--error" role="status" aria-live="polite">
                       Stripe publishable key is missing. Set
