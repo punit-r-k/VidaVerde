@@ -64,7 +64,7 @@ const recordPaidOrder = async ({
   customer,
   items
 }) => {
-  const { error: recordError } = await supabaseAdmin.rpc("record_paid_order", {
+  const { data: orderId, error: recordError } = await supabaseAdmin.rpc("record_paid_order", {
     p_session_id: paymentSessionId,
     p_payment_reference: paymentReference,
     p_payment_provider: "stripe",
@@ -78,7 +78,20 @@ const recordPaidOrder = async ({
     p_items: items
   });
 
-  return recordError;
+  return {
+    orderId: typeof orderId === "string" ? orderId : null,
+    error: recordError
+  };
+};
+
+const syncShipmentForOrder = async (orderId) => {
+  if (!orderId) return null;
+
+  const { error } = await supabaseAdmin.rpc("sync_shipment_for_order", {
+    p_order_id: orderId
+  });
+
+  return error;
 };
 
 const handleCheckoutSessionEvent = async (session, eventType) => {
@@ -137,7 +150,7 @@ const handleCheckoutSessionEvent = async (session, eventType) => {
   const paymentReference =
     typeof session?.payment_intent === "string" ? session.payment_intent : "";
 
-  const recordError = await recordPaidOrder({
+  const recordResult = await recordPaidOrder({
     paymentSessionId,
     paymentReference,
     fulfillment: toFulfillment(metadata.fulfillment),
@@ -150,11 +163,21 @@ const handleCheckoutSessionEvent = async (session, eventType) => {
     items
   });
 
-  if (recordError) {
-    console.error("record_paid_order error:", recordError);
+  if (recordResult.error) {
+    console.error("record_paid_order error:", recordResult.error);
     return {
       ok: false,
       error: "Unable to record order.",
+      status: 500
+    };
+  }
+
+  const shipmentError = await syncShipmentForOrder(recordResult.orderId);
+  if (shipmentError) {
+    console.error("sync_shipment_for_order error:", shipmentError);
+    return {
+      ok: false,
+      error: "Unable to sync shipment.",
       status: 500
     };
   }
@@ -206,7 +229,7 @@ const handlePaymentIntentSucceeded = async (intent) => {
   const paymentSessionId = toText(intent?.id, 255);
   const paymentReference = toText(intent?.latest_charge, 255);
 
-  const recordError = await recordPaidOrder({
+  const recordResult = await recordPaidOrder({
     paymentSessionId,
     paymentReference,
     fulfillment: toFulfillment(metadata.fulfillment),
@@ -219,11 +242,21 @@ const handlePaymentIntentSucceeded = async (intent) => {
     items
   });
 
-  if (recordError) {
-    console.error("record_paid_order error:", recordError);
+  if (recordResult.error) {
+    console.error("record_paid_order error:", recordResult.error);
     return {
       ok: false,
       error: "Unable to record order.",
+      status: 500
+    };
+  }
+
+  const shipmentError = await syncShipmentForOrder(recordResult.orderId);
+  if (shipmentError) {
+    console.error("sync_shipment_for_order error:", shipmentError);
+    return {
+      ok: false,
+      error: "Unable to sync shipment.",
       status: 500
     };
   }

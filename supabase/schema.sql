@@ -63,6 +63,39 @@ create table if not exists orders (
   created_at timestamptz not null default now()
 );
 
+create table if not exists shipments (
+  id uuid primary key default gen_random_uuid(),
+  order_id uuid not null unique references orders(id) on delete cascade,
+  payment_session_id text not null unique,
+  payment_reference text,
+  status text not null default 'pending_label'
+    check (status in ('pending_label', 'label_purchased', 'shipped', 'delivered', 'cancelled')),
+  label_provider text,
+  label_url text,
+  tracking_number text,
+  carrier text,
+  service text,
+  customer_name text not null,
+  customer_email text not null,
+  customer_phone text,
+  address1 text not null,
+  address2 text,
+  city text not null,
+  state text not null,
+  postal_code text not null,
+  country text not null default 'US',
+  items_summary text not null default '',
+  items_json jsonb not null default '[]'::jsonb,
+  item_count integer not null default 0 check (item_count >= 0),
+  amount_total integer not null default 0 check (amount_total >= 0),
+  currency text not null default 'USD',
+  notes text,
+  label_purchased_at timestamptz,
+  shipped_at timestamptz,
+  created_at timestamptz not null default now(),
+  updated_at timestamptz not null default now()
+);
+
 create table if not exists email_signups (
   id uuid primary key default gen_random_uuid(),
   email text not null,
@@ -74,6 +107,8 @@ create table if not exists email_signups (
 
 create index if not exists email_signups_email_idx on email_signups (email);
 create index if not exists email_signups_created_at_idx on email_signups (created_at desc);
+create index if not exists shipments_status_created_at_idx on shipments (status, created_at desc);
+create index if not exists shipments_created_at_idx on shipments (created_at desc);
 
 do $$
 begin
@@ -156,6 +191,11 @@ for each row execute function set_updated_at();
 drop trigger if exists set_site_settings_updated_at on site_settings;
 create trigger set_site_settings_updated_at
 before update on site_settings
+for each row execute function set_updated_at();
+
+drop trigger if exists set_shipments_updated_at on shipments;
+create trigger set_shipments_updated_at
+before update on shipments
 for each row execute function set_updated_at();
 
 create or replace function record_paid_order(
@@ -273,6 +313,149 @@ begin
   end loop;
 
   return v_order_id;
+end;
+$$;
+
+create or replace function sync_shipment_for_order(
+  p_order_id uuid
+) returns uuid
+language plpgsql
+security definer
+set search_path = public
+as $$
+declare
+  v_order orders%rowtype;
+  v_items_json jsonb := '[]'::jsonb;
+  v_items_summary text := '';
+  v_item_count integer := 0;
+  v_shipment_id uuid;
+begin
+  select *
+    into v_order
+    from orders o
+    where o.id = p_order_id;
+
+  if not found then
+    raise exception 'Unknown order id: %', p_order_id;
+  end if;
+
+  if v_order.fulfillment <> 'ship' then
+    delete from shipments s
+      where s.order_id = v_order.id;
+    return null;
+  end if;
+
+  select
+    coalesce(
+      jsonb_agg(
+        jsonb_build_object(
+          'sku', oi.sku,
+          'quantity', oi.quantity,
+          'price_cents', oi.price_cents,
+          'line_total_cents', oi.quantity * oi.price_cents
+        )
+        order by oi.created_at, oi.id
+      ),
+      '[]'::jsonb
+    ),
+    coalesce(
+      string_agg(
+        format('%s x%s', oi.sku, oi.quantity),
+        ', '
+        order by oi.created_at, oi.id
+      ),
+      ''
+    ),
+    coalesce(sum(oi.quantity), 0)
+    into v_items_json, v_items_summary, v_item_count
+    from order_items oi
+    where oi.order_id = v_order.id;
+
+  insert into shipments (
+    order_id,
+    payment_session_id,
+    payment_reference,
+    status,
+    customer_name,
+    customer_email,
+    customer_phone,
+    address1,
+    address2,
+    city,
+    state,
+    postal_code,
+    country,
+    items_summary,
+    items_json,
+    item_count,
+    amount_total,
+    currency
+  ) values (
+    v_order.id,
+    v_order.payment_session_id,
+    v_order.payment_reference,
+    'pending_label',
+    coalesce(v_order.customer_name, ''),
+    coalesce(v_order.customer_email, ''),
+    nullif(v_order.customer_phone, ''),
+    coalesce(v_order.address1, ''),
+    nullif(v_order.address2, ''),
+    coalesce(v_order.city, ''),
+    coalesce(v_order.state, ''),
+    coalesce(v_order.postal_code, ''),
+    'US',
+    v_items_summary,
+    v_items_json,
+    v_item_count,
+    coalesce(v_order.amount_total, 0),
+    upper(coalesce(v_order.currency, 'USD'))
+  )
+  on conflict (order_id) do update set
+    payment_session_id = excluded.payment_session_id,
+    payment_reference = excluded.payment_reference,
+    customer_name = excluded.customer_name,
+    customer_email = excluded.customer_email,
+    customer_phone = excluded.customer_phone,
+    address1 = excluded.address1,
+    address2 = excluded.address2,
+    city = excluded.city,
+    state = excluded.state,
+    postal_code = excluded.postal_code,
+    country = excluded.country,
+    items_summary = excluded.items_summary,
+    items_json = excluded.items_json,
+    item_count = excluded.item_count,
+    amount_total = excluded.amount_total,
+    currency = excluded.currency,
+    updated_at = now()
+  returning id into v_shipment_id;
+
+  return v_shipment_id;
+end;
+$$;
+
+create or replace function sync_all_shipments()
+returns integer
+language plpgsql
+security definer
+set search_path = public
+as $$
+declare
+  v_order_id uuid;
+  v_synced integer := 0;
+begin
+  for v_order_id in
+    select o.id
+    from orders o
+    where o.fulfillment = 'ship'
+      and o.status = 'paid'
+    order by o.created_at desc
+  loop
+    perform sync_shipment_for_order(v_order_id);
+    v_synced := v_synced + 1;
+  end loop;
+
+  return v_synced;
 end;
 $$;
 

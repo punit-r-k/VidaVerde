@@ -1,6 +1,7 @@
 const CONFIG = {
   SHEET_NAME: "Inventory",
   PREP_SHEET_NAME: "Prepare for this week",
+  SHIPMENTS_SHEET_NAME: "Shipments",
   SETTINGS_SHEET_NAME: "Settings",
   HEADER_ROW: 1,
   START_ROW: 2,
@@ -28,6 +29,10 @@ const CONFIG = {
     META_ROW: 1,
     HEADER_ROW: 2,
     START_ROW: 3
+  },
+  SHIPMENTS: {
+    HEADER_ROW: 1,
+    START_ROW: 2
   }
 };
 
@@ -38,6 +43,7 @@ function onOpen() {
     .createMenu("Vida Verde")
     .addItem("Sync Inventory", "syncInventory")
     .addItem("Sync Weekly Prep", "syncWeeklyPrep")
+    .addItem("Sync Shipments", "syncShipments")
     .addItem("Setup Edit Trigger", "setupEditTrigger")
     .addToUi();
 }
@@ -220,6 +226,93 @@ function syncWeeklyPrep() {
     .setFontWeight("bold");
   sheet.setFrozenRows(2);
   sheet.autoResizeColumns(1, 5);
+}
+
+function syncShipments() {
+  ensureSettingsSheet_();
+
+  const settings = getSettings_();
+  const response = getJson_(
+    `${settings.apiBaseUrl}/api/admin/shipments?refresh=1&limit=1000`,
+    settings.adminSecret
+  );
+
+  const shipments = Array.isArray(response?.shipments) ? response.shipments : [];
+  const sheet = ensureShipmentsSheet_();
+  sheet.clearContents();
+
+  const headerValues = [[
+    "Created At",
+    "Order ID",
+    "Payment Session",
+    "Customer",
+    "Email",
+    "Phone",
+    "Ship To",
+    "Items",
+    "Units",
+    "Order Total",
+    "Status",
+    "Carrier",
+    "Service",
+    "Tracking",
+    "Label URL"
+  ]];
+  sheet
+    .getRange(CONFIG.SHIPMENTS.HEADER_ROW, 1, 1, headerValues[0].length)
+    .setValues(headerValues);
+
+  if (shipments.length === 0) {
+    sheet
+      .getRange(CONFIG.SHIPMENTS.START_ROW, 1)
+      .setValue("No shipping orders yet.");
+  } else {
+    const rows = shipments.map((shipment) => {
+      const createdAt = shipment?.created_at
+        ? new Date(shipment.created_at)
+        : "";
+      const amountCents = Number(shipment?.amount_total || 0);
+      const amountDollars = amountCents / 100;
+
+      return [
+        createdAt,
+        String(shipment?.order_id || ""),
+        String(shipment?.payment_session_id || ""),
+        String(shipment?.customer_name || ""),
+        String(shipment?.customer_email || ""),
+        String(shipment?.customer_phone || ""),
+        formatShipmentAddress_(shipment),
+        formatShipmentItems_(shipment),
+        Number(shipment?.item_count || 0),
+        amountDollars,
+        String(shipment?.status || ""),
+        String(shipment?.carrier || ""),
+        String(shipment?.service || ""),
+        String(shipment?.tracking_number || ""),
+        String(shipment?.label_url || "")
+      ];
+    });
+
+    sheet
+      .getRange(CONFIG.SHIPMENTS.START_ROW, 1, rows.length, rows[0].length)
+      .setValues(rows);
+
+    sheet
+      .getRange(CONFIG.SHIPMENTS.START_ROW, 1, rows.length, 1)
+      .setNumberFormat("yyyy-mm-dd hh:mm");
+    sheet
+      .getRange(CONFIG.SHIPMENTS.START_ROW, 9, rows.length, 1)
+      .setNumberFormat("0");
+    sheet
+      .getRange(CONFIG.SHIPMENTS.START_ROW, 10, rows.length, 1)
+      .setNumberFormat("$#,##0.00");
+  }
+
+  sheet
+    .getRange(CONFIG.SHIPMENTS.HEADER_ROW, 1, 1, 15)
+    .setFontWeight("bold");
+  sheet.setFrozenRows(1);
+  sheet.autoResizeColumns(1, 15);
 }
 
 function handleRestockEdit_(sheet, row) {
@@ -482,6 +575,49 @@ function ensurePrepSheet_() {
   }
 
   return sheet;
+}
+
+function ensureShipmentsSheet_() {
+  const book = SpreadsheetApp.getActive();
+  let sheet = book.getSheetByName(CONFIG.SHIPMENTS_SHEET_NAME);
+
+  if (!sheet) {
+    sheet = book.insertSheet(CONFIG.SHIPMENTS_SHEET_NAME);
+  }
+
+  return sheet;
+}
+
+function formatShipmentAddress_(shipment) {
+  const addressParts = [
+    String(shipment?.address1 || "").trim(),
+    String(shipment?.address2 || "").trim(),
+    [shipment?.city, shipment?.state, shipment?.postal_code]
+      .map((value) => String(value || "").trim())
+      .filter(Boolean)
+      .join(", "),
+    String(shipment?.country || "").trim()
+  ].filter(Boolean);
+
+  return addressParts.join(" | ");
+}
+
+function formatShipmentItems_(shipment) {
+  const summary = String(shipment?.items_summary || "").trim();
+  if (summary) return summary;
+
+  const items = Array.isArray(shipment?.items_json) ? shipment.items_json : [];
+  const fallbackSummary = items
+    .map((item) => {
+      const sku = normalizeSku_(item?.sku);
+      const quantity = Number(item?.quantity || 0);
+      if (!sku || quantity <= 0) return "";
+      return `${sku} x${quantity}`;
+    })
+    .filter(Boolean)
+    .join(", ");
+
+  return fallbackSummary;
 }
 
 function writeShowStockSetting_(showStock) {
