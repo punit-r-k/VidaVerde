@@ -218,7 +218,7 @@ export default function Storefront({ products, inventory = {} }) {
   const [status, setStatus] = useState("idle");
   const [notice, setNotice] = useState("");
   const [checkoutStep, setCheckoutStep] = useState("details");
-  const [fulfillment, setFulfillment] = useState("ship");
+  const [fulfillment, setFulfillment] = useState("market");
   const [liveInventory, setLiveInventory] = useState(inventory);
   const [formValues, setFormValues] = useState(INITIAL_FORM_VALUES);
   const [fieldErrors, setFieldErrors] = useState({});
@@ -241,7 +241,7 @@ export default function Storefront({ products, inventory = {} }) {
 
   const resetCheckoutAfterSuccess = useCallback(() => {
     setCart({});
-    setFulfillment("ship");
+    setFulfillment("market");
     setFormValues(INITIAL_FORM_VALUES);
     setFieldErrors({});
     setTouchedFields({});
@@ -593,19 +593,6 @@ export default function Storefront({ products, inventory = {} }) {
     setFieldErrors(validateCheckoutForm(nextValues, fulfillment));
   };
 
-  const handleFulfillmentChange = (event) => {
-    const nextFulfillment = normalizeFulfillment(event.target.value);
-    resetPaymentState();
-    setFulfillment(nextFulfillment);
-
-    if (status !== "idle") {
-      setStatus("idle");
-      setNotice("");
-    }
-
-    setFieldErrors(validateCheckoutForm(formValues, nextFulfillment));
-  };
-
   const handleBackToEdit = useCallback(() => {
     resetPaymentState();
     setStatus("idle");
@@ -787,9 +774,7 @@ export default function Storefront({ products, inventory = {} }) {
     { label: "Phone", value: summarizeValue(formValues.phone) },
     {
       label: "Fulfillment",
-      value: fulfillment === "market"
-        ? "Pick up at Fulshear Farmers Market"
-        : "Ship to me"
+      value: "Pick up at Fulshear Farmers Market"
     },
     ...(fulfillment === "ship"
       ? [
@@ -1112,30 +1097,16 @@ export default function Storefront({ products, inventory = {} }) {
                   </label>
                   <label className="form-field form-field--select">
                     Fulfillment *
-                    <div className="select-wrap">
-                      <select
-                        ref={setFieldRef("fulfillment")}
-                        name="fulfillment"
-                        value={fulfillment}
-                        onChange={handleFulfillmentChange}
-                      >
-                        <option value="ship">Ship to me</option>
-                        <option value="market">
-                          Pick up at Fulshear Farmers Market (Every Saturday)
-                        </option>
-                      </select>
-                      <span className="select-wrap__icon" aria-hidden="true">
-                        <svg viewBox="0 0 24 24" fill="none">
-                          <path
-                            d="M7 10l5 5 5-5"
-                            stroke="currentColor"
-                            strokeWidth="1.8"
-                            strokeLinecap="round"
-                            strokeLinejoin="round"
-                          />
-                        </svg>
-                      </span>
+                    <div
+                      ref={setFieldRef("fulfillment")}
+                      className="form-field__readonly"
+                      tabIndex={-1}
+                      role="textbox"
+                      aria-readonly="true"
+                    >
+                      Pick up at Fulshear Farmers Market
                     </div>
+                    <span className="form-field__hint">Shipping option coming soon.</span>
                   </label>
                 </div>
 
@@ -1278,7 +1249,7 @@ export default function Storefront({ products, inventory = {} }) {
                   </>
                 ) : (
                   <div className="market-note">
-                    Pickup available every Saturday at the Fulshear Farmers Market.
+                    Pickup available every Saturday at the Fulshear Farmers Market. 9am-1pm
                   </div>
                 )}
 

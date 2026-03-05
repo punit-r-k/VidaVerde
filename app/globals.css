@@ -1197,6 +1197,26 @@ label {
   line-height: 1.35;
 }
 
+.form-field__hint {
+  font-size: 0.78rem;
+  color: rgba(41, 54, 47, 0.75);
+  line-height: 1.35;
+}
+
+.form-field__readonly {
+  width: 100%;
+  min-width: 0;
+  padding: 12px 14px;
+  border-radius: var(--radius);
+  border: 1px solid var(--line);
+  background: var(--surface);
+  color: var(--ink);
+  font-size: 0.95rem;
+  line-height: 1.35;
+  white-space: normal;
+  overflow-wrap: anywhere;
+}
+
 .form-field--select .select-wrap {
   position: relative;
 }
