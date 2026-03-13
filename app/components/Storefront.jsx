@@ -466,18 +466,6 @@ export default function Storefront({ products, inventory = {} }) {
     () => validateCheckoutForm(formValues, fulfillment),
     [formValues, fulfillment, validateCheckoutForm]
   );
-  const requiredFieldRemaining = requiredFieldNames.filter((name) =>
-    Boolean(completionErrors[name])
-  ).length;
-  const requiredFieldCompleted = requiredFieldNames.length - requiredFieldRemaining;
-  const completionProgress = Math.round((requiredFieldCompleted / requiredFieldNames.length) * 100);
-  const checkoutReadinessText = isPaymentStep
-    ? "Review your order and complete secure payment."
-    : itemCount === 0
-      ? "Add at least one jar to continue."
-      : requiredFieldRemaining === 0
-        ? "Ready for secure checkout."
-        : `${requiredFieldRemaining} required field${requiredFieldRemaining === 1 ? "" : "s"} left.`;
   const cityOptions = useMemo(() => {
     const selectedCity = String(formValues.city || "").trim();
     if (!selectedCity) return US_CITY_OPTIONS;
@@ -1108,19 +1096,6 @@ export default function Storefront({ products, inventory = {} }) {
                 ? "Review your order details below. Use Back to Edit if anything needs changes."
                 : "Fields marked * are required. Payment opens after details validate."}
             </p>
-            {!isPaymentStep ? (
-              <div className="order-form__progress" aria-live="polite">
-                <div className="order-form__progress-row">
-                  <strong>
-                    {requiredFieldCompleted}/{requiredFieldNames.length} required complete
-                  </strong>
-                  <span>{checkoutReadinessText}</span>
-                </div>
-                <div className="order-form__progress-track" aria-hidden="true">
-                  <span style={{ width: `${completionProgress}%` }}></span>
-                </div>
-              </div>
-            ) : null}
 
             {!isPaymentStep ? (
               <>

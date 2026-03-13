@@ -1234,48 +1234,6 @@ img {
   color: rgba(41, 54, 47, 0.75);
 }
 
-.order-form__progress {
-  border: 1px solid var(--line);
-  border-radius: var(--radius);
-  padding: 12px;
-  background: var(--surface);
-  display: grid;
-  gap: 10px;
-}
-
-.order-form__progress-row {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 12px;
-}
-
-.order-form__progress-row strong {
-  font-size: 0.75rem;
-  letter-spacing: 0.12em;
-  text-transform: uppercase;
-  color: var(--green-900);
-}
-
-.order-form__progress-row span {
-  font-size: 0.78rem;
-  color: rgba(41, 54, 47, 0.75);
-}
-
-.order-form__progress-track {
-  height: 8px;
-  border-radius: 999px;
-  overflow: hidden;
-  background: rgba(41, 54, 47, 0.14);
-}
-
-.order-form__progress-track span {
-  display: block;
-  height: 100%;
-  border-radius: 999px;
-  background: var(--green-800);
-}
-
 .form__row {
   display: grid;
   grid-template-columns: repeat(auto-fit, minmax(160px, 1fr));
@@ -3589,11 +3547,6 @@ select:focus {
     padding: 20px;
   }
 
-  .order-form__progress-row {
-    flex-direction: column;
-    align-items: flex-start;
-  }
-
 }
 
 @media (max-width: 640px) {
@@ -3869,10 +3822,6 @@ select:focus {
 
   .order-form h3 {
     font-size: 1.25rem;
-  }
-
-  .order-form__progress {
-    padding: 10px;
   }
 
   label {
