@@ -26,6 +26,10 @@ const INVENTORY_POLL_MS = 30000;
 const PREORDER_TIMING_NOTICE =
   "Pre-orders are not guaranteed to be filled for the next Fulshear Farmers Market. Kraut can take up to 15 days to be ready. It may be ready sooner, but that is not guaranteed.";
 const PREORDER_ACKNOWLEDGEMENT_LABEL = "Accept preorder terms & conditions.";
+const PREORDER_NOTICE_MESSAGES = new Set([
+  "Please acknowledge the pre-order notice before proceeding to payment.",
+  "Please acknowledge the pre-order notice before payment."
+]);
 const HEALTH_BENEFIT_PATTERN =
   /(live[-\s]?cultures?|active[-\s]?cultures?|fiber(?:-rich)?|digestion|digestive|gut|probiotic|vitamin|antioxidant|health|wellness|immune|nutrient|plant variety)/i;
 const SPICE_PROFILE_PATTERN =
@@ -313,7 +317,6 @@ export default function Storefront({ products, inventory = {} }) {
   }, [fieldErrors, submitAttempted, touchedFields]);
 
   const hasFieldError = useCallback((name) => Boolean(getFieldError(name)), [getFieldError]);
-  const showGlobalNotice = Boolean(notice) && !(isPaymentStep && status === "error");
 
   const applyInventory = (nextInventory) => {
     if (nextInventory && typeof nextInventory === "object") {
@@ -450,6 +453,10 @@ export default function Storefront({ products, inventory = {} }) {
   const preorderAcknowledgementError = hasPreorderItems &&
     !preorderAcknowledged &&
     (submitAttempted || preorderTouched);
+  const showGlobalNotice = Boolean(notice) && !(
+    status === "error" &&
+    (isPaymentStep || preorderAcknowledgementError)
+  );
   const requiresAddress = fulfillment === "ship";
   const cartCountLabel = `${itemCount} item${itemCount === 1 ? "" : "s"}`;
   const requiredFieldNames = requiresAddress
@@ -632,6 +639,11 @@ export default function Storefront({ products, inventory = {} }) {
     const isChecked = Boolean(event.currentTarget.checked);
     setPreorderAcknowledged(isChecked);
     setPreorderTouched(true);
+
+    if (isChecked && status === "error" && PREORDER_NOTICE_MESSAGES.has(notice)) {
+      setStatus("idle");
+      setNotice("");
+    }
   };
 
   const createPaymentIntent = useCallback(async () => {

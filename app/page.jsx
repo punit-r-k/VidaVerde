@@ -3,6 +3,7 @@ import EmailListPopup from "./components/EmailListPopup";
 import EmailSignupForm from "./components/EmailSignupForm";
 import ScrollReveal from "./components/ScrollReveal";
 import JumpNav from "./components/JumpNav";
+import TestimonialGrid from "./components/TestimonialGrid";
 import Image from "next/image";
 import { getProducts } from "@/lib/products";
 import { getInventoryMap } from "@/lib/stock";
@@ -75,21 +76,49 @@ export default async function Home() {
   const testimonials = [
     {
       quote:
-        "This sauerkraut with cumin is truly a standout. The tangy brightness of the sauerkraut pairs beautifully with the warm, earthy flavor of cumin, creating a perfect balance of zest and depth. The cumin adds just the right touch of spice without overpowering the natural crispness and freshness of the cabbage. It's wonderfully seasoned, delicious on its own, and even better as a complement to a hearty meal.",
-      name: "Veronica Bradshaw",
-      meta: "Customer Review"
-    },
-    {
-      quote:
-        "VidaVerde has the best microgreens and gut healthy products I've found. I've been visiting Edison at the Fulshear Farmers market since 2021, and now I won't go anywhere else. I bravely tried various sauerkrauts and they are nothing like what I'd ever had before. My fave-Red Coral. The microgreens are in containers that make it extremely easy to keep fresh, and the containers can be returned for less waste.",
+        "VidaVerde has the best microgreens and gut healthy products I've found. I've been visiting Edison at the Fulshear Farmers market since 2021, and now I won't go anywhere else. In that time, I've received an education on his process (it's all clean, green, intentional y'all), he's passionate about what he does, I've gotten to know him as a person (he's a beautiful human being as well as a comedian), and I've had the privilege to sample lots of products. The soup is very tasty and has been my lunch most of the winter. I bravely tried various sauerkrauts and they are nothing like what I'd ever had before. My fave - Red Coral. He also has probiotic hot sauces chock full of vitamins and on occasion wellness shots. The microgreens are in containers that make it extremely easy to keep fresh, and the containers can be returned for less waste. They are all my favorite, though the flavors of the basil and wasabi really come through. Best of all is the smile that comes with the service.",
+      highlights: [
+        "microgreens",
+        "gut healthy",
+        "probiotic hot sauces",
+        "wellness shots",
+        "sauerkrauts",
+        "basil and wasabi",
+        "very tasty"
+      ],
       name: "Jennifer Hopkins",
       meta: "Fulshear Farmers Market"
     },
     {
       quote:
-        "The mild profile made it simple to build a daily habit. The consistency week-to-week is what keeps me coming back.",
-      name: "Repeat Buyer",
-      meta: "Houston Area"
+        "Absolutely wonderful and delicious. This sauerkraut with cumin is truly a standout. The tangy brightness of the sauerkraut pairs beautifully with the warm, earthy flavor of cumin, creating a perfect balance of zest and depth. The cumin adds just the right touch of spice without overpowering the natural crispness and freshness of the cabbage. Every bite is flavorful, aromatic, and satisfying. It's wonderfully seasoned, delicious on its own, and even better as a complement to a hearty meal. If you enjoy bold yet balanced flavors, this combination is simply perfect.",
+      highlights: [
+        "sauerkraut with cumin",
+        "cumin",
+        "cabbage",
+        "tangy brightness",
+        "warm, earthy flavor",
+        "perfect balance of zest and depth",
+        "flavorful, aromatic, and satisfying"
+      ],
+      name: "Veronica Bradshaw",
+      meta: "Fulshear Farmers Market"
+    },
+    {
+      quote:
+        "Edison's \"Caribbean Heat\" raw sauerkraut has completely changed the way I think about fermented foods in the best possible way. The flavor is tangy and refreshingly crisp. Unlike some shelf-stable versions that can taste dull or sour, his sauerkraut has a lively taste that feels vibrant with every bite. A huge bonus is its natural fermentation. It retains beneficial probiotics that support gut health. Also, love the texture. It stays crunchy, which makes a great topping for salads, sandwiches, grain bowls, or straight from the jar (my fav!). It adds an instant flavor boost and zing to otherwise simple dishes.",
+      highlights: [
+        "natural fermentation",
+        "probiotics",
+        "gut health",
+        "sauerkraut",
+        "tangy and refreshingly crisp",
+        "lively taste",
+        "flavor boost",
+        "zing"
+      ],
+      name: "Jason Smarg",
+      meta: "Fulshear Farmers Market"
     }
   ];
 
@@ -222,20 +251,7 @@ export default async function Home() {
               <p className="eyebrow">Customer Voices</p>
               <h2>Real feedback from weekly customers building a daily ferment routine.</h2>
             </div>
-            <div className="voices__grid" aria-label="Customer testimonials">
-              {testimonials.map((item, index) => (
-                <article
-                  key={item.name}
-                  className={`voices-card ${index % 2 === 0 ? "voices-card--sage" : "voices-card--oat"}`}
-                >
-                  <p className="voices-card__quote">&quot;{item.quote}&quot;</p>
-                  <p className="voices-card__meta">
-                    <strong>{item.name}</strong>
-                    <span>{item.meta}</span>
-                  </p>
-                </article>
-              ))}
-            </div>
+            <TestimonialGrid testimonials={testimonials} />
           </div>
         </section>
 
