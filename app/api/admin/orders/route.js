@@ -1,10 +1,17 @@
 import { NextResponse } from "next/server";
 import { supabaseAdmin } from "@/lib/supabaseAdmin";
+import {
+  getRateLimitHeaders,
+  getRetryAfterSeconds,
+  rateLimitByRequest
+} from "@/lib/rateLimit";
 
 const requireSecret = (request) => {
   const secret = request.headers.get("x-admin-secret");
   return secret && secret === process.env.ADMIN_RESTOCK_SECRET;
 };
+const ADMIN_ORDERS_WINDOW_MS = 60_000;
+const ADMIN_ORDERS_MAX = 90;
 
 const toInt = (value, fallback = 0) => {
   const parsed = Number.parseInt(value, 10);
@@ -21,6 +28,24 @@ const normalizeFulfillment = (value) => (value === "market" ? "market" : "ship")
 export const runtime = "nodejs";
 
 export async function GET(request) {
+  const rate = rateLimitByRequest(request, {
+    scope: "admin:orders:get",
+    windowMs: ADMIN_ORDERS_WINDOW_MS,
+    max: ADMIN_ORDERS_MAX
+  });
+  if (!rate.ok) {
+    return NextResponse.json(
+      { error: "Too many admin order requests. Please wait and try again." },
+      {
+        status: 429,
+        headers: {
+          ...getRateLimitHeaders(rate, ADMIN_ORDERS_MAX),
+          "Retry-After": String(getRetryAfterSeconds(rate.resetAt))
+        }
+      }
+    );
+  }
+
   if (!requireSecret(request)) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   }

@@ -1,16 +1,44 @@
 import { NextResponse } from "next/server";
 import { supabaseAdmin } from "@/lib/supabaseAdmin";
 import { getShowStockSetting, setShowStockSetting } from "@/lib/siteSettings";
+import {
+  getRateLimitHeaders,
+  getRetryAfterSeconds,
+  rateLimitByRequest
+} from "@/lib/rateLimit";
+
+const ADMIN_INVENTORY_WINDOW_MS = 60_000;
+const ADMIN_INVENTORY_MAX = 120;
 
 const requireSecret = (request) => {
   const secret = request.headers.get("x-admin-secret");
   return secret && secret === process.env.ADMIN_RESTOCK_SECRET;
 };
 const normalizeSku = (value) => String(value || "").trim().toUpperCase();
+const getAdminInventoryLimit = (request, action) =>
+  rateLimitByRequest(request, {
+    scope: `admin:inventory:${action}`,
+    windowMs: ADMIN_INVENTORY_WINDOW_MS,
+    max: ADMIN_INVENTORY_MAX
+  });
 
 export const runtime = "nodejs";
 
 export async function GET(request) {
+  const limit = getAdminInventoryLimit(request, "get");
+  if (!limit.ok) {
+    return NextResponse.json(
+      { error: "Too many inventory admin requests. Please wait and try again." },
+      {
+        status: 429,
+        headers: {
+          ...getRateLimitHeaders(limit, ADMIN_INVENTORY_MAX),
+          "Retry-After": String(getRetryAfterSeconds(limit.resetAt))
+        }
+      }
+    );
+  }
+
   if (!requireSecret(request)) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   }
@@ -52,6 +80,20 @@ export async function GET(request) {
 }
 
 export async function PATCH(request) {
+  const limit = getAdminInventoryLimit(request, "patch");
+  if (!limit.ok) {
+    return NextResponse.json(
+      { error: "Too many inventory admin updates. Please wait and try again." },
+      {
+        status: 429,
+        headers: {
+          ...getRateLimitHeaders(limit, ADMIN_INVENTORY_MAX),
+          "Retry-After": String(getRetryAfterSeconds(limit.resetAt))
+        }
+      }
+    );
+  }
+
   if (!requireSecret(request)) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   }

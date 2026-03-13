@@ -1,6 +1,10 @@
 ﻿import { NextResponse } from "next/server";
 import { getProductMap } from "@/lib/products";
-import { rateLimit } from "@/lib/rateLimit";
+import {
+  getRateLimitHeaders,
+  getRetryAfterSeconds,
+  rateLimitByRequest
+} from "@/lib/rateLimit";
 import {
   checkoutPayloadSchema,
   mapCheckoutIssuesToFieldErrors
@@ -19,15 +23,6 @@ const buildOrderSummary = (lineItems) =>
 const buildSkuSummary = (lineItems) =>
   lineItems.map((item) => `${item.sku}x${item.quantity}`).join(", ");
 
-const getClientId = (request) => {
-  const forwardedFor = request.headers.get("x-forwarded-for");
-  if (forwardedFor) {
-    return forwardedFor.split(",")[0].trim();
-  }
-
-  return request.headers.get("x-real-ip") || "unknown";
-};
-
 export const runtime = "nodejs";
 
 export async function POST(request) {
@@ -38,20 +33,20 @@ export async function POST(request) {
     );
   }
 
-  const clientId = getClientId(request);
-  const limit = rateLimit(clientId, {
+  const limit = rateLimitByRequest(request, {
+    scope: "order:create",
     windowMs: CHECKOUT_WINDOW_MS,
     max: CHECKOUT_MAX
   });
 
   if (!limit.ok) {
-    const retryAfter = Math.max(1, Math.ceil((limit.resetAt - Date.now()) / 1000));
     return NextResponse.json(
       { error: "Too many checkout attempts. Please wait and try again." },
       {
         status: 429,
         headers: {
-          "Retry-After": String(retryAfter)
+          ...getRateLimitHeaders(limit, CHECKOUT_MAX),
+          "Retry-After": String(getRetryAfterSeconds(limit.resetAt))
         }
       }
     );

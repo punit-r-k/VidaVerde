@@ -1,7 +1,12 @@
 import { NextResponse } from "next/server";
 import { z } from "zod";
 import { supabaseAdmin } from "@/lib/supabaseAdmin";
-import { rateLimit } from "@/lib/rateLimit";
+import {
+  getRateLimitHeaders,
+  getRetryAfterSeconds,
+  rateLimitByRequest,
+  getClientId
+} from "@/lib/rateLimit";
 
 const SIGNUP_WINDOW_MS = 60_000;
 const SIGNUP_MAX = 10;
@@ -10,15 +15,6 @@ const payloadSchema = z.object({
   email: z.string().trim().toLowerCase().email("Enter a valid email address."),
   source: z.string().trim().min(1).max(64).optional()
 });
-
-const getClientId = (request) => {
-  const forwardedFor = request.headers.get("x-forwarded-for");
-  if (forwardedFor) {
-    return forwardedFor.split(",")[0].trim();
-  }
-
-  return request.headers.get("x-real-ip") || "unknown";
-};
 
 export const runtime = "nodejs";
 
@@ -31,19 +27,21 @@ export async function POST(request) {
   }
 
   const clientId = getClientId(request);
-  const limit = rateLimit(clientId, {
+  const limit = rateLimitByRequest(request, {
+    scope: "email-signups:create",
+    identifier: clientId,
     windowMs: SIGNUP_WINDOW_MS,
     max: SIGNUP_MAX
   });
 
   if (!limit.ok) {
-    const retryAfter = Math.max(1, Math.ceil((limit.resetAt - Date.now()) / 1000));
     return NextResponse.json(
       { error: "Too many signup attempts. Please wait and try again." },
       {
         status: 429,
         headers: {
-          "Retry-After": String(retryAfter)
+          ...getRateLimitHeaders(limit, SIGNUP_MAX),
+          "Retry-After": String(getRetryAfterSeconds(limit.resetAt))
         }
       }
     );

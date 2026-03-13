@@ -5,8 +5,15 @@ import {
   stripeRequest,
   verifyStripeSignature
 } from "@/lib/stripe";
+import {
+  getRateLimitHeaders,
+  getRetryAfterSeconds,
+  rateLimitByRequest
+} from "@/lib/rateLimit";
 
 export const runtime = "nodejs";
+const STRIPE_WEBHOOK_WINDOW_MS = 60_000;
+const STRIPE_WEBHOOK_MAX = 600;
 
 const parseItemsFromMetadata = (source) => {
   const raw = source?.metadata?.items;
@@ -265,6 +272,24 @@ const handlePaymentIntentSucceeded = async (intent) => {
 };
 
 export async function POST(request) {
+  const limit = rateLimitByRequest(request, {
+    scope: "stripe:webhook:post",
+    windowMs: STRIPE_WEBHOOK_WINDOW_MS,
+    max: STRIPE_WEBHOOK_MAX
+  });
+  if (!limit.ok) {
+    return NextResponse.json(
+      { error: "Too many webhook requests. Please wait and retry." },
+      {
+        status: 429,
+        headers: {
+          ...getRateLimitHeaders(limit, STRIPE_WEBHOOK_MAX),
+          "Retry-After": String(getRetryAfterSeconds(limit.resetAt))
+        }
+      }
+    );
+  }
+
   if (!stripeConfig) {
     return NextResponse.json(
       { error: "Stripe is not configured." },

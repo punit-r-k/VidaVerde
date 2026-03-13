@@ -1,5 +1,10 @@
 import { NextResponse } from "next/server";
 import { supabaseAdmin } from "@/lib/supabaseAdmin";
+import {
+  getRateLimitHeaders,
+  getRetryAfterSeconds,
+  rateLimitByRequest
+} from "@/lib/rateLimit";
 
 const DEFAULT_TIMEZONE = "America/Chicago";
 const LOOKBACK_DAYS = 21;
@@ -81,10 +86,30 @@ const toQty = (value) => {
 };
 
 const normalizeSku = (value) => String(value || "").trim().toUpperCase();
+const ADMIN_PREP_WINDOW_MS = 60_000;
+const ADMIN_PREP_MAX = 90;
 
 export const runtime = "nodejs";
 
 export async function GET(request) {
+  const limit = rateLimitByRequest(request, {
+    scope: "admin:prep:get",
+    windowMs: ADMIN_PREP_WINDOW_MS,
+    max: ADMIN_PREP_MAX
+  });
+  if (!limit.ok) {
+    return NextResponse.json(
+      { error: "Too many prep requests. Please wait and try again." },
+      {
+        status: 429,
+        headers: {
+          ...getRateLimitHeaders(limit, ADMIN_PREP_MAX),
+          "Retry-After": String(getRetryAfterSeconds(limit.resetAt))
+        }
+      }
+    );
+  }
+
   if (!requireSecret(request)) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   }

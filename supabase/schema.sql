@@ -718,7 +718,7 @@ insert into products (
       'Bottle size: 5oz'
     ],
     'https://images.unsplash.com/photo-1476718406336-bb5a9690ee2a?auto=format&fit=crop&w=800&q=80',
-    1199,
+    999,
     5,
     5,
     true
@@ -736,7 +736,7 @@ insert into products (
       'Bottle size: 5oz'
     ],
     'https://images.unsplash.com/photo-1505250469679-203ad9ced0cb?auto=format&fit=crop&w=800&q=80',
-    1199,
+    999,
     5,
     6,
     true
