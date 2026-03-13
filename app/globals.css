@@ -2365,7 +2365,7 @@ select:focus {
   border-radius: 18px;
   padding: clamp(22px, 2.2vw, 30px);
   display: grid;
-  grid-template-rows: auto 1fr auto;
+  grid-template-rows: 1fr auto;
   gap: 18px;
   height: 100%;
   min-height: 280px;
@@ -2378,15 +2378,6 @@ select:focus {
   box-shadow:
     0 18px 36px rgba(12, 41, 29, 0.18),
     inset 0 0 0 1px rgba(35, 101, 72, 0.16);
-}
-
-.voices-card__index {
-  margin: 0;
-  font-size: 0.7rem;
-  font-weight: 700;
-  letter-spacing: 0.18em;
-  text-transform: uppercase;
-  color: var(--accent);
 }
 
 .voices-card__quote {
@@ -2499,20 +2490,11 @@ select:focus {
 .voices-modal__topbar {
   display: flex;
   align-items: center;
-  justify-content: space-between;
+  justify-content: flex-end;
   gap: 16px;
   flex-wrap: wrap;
   padding: 18px 22px;
   border-bottom: 1px solid rgba(41, 54, 47, 0.08);
-}
-
-.voices-modal__count {
-  margin: 0;
-  font-size: 0.72rem;
-  font-weight: 700;
-  letter-spacing: 0.16em;
-  text-transform: uppercase;
-  color: rgba(41, 54, 47, 0.72);
 }
 
 .voices-modal__topbar-actions {

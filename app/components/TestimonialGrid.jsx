@@ -144,9 +144,6 @@ export default function TestimonialGrid({ testimonials = [] }) {
               key={item.name}
               className={`voices-card${isActive ? " voices-card--active" : ""}`}
             >
-              <p className="voices-card__index">
-                {String(index + 1).padStart(2, "0")}
-              </p>
               <p className="voices-card__quote">
                 &quot;
                 {renderHighlightedText(
@@ -194,11 +191,6 @@ export default function TestimonialGrid({ testimonials = [] }) {
             onTouchEnd={handleTouchEnd}
           >
             <div className="voices-modal__topbar">
-              <p className="voices-modal__count">
-                {String(activeIndex + 1).padStart(2, "0")}
-                {" / "}
-                {String(testimonials.length).padStart(2, "0")}
-              </p>
               <div className="voices-modal__topbar-actions">
                 <button
                   className="voices-modal__nav"
