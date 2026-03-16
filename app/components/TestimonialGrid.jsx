@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 
 const REVIEW_PREVIEW_SENTENCE_COUNT = 2;
 const SWIPE_THRESHOLD = 48;
@@ -71,22 +71,81 @@ const renderHighlightedText = (text, highlights = [], keyPrefix) => {
 };
 
 export default function TestimonialGrid({ testimonials = [] }) {
+  const trackRef = useRef(null);
   const [activeIndex, setActiveIndex] = useState(null);
+  const [beltState, setBeltState] = useState({
+    canScrollPrev: false,
+    canScrollNext: false
+  });
   const closeButtonRef = useRef(null);
   const touchStartXRef = useRef(null);
   const activeReview =
     activeIndex === null ? null : testimonials[activeIndex] || null;
 
-  const openReview = (index) => setActiveIndex(index);
-  const closeReview = () => setActiveIndex(null);
-  const showPrevious = () => {
-    if (!testimonials.length || activeIndex === null) return;
-    setActiveIndex((activeIndex - 1 + testimonials.length) % testimonials.length);
-  };
-  const showNext = () => {
-    if (!testimonials.length || activeIndex === null) return;
-    setActiveIndex((activeIndex + 1) % testimonials.length);
-  };
+  const updateBeltState = useCallback(() => {
+    const track = trackRef.current;
+    if (!track) return;
+
+    const maxScrollLeft = Math.max(track.scrollWidth - track.clientWidth, 0);
+    const nextState = {
+      canScrollPrev: track.scrollLeft > 2,
+      canScrollNext: track.scrollLeft < maxScrollLeft - 2
+    };
+
+    setBeltState((currentState) =>
+      currentState.canScrollPrev === nextState.canScrollPrev &&
+      currentState.canScrollNext === nextState.canScrollNext
+        ? currentState
+        : nextState
+    );
+  }, []);
+
+  const getTrackCards = useCallback(() => {
+    const track = trackRef.current;
+    if (!track) return [];
+    return Array.from(track.querySelectorAll("[data-testimonial-card]"));
+  }, []);
+
+  const getScrollStep = useCallback(() => {
+    const track = trackRef.current;
+    const cards = getTrackCards();
+    if (!track || !cards.length) return 0;
+
+    if (cards.length > 1) {
+      const inferredStep = cards[1].offsetLeft - cards[0].offsetLeft;
+      if (inferredStep > 0) return inferredStep;
+    }
+
+    return cards[0].getBoundingClientRect().width || track.clientWidth;
+  }, [getTrackCards]);
+
+  const openReview = useCallback((index) => {
+    setActiveIndex(index);
+  }, []);
+
+  const closeReview = useCallback(() => {
+    setActiveIndex(null);
+  }, []);
+
+  const showPrevious = useCallback(() => {
+    if (!testimonials.length) return;
+
+    setActiveIndex((currentIndex) =>
+      currentIndex === null
+        ? null
+        : (currentIndex - 1 + testimonials.length) % testimonials.length
+    );
+  }, [testimonials.length]);
+
+  const showNext = useCallback(() => {
+    if (!testimonials.length) return;
+
+    setActiveIndex((currentIndex) =>
+      currentIndex === null
+        ? null
+        : (currentIndex + 1) % testimonials.length
+    );
+  }, [testimonials.length]);
 
   useEffect(() => {
     if (activeIndex === null) return undefined;
@@ -110,7 +169,7 @@ export default function TestimonialGrid({ testimonials = [] }) {
       document.body.style.overflow = previousOverflow;
       window.removeEventListener("keydown", handleKeyDown);
     };
-  }, [activeIndex]);
+  }, [activeIndex, closeReview, showPrevious, showNext]);
 
   const handleTouchStart = (event) => {
     touchStartXRef.current = event.touches[0]?.clientX ?? null;
@@ -132,50 +191,115 @@ export default function TestimonialGrid({ testimonials = [] }) {
     }
   };
 
+  const scrollTrackByCard = useCallback((direction) => {
+    const track = trackRef.current;
+    if (!track) return;
+
+    const cards = getTrackCards();
+    if (!cards.length) return;
+
+    const step = getScrollStep();
+    if (step <= 0) return;
+
+    const maxScrollLeft = Math.max(track.scrollWidth - track.clientWidth, 0);
+    const maxIndex = Math.ceil(maxScrollLeft / step);
+    const currentIndex = Math.round(track.scrollLeft / step);
+    const nextIndex = Math.min(Math.max(currentIndex + direction, 0), maxIndex);
+    const targetLeft = Math.min(nextIndex * step, maxScrollLeft);
+
+    track.scrollTo({
+      left: targetLeft,
+      behavior: "smooth"
+    });
+  }, [getScrollStep, getTrackCards]);
+
+  useEffect(() => {
+    updateBeltState();
+    window.addEventListener("resize", updateBeltState);
+
+    return () => {
+      window.removeEventListener("resize", updateBeltState);
+    };
+  }, [testimonials.length, updateBeltState]);
+
   return (
     <>
-      <div className="voices__grid" aria-label="Customer testimonials">
-        {testimonials.map((item, index) => {
-          const review = splitReviewQuote(item.quote);
-          const isActive = activeIndex === index;
+      <div className="voices__belt-shell" aria-label="Browse testimonials">
+        <button
+          className={`voices__belt-arrow voices__belt-arrow--side${beltState.canScrollPrev ? "" : " voices__belt-arrow--hidden"}`}
+          type="button"
+          onClick={() => scrollTrackByCard(-1)}
+          aria-label="Scroll to previous testimonials"
+          disabled={!beltState.canScrollPrev}
+          aria-hidden={!beltState.canScrollPrev}
+          tabIndex={beltState.canScrollPrev ? 0 : -1}
+        >
+          &lsaquo;
+        </button>
 
-          return (
-            <article
-              key={item.name}
-              className={`voices-card${isActive ? " voices-card--active" : ""}`}
-            >
-              <p className="voices-card__quote">
-                &quot;
-                {renderHighlightedText(
-                  review.preview,
-                  item.highlights,
-                  `preview-${index}`
-                )}
-                {review.hasOverflow ? "..." : ""}
-                &quot;
-              </p>
-              <div className="voices-card__footer">
-                <p className="voices-card__meta">
-                  <strong>{item.name}</strong>
-                  <span>{item.meta}</span>
-                </p>
-                {review.hasOverflow ? (
+        <div
+          ref={trackRef}
+          className="voices__belt"
+          aria-label="Customer testimonials"
+          onScroll={updateBeltState}
+        >
+          {testimonials.map((item, index) => {
+            const review = splitReviewQuote(
+              item.quote,
+              item.previewSentenceCount
+            );
+            const isActive = activeIndex === index;
+
+            return (
+              <article
+                key={item.name}
+                className={`voices-card${isActive ? " voices-card--active" : ""}`}
+                data-testimonial-card
+              >
+                <div className="voices-card__body">
+                  <p className="voices-card__quote">
+                    &quot;
+                    {renderHighlightedText(
+                      review.preview,
+                      item.highlights,
+                      `preview-${index}`
+                    )}
+                    {review.hasOverflow ? "..." : ""}
+                    &quot;
+                  </p>
+                </div>
+                <div className="voices-card__footer">
+                  <p className="voices-card__meta">
+                    <strong>{item.name}</strong>
+                    <span>{item.meta}</span>
+                  </p>
                   <button
                     className="voices-card__button"
                     type="button"
                     aria-haspopup="dialog"
-                    aria-expanded={isActive}
+                    aria-label={`Read full review from ${item.name}`}
                     onClick={() => openReview(index)}
                   >
                     Read more
                   </button>
-                ) : null}
-              </div>
-            </article>
-          );
-        })}
-      </div>
+                </div>
+              </article>
+            );
+          })}
+        </div>
 
+        <button
+          className={`voices__belt-arrow voices__belt-arrow--side${beltState.canScrollNext ? "" : " voices__belt-arrow--hidden"}`}
+          type="button"
+          onClick={() => scrollTrackByCard(1)}
+          aria-label="Scroll to next testimonials"
+          disabled={!beltState.canScrollNext}
+          aria-hidden={!beltState.canScrollNext}
+          tabIndex={beltState.canScrollNext ? 0 : -1}
+        >
+          &rsaquo;
+        </button>
+      </div>
       {activeReview ? (
         <div
           className="voices-modal"

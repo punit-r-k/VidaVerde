@@ -86,6 +86,7 @@ export default async function Home() {
         "basil and wasabi",
         "very tasty"
       ],
+      previewSentenceCount: 1,
       name: "Jennifer Hopkins",
       meta: "Fulshear Farmers Market"
     },
@@ -106,7 +107,7 @@ export default async function Home() {
     },
     {
       quote:
-        "Edison's \"Caribbean Heat\" raw sauerkraut has completely changed the way I think about fermented foods in the best possible way. The flavor is tangy and refreshingly crisp. Unlike some shelf-stable versions that can taste dull or sour, his sauerkraut has a lively taste that feels vibrant with every bite. A huge bonus is its natural fermentation. It retains beneficial probiotics that support gut health. Also, love the texture. It stays crunchy, which makes a great topping for salads, sandwiches, grain bowls, or straight from the jar (my fav!). It adds an instant flavor boost and zing to otherwise simple dishes.",
+        "Edison's \'Caribbean Heat\' raw sauerkraut has completely changed the way I think about fermented foods in the best possible way. The flavor is tangy and refreshingly crisp. Unlike some shelf-stable versions that can taste dull or sour, his sauerkraut has a lively taste that feels vibrant with every bite. A huge bonus is its natural fermentation. It retains beneficial probiotics that support gut health. Also, love the texture. It stays crunchy, which makes a great topping for salads, sandwiches, grain bowls, or straight from the jar (my fav!). It adds an instant flavor boost and zing to otherwise simple dishes.",
       highlights: [
         "natural fermentation",
         "probiotics",
@@ -117,7 +118,20 @@ export default async function Home() {
         "flavor boost",
         "zing"
       ],
+      previewSentenceCount: 1,
       name: "Jason Smarg",
+      meta: "Fulshear Farmers Market"
+    },
+    {
+      quote:
+        "Vida Verda Micro-greens makes awesome and inventive sauerkraut. Before I started using their product I was not a fan of sauerkraut, but I find Vida Verda to be delicious and nutritious to the point our whole family looks to incorporate into our diet on a weekly basis.",
+      highlights: [
+        "sauerkraut",
+        "delicious and nutritious",
+        "incorporate into our diet on a weekly basis"
+      ],
+      previewSentenceCount: 1,
+      name: "David & Claire",
       meta: "Fulshear Farmers Market"
     }
   ];
