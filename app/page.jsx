@@ -232,9 +232,9 @@ export default async function Home() {
         <div className="hero__scroll">Scroll</div>
       </header>
 
-      <main>
-        <JumpNav />
+      <JumpNav />
 
+      <main>
         {showProofSection ? (
           <section id="proof" className="section section--tight section--line signals">
             <div className="signals__shell js-reveal">
