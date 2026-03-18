@@ -211,7 +211,7 @@ export default async function Home() {
             Unpasteurized ferments made for daily meals.
           </p>
           <h1 className="reveal" style={{ "--delay": "0.2s" }}>
-            Real food. 
+            Real food.{" "}
             <br className="hero__mobile-break" />
             Real cultures.
             <br />
