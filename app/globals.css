@@ -2502,6 +2502,7 @@ select:focus {
   background: rgba(8, 29, 21, 0.6);
   -webkit-backdrop-filter: blur(6px);
   backdrop-filter: blur(6px);
+  pointer-events: none;
 }
 
 .voices-modal__panel {
@@ -2512,6 +2513,7 @@ select:focus {
   grid-template-rows: auto minmax(0, 1fr);
   overflow: hidden;
   overscroll-behavior: contain;
+  pointer-events: auto;
   border: 1px solid rgba(41, 54, 47, 0.12);
   border-radius: 24px;
   background: var(--surface-elevated);
@@ -3677,7 +3679,7 @@ select:focus {
   }
 
   .hero {
-    min-height: 75vh;
+    min-height: 80vh;
   }
 
   .hero__content {

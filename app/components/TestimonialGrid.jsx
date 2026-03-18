@@ -82,7 +82,6 @@ export default function TestimonialGrid({ testimonials = [] }) {
     canScrollPrev: false,
     canScrollNext: false
   });
-  const closeButtonRef = useRef(null);
   const modalReviewRef = useRef(null);
   const modalTouchStateRef = useRef(null);
   const trackTouchStateRef = useRef(null);
@@ -173,12 +172,6 @@ export default function TestimonialGrid({ testimonials = [] }) {
   useEffect(() => {
     if (activeIndex === null) return undefined;
 
-    const scrollY = window.scrollY;
-    const previousHtmlOverflow = document.documentElement.style.overflow;
-    const previousBodyOverflow = document.body.style.overflow;
-    const previousBodyPosition = document.body.style.position;
-    const previousBodyTop = document.body.style.top;
-    const previousBodyWidth = document.body.style.width;
     const handleKeyDown = (event) => {
       if (event.key === "Escape") {
         closeReview();
@@ -189,28 +182,10 @@ export default function TestimonialGrid({ testimonials = [] }) {
       }
     };
 
-    document.documentElement.style.overflow = "hidden";
-    document.body.style.overflow = "hidden";
-    document.body.style.position = "fixed";
-    document.body.style.top = `-${scrollY}px`;
-    document.body.style.width = "100%";
-    if (closeButtonRef.current) {
-      try {
-        closeButtonRef.current.focus({ preventScroll: true });
-      } catch {
-        closeButtonRef.current.focus();
-      }
-    }
     window.addEventListener("keydown", handleKeyDown);
 
     return () => {
-      document.documentElement.style.overflow = previousHtmlOverflow;
-      document.body.style.overflow = previousBodyOverflow;
-      document.body.style.position = previousBodyPosition;
-      document.body.style.top = previousBodyTop;
-      document.body.style.width = previousBodyWidth;
       window.removeEventListener("keydown", handleKeyDown);
-      window.scrollTo(0, scrollY);
     };
   }, [activeIndex, closeReview, showPrevious, showNext]);
 
@@ -485,14 +460,9 @@ export default function TestimonialGrid({ testimonials = [] }) {
         <div
           className="voices-modal"
           role="dialog"
-          aria-modal="true"
           aria-labelledby={`testimonial-title-${activeIndex}`}
-          onClick={closeReview}
         >
-          <div
-            className="voices-modal__panel"
-            onClick={(event) => event.stopPropagation()}
-          >
+          <div className="voices-modal__panel">
             <div className="voices-modal__topbar">
               <div className="voices-modal__topbar-actions">
                 <button
@@ -512,7 +482,6 @@ export default function TestimonialGrid({ testimonials = [] }) {
                   Next
                 </button>
                 <button
-                  ref={closeButtonRef}
                   className="voices-modal__close"
                   type="button"
                   onClick={closeReview}
