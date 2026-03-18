@@ -2638,14 +2638,12 @@ select:focus {
   }
 
   .voices__belt-shell {
-    grid-template-columns: 48px minmax(0, 1fr) 48px;
-    gap: 10px;
+    grid-template-columns: minmax(0, 1fr);
+    gap: 0;
   }
 
   .voices__belt-arrow {
-    width: 48px;
-    height: 48px;
-    font-size: 1.7rem;
+    display: none;
   }
 
   .voices-modal {
@@ -3639,7 +3637,7 @@ select:focus {
   }
 
   .hero {
-    min-height: 70vh;
+    min-height: 75vh;
   }
 
   .hero__content {
@@ -3745,7 +3743,6 @@ select:focus {
   }
 
   .signals__intro,
-  .voices__intro,
   .pulse__intro {
     text-align: left;
   }

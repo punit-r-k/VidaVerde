@@ -2,6 +2,8 @@
 
 import { useCallback, useEffect, useRef, useState } from "react";
 
+const AUTO_SCROLL_INTERVAL_MS = 7000;
+const MOBILE_BREAKPOINT_QUERY = "(max-width: 720px)";
 const REVIEW_PREVIEW_SENTENCE_COUNT = 2;
 const SWIPE_THRESHOLD = 48;
 
@@ -73,14 +75,48 @@ const renderHighlightedText = (text, highlights = [], keyPrefix) => {
 export default function TestimonialGrid({ testimonials = [] }) {
   const trackRef = useRef(null);
   const [activeIndex, setActiveIndex] = useState(null);
+  const [currentTrackIndex, setCurrentTrackIndex] = useState(0);
+  const [isAutoScrollEnabled, setIsAutoScrollEnabled] = useState(true);
+  const [isMobileViewport, setIsMobileViewport] = useState(false);
   const [beltState, setBeltState] = useState({
     canScrollPrev: false,
     canScrollNext: false
   });
   const closeButtonRef = useRef(null);
-  const touchStartXRef = useRef(null);
+  const modalTouchStartXRef = useRef(null);
+  const trackTouchStateRef = useRef(null);
   const activeReview =
     activeIndex === null ? null : testimonials[activeIndex] || null;
+
+  const getTrackCards = useCallback(() => {
+    const track = trackRef.current;
+    if (!track) return [];
+    return Array.from(track.querySelectorAll("[data-testimonial-card]"));
+  }, []);
+
+  const getNearestTrackIndex = useCallback(
+    (scrollLeft) => {
+      const track = trackRef.current;
+      const cards = getTrackCards();
+      if (!track || !cards.length) return 0;
+
+      const targetScrollLeft =
+        typeof scrollLeft === "number" ? scrollLeft : track.scrollLeft;
+      let nearestIndex = 0;
+      let nearestDistance = Number.POSITIVE_INFINITY;
+
+      cards.forEach((card, index) => {
+        const distance = Math.abs(card.offsetLeft - targetScrollLeft);
+        if (distance < nearestDistance) {
+          nearestDistance = distance;
+          nearestIndex = index;
+        }
+      });
+
+      return nearestIndex;
+    },
+    [getTrackCards]
+  );
 
   const updateBeltState = useCallback(() => {
     const track = trackRef.current;
@@ -98,26 +134,12 @@ export default function TestimonialGrid({ testimonials = [] }) {
         ? currentState
         : nextState
     );
-  }, []);
 
-  const getTrackCards = useCallback(() => {
-    const track = trackRef.current;
-    if (!track) return [];
-    return Array.from(track.querySelectorAll("[data-testimonial-card]"));
-  }, []);
-
-  const getScrollStep = useCallback(() => {
-    const track = trackRef.current;
-    const cards = getTrackCards();
-    if (!track || !cards.length) return 0;
-
-    if (cards.length > 1) {
-      const inferredStep = cards[1].offsetLeft - cards[0].offsetLeft;
-      if (inferredStep > 0) return inferredStep;
-    }
-
-    return cards[0].getBoundingClientRect().width || track.clientWidth;
-  }, [getTrackCards]);
+    const nextTrackIndex = getNearestTrackIndex(track.scrollLeft);
+    setCurrentTrackIndex((currentIndex) =>
+      currentIndex === nextTrackIndex ? currentIndex : nextTrackIndex
+    );
+  }, [getNearestTrackIndex]);
 
   const openReview = useCallback((index) => {
     setActiveIndex(index);
@@ -171,16 +193,17 @@ export default function TestimonialGrid({ testimonials = [] }) {
     };
   }, [activeIndex, closeReview, showPrevious, showNext]);
 
-  const handleTouchStart = (event) => {
-    touchStartXRef.current = event.touches[0]?.clientX ?? null;
+  const handleModalTouchStart = (event) => {
+    modalTouchStartXRef.current = event.touches[0]?.clientX ?? null;
   };
 
-  const handleTouchEnd = (event) => {
-    if (touchStartXRef.current === null) return;
+  const handleModalTouchEnd = (event) => {
+    if (modalTouchStartXRef.current === null) return;
 
-    const touchEndX = event.changedTouches[0]?.clientX ?? touchStartXRef.current;
-    const deltaX = touchEndX - touchStartXRef.current;
-    touchStartXRef.current = null;
+    const touchEndX =
+      event.changedTouches[0]?.clientX ?? modalTouchStartXRef.current;
+    const deltaX = touchEndX - modalTouchStartXRef.current;
+    modalTouchStartXRef.current = null;
 
     if (Math.abs(deltaX) < SWIPE_THRESHOLD) return;
 
@@ -191,29 +214,134 @@ export default function TestimonialGrid({ testimonials = [] }) {
     }
   };
 
-  const scrollTrackByCard = useCallback((direction) => {
-    const track = trackRef.current;
-    if (!track) return;
+  const scrollTrackToIndex = useCallback(
+    (index) => {
+      const track = trackRef.current;
+      const cards = getTrackCards();
+      if (!track || !cards.length) return;
 
-    const cards = getTrackCards();
-    if (!cards.length) return;
+      const safeIndex = ((index % cards.length) + cards.length) % cards.length;
+      track.scrollTo({
+        left: cards[safeIndex].offsetLeft,
+        behavior: "smooth"
+      });
+    },
+    [getTrackCards]
+  );
 
-    const step = getScrollStep();
-    if (step <= 0) return;
+  const scrollTrackByCard = useCallback(
+    (direction) => {
+      const track = trackRef.current;
+      const cards = getTrackCards();
+      if (!track || !cards.length) return;
 
-    const maxScrollLeft = Math.max(track.scrollWidth - track.clientWidth, 0);
-    const maxIndex = Math.ceil(maxScrollLeft / step);
-    const currentIndex = Math.round(track.scrollLeft / step);
-    const nextIndex = Math.min(Math.max(currentIndex + direction, 0), maxIndex);
-    const targetLeft = Math.min(nextIndex * step, maxScrollLeft);
+      const currentIndex = getNearestTrackIndex(track.scrollLeft);
+      const nextIndex = Math.min(
+        Math.max(currentIndex + direction, 0),
+        cards.length - 1
+      );
 
-    track.scrollTo({
-      left: targetLeft,
-      behavior: "smooth"
-    });
-  }, [getScrollStep, getTrackCards]);
+      scrollTrackToIndex(nextIndex);
+    },
+    [getNearestTrackIndex, getTrackCards, scrollTrackToIndex]
+  );
+
+  const handleTrackTouchStart = useCallback((event) => {
+    const touch = event.touches[0];
+    if (!touch) return;
+
+    trackTouchStateRef.current = {
+      x: touch.clientX,
+      y: touch.clientY,
+      scrollLeft: trackRef.current?.scrollLeft ?? 0
+    };
+  }, []);
+
+  const handleTrackTouchMove = useCallback(
+    (event) => {
+      if (!isMobileViewport || !isAutoScrollEnabled) return;
+
+      const touch = event.touches[0];
+      const trackTouchState = trackTouchStateRef.current;
+      if (!touch || !trackTouchState) return;
+
+      const deltaX = Math.abs(touch.clientX - trackTouchState.x);
+      const deltaY = Math.abs(touch.clientY - trackTouchState.y);
+      const scrollDelta = Math.abs(
+        (trackRef.current?.scrollLeft ?? 0) - trackTouchState.scrollLeft
+      );
+
+      if (deltaX > deltaY && (deltaX > 10 || scrollDelta > 10)) {
+        setIsAutoScrollEnabled(false);
+      }
+    },
+    [isAutoScrollEnabled, isMobileViewport]
+  );
+
+  const clearTrackTouchState = useCallback(() => {
+    trackTouchStateRef.current = null;
+  }, []);
 
   useEffect(() => {
+    const mediaQuery = window.matchMedia(MOBILE_BREAKPOINT_QUERY);
+    const updateViewport = (event) => {
+      const matches = typeof event?.matches === "boolean" ? event.matches : mediaQuery.matches;
+      setIsMobileViewport(matches);
+
+      if (!matches) {
+        setIsAutoScrollEnabled(true);
+      }
+    };
+
+    updateViewport();
+
+    if (typeof mediaQuery.addEventListener === "function") {
+      mediaQuery.addEventListener("change", updateViewport);
+      return () => {
+        mediaQuery.removeEventListener("change", updateViewport);
+      };
+    }
+
+    mediaQuery.addListener(updateViewport);
+    return () => {
+      mediaQuery.removeListener(updateViewport);
+    };
+  }, []);
+
+  useEffect(() => {
+    if (
+      !isMobileViewport ||
+      !isAutoScrollEnabled ||
+      activeIndex !== null ||
+      testimonials.length < 2
+    ) {
+      return undefined;
+    }
+
+    if (window.matchMedia("(prefers-reduced-motion: reduce)").matches) {
+      return undefined;
+    }
+
+    const timeoutId = window.setTimeout(() => {
+      scrollTrackToIndex(currentTrackIndex + 1);
+    }, AUTO_SCROLL_INTERVAL_MS);
+
+    return () => {
+      window.clearTimeout(timeoutId);
+    };
+  }, [
+    activeIndex,
+    currentTrackIndex,
+    isAutoScrollEnabled,
+    isMobileViewport,
+    scrollTrackToIndex,
+    testimonials.length
+  ]);
+
+  useEffect(() => {
+    const track = trackRef.current;
+    if (!track) return undefined;
+
     updateBeltState();
     window.addEventListener("resize", updateBeltState);
 
@@ -221,6 +349,11 @@ export default function TestimonialGrid({ testimonials = [] }) {
       window.removeEventListener("resize", updateBeltState);
     };
   }, [testimonials.length, updateBeltState]);
+
+  useEffect(() => {
+    if (!isMobileViewport) return;
+    updateBeltState();
+  }, [isMobileViewport, testimonials.length, updateBeltState]);
 
   return (
     <>
@@ -242,6 +375,10 @@ export default function TestimonialGrid({ testimonials = [] }) {
           className="voices__belt"
           aria-label="Customer testimonials"
           onScroll={updateBeltState}
+          onTouchStart={handleTrackTouchStart}
+          onTouchMove={handleTrackTouchMove}
+          onTouchEnd={clearTrackTouchState}
+          onTouchCancel={clearTrackTouchState}
         >
           {testimonials.map((item, index) => {
             const review = splitReviewQuote(
@@ -311,8 +448,8 @@ export default function TestimonialGrid({ testimonials = [] }) {
           <div
             className="voices-modal__panel"
             onClick={(event) => event.stopPropagation()}
-            onTouchStart={handleTouchStart}
-            onTouchEnd={handleTouchEnd}
+            onTouchStart={handleModalTouchStart}
+            onTouchEnd={handleModalTouchEnd}
           >
             <div className="voices-modal__topbar">
               <div className="voices-modal__topbar-actions">
