@@ -3400,6 +3400,21 @@ select:focus {
 }
 
 @media (max-width: 640px) {
+  body::before {
+    content: "";
+    position: fixed;
+    left: 0;
+    right: 0;
+    bottom: env(safe-area-inset-bottom, 0px);
+    height: 1px;
+    z-index: 39;
+    pointer-events: none;
+    opacity: 0;
+    transform: translateZ(0);
+    backface-visibility: hidden;
+    will-change: transform;
+  }
+
   .jump-nav {
     top: 0;
     padding: 10px var(--layout-inline);
