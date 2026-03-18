@@ -713,6 +713,61 @@ select
   case when on_hand > 0 then 'In Stock' else 'Out of Stock' end as status
 from inventory;
 
+-- Lock down direct Data API access. This app talks to Supabase from trusted
+-- server routes using the service role key, so public and authenticated roles
+-- should not have direct table or RPC access.
+do $$
+declare
+  v_table text;
+  v_policy text;
+begin
+  foreach v_table in array array[
+    'products',
+    'inventory',
+    'site_settings',
+    'orders',
+    'shipments',
+    'email_signups',
+    'order_items',
+    'preorder_queue',
+    'restock_events',
+    'api_rate_limits'
+  ]
+  loop
+    execute format('alter table public.%I enable row level security', v_table);
+
+    for v_policy in
+      select policyname
+      from pg_policies
+      where schemaname = 'public'
+        and tablename = v_table
+    loop
+      execute format('drop policy if exists %I on public.%I', v_policy, v_table);
+    end loop;
+  end loop;
+end $$;
+
+revoke all on all tables in schema public from public, anon, authenticated;
+revoke all on all sequences in schema public from public, anon, authenticated;
+
+alter default privileges in schema public revoke all on tables from public, anon, authenticated;
+alter default privileges in schema public revoke all on sequences from public, anon, authenticated;
+alter default privileges in schema public revoke execute on functions from public, anon, authenticated;
+
+revoke execute on function consume_api_rate_limit(text, text, integer, integer) from public, anon, authenticated;
+revoke execute on function record_paid_order(text, text, text, text, text, integer, integer, integer, integer, jsonb, jsonb) from public, anon, authenticated;
+revoke execute on function sync_shipment_for_order(uuid) from public, anon, authenticated;
+revoke execute on function sync_all_shipments() from public, anon, authenticated;
+revoke execute on function apply_restock(text, integer) from public, anon, authenticated;
+revoke execute on function set_expected_restock_date(text, date) from public, anon, authenticated;
+
+grant execute on function consume_api_rate_limit(text, text, integer, integer) to service_role;
+grant execute on function record_paid_order(text, text, text, text, text, integer, integer, integer, integer, jsonb, jsonb) to service_role;
+grant execute on function sync_shipment_for_order(uuid) to service_role;
+grant execute on function sync_all_shipments() to service_role;
+grant execute on function apply_restock(text, integer) to service_role;
+grant execute on function set_expected_restock_date(text, date) to service_role;
+
 insert into products (
   sku,
   slug,
