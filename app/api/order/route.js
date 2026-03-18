@@ -1,18 +1,16 @@
-﻿import { NextResponse } from "next/server";
-import { getProductMap } from "@/lib/products";
-import {
-  getRateLimitHeaders,
-  getRetryAfterSeconds,
-  rateLimitByRequest
-} from "@/lib/rateLimit";
+import { securePublicRoute } from "@/lib/apiSecurity";
 import {
   checkoutPayloadSchema,
   mapCheckoutIssuesToFieldErrors
 } from "@/lib/checkoutSchema";
+import { getProductMap } from "@/lib/products";
+import { getRouteRateLimitConfig } from "@/lib/rateLimit";
 import { stripeConfig, stripeRequest } from "@/lib/stripe";
 
-const CHECKOUT_WINDOW_MS = 60_000;
-const CHECKOUT_MAX = 6;
+const ORDER_RATE_LIMIT = getRouteRateLimitConfig("ORDER_CREATE", {
+  windowMs: 60_000,
+  ipMax: 6
+});
 
 const asMetadataValue = (value, maxLength = 500) =>
   String(value || "").trim().slice(0, maxLength);
@@ -26,29 +24,21 @@ const buildSkuSummary = (lineItems) =>
 export const runtime = "nodejs";
 
 export async function POST(request) {
-  if (!stripeConfig) {
-    return NextResponse.json(
-      { error: "Stripe is not configured." },
-      { status: 500 }
-    );
+  const security = await securePublicRoute(request, {
+    scope: "order:create",
+    rateLimit: ORDER_RATE_LIMIT,
+    rateLimitExceededMessage: "Too many checkout attempts. Please wait and try again."
+  });
+  if (!security.ok) {
+    return security.response;
   }
 
-  const limit = rateLimitByRequest(request, {
-    scope: "order:create",
-    windowMs: CHECKOUT_WINDOW_MS,
-    max: CHECKOUT_MAX
-  });
+  const { respond } = security;
 
-  if (!limit.ok) {
-    return NextResponse.json(
-      { error: "Too many checkout attempts. Please wait and try again." },
-      {
-        status: 429,
-        headers: {
-          ...getRateLimitHeaders(limit, CHECKOUT_MAX),
-          "Retry-After": String(getRetryAfterSeconds(limit.resetAt))
-        }
-      }
+  if (!stripeConfig) {
+    return respond.json(
+      { error: "Stripe is not configured." },
+      { status: 500 }
     );
   }
 
@@ -56,7 +46,7 @@ export async function POST(request) {
   try {
     payload = await request.json();
   } catch {
-    return NextResponse.json({ error: "Invalid payload." }, { status: 400 });
+    return respond.json({ error: "Invalid payload." }, { status: 400 });
   }
 
   const parsedPayload = checkoutPayloadSchema.safeParse(payload);
@@ -65,7 +55,7 @@ export async function POST(request) {
     const firstIssue = issues[0];
     const fieldErrors = mapCheckoutIssuesToFieldErrors(issues);
 
-    return NextResponse.json(
+    return respond.json(
       {
         error: firstIssue?.message || "Checkout details are invalid.",
         fieldErrors
@@ -101,7 +91,7 @@ export async function POST(request) {
     .filter(Boolean);
 
   if (lineItems.length === 0 || lineItems.length !== normalizedItems.length) {
-    return NextResponse.json(
+    return respond.json(
       { error: "Items are unavailable." },
       { status: 400 }
     );
@@ -113,7 +103,7 @@ export async function POST(request) {
   );
 
   if (!siteUrl) {
-    return NextResponse.json(
+    return respond.json(
       { error: "Site URL is not configured." },
       { status: 500 }
     );
@@ -125,7 +115,7 @@ export async function POST(request) {
   );
 
   if (!Number.isFinite(subtotal) || subtotal <= 0) {
-    return NextResponse.json(
+    return respond.json(
       { error: "Invalid order total." },
       { status: 400 }
     );
@@ -163,7 +153,7 @@ export async function POST(request) {
 
   const serializedItems = JSON.stringify(itemsPayload);
   if (serializedItems.length > 500) {
-    return NextResponse.json(
+    return respond.json(
       { error: "Cart is too large to process online. Please split into multiple orders." },
       { status: 400 }
     );
@@ -207,20 +197,20 @@ export async function POST(request) {
 
     if (!ok) {
       console.error("stripe payment_intent error:", error);
-      return NextResponse.json(
+      return respond.json(
         { error: "Unable to start payment." },
         { status: 500 }
       );
     }
 
     if (!data?.client_secret || !data?.id) {
-      return NextResponse.json(
+      return respond.json(
         { error: "Unable to start payment." },
         { status: 500 }
       );
     }
 
-    return NextResponse.json(
+    return respond.json(
       {
         clientSecret: data.client_secret,
         paymentIntentId: data.id,
@@ -230,7 +220,7 @@ export async function POST(request) {
     );
   } catch (error) {
     console.error("payment_intent create error:", error);
-    return NextResponse.json(
+    return respond.json(
       { error: "Unable to start payment." },
       { status: 500 }
     );

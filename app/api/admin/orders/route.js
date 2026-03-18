@@ -1,17 +1,15 @@
-import { NextResponse } from "next/server";
+import { ordersQuerySchema, parseSearchParams } from "@/lib/adminSchemas";
+import { secureAdminRoute } from "@/lib/apiSecurity";
+import { getRouteRateLimitConfig } from "@/lib/rateLimit";
 import { supabaseAdmin } from "@/lib/supabaseAdmin";
-import {
-  getRateLimitHeaders,
-  getRetryAfterSeconds,
-  rateLimitByRequest
-} from "@/lib/rateLimit";
 
-const requireSecret = (request) => {
-  const secret = request.headers.get("x-admin-secret");
-  return secret && secret === process.env.ADMIN_RESTOCK_SECRET;
-};
-const ADMIN_ORDERS_WINDOW_MS = 60_000;
-const ADMIN_ORDERS_MAX = 90;
+const ADMIN_ORDERS_RATE_LIMIT = getRouteRateLimitConfig("ADMIN_ORDERS_GET", {
+  windowMs: 60_000,
+  ipMax: 120,
+  userMax: 90
+});
+
+const ADMIN_ORDERS_ROLES = ["admin", "ops_admin"];
 
 const toInt = (value, fallback = 0) => {
   const parsed = Number.parseInt(value, 10);
@@ -28,44 +26,34 @@ const normalizeFulfillment = (value) => (value === "market" ? "market" : "ship")
 export const runtime = "nodejs";
 
 export async function GET(request) {
-  const rate = rateLimitByRequest(request, {
+  const security = await secureAdminRoute(request, {
     scope: "admin:orders:get",
-    windowMs: ADMIN_ORDERS_WINDOW_MS,
-    max: ADMIN_ORDERS_MAX
+    requiredRoles: ADMIN_ORDERS_ROLES,
+    rateLimit: ADMIN_ORDERS_RATE_LIMIT,
+    rateLimitExceededMessage: "Too many admin order requests. Please wait and try again."
   });
-  if (!rate.ok) {
-    return NextResponse.json(
-      { error: "Too many admin order requests. Please wait and try again." },
-      {
-        status: 429,
-        headers: {
-          ...getRateLimitHeaders(rate, ADMIN_ORDERS_MAX),
-          "Retry-After": String(getRetryAfterSeconds(rate.resetAt))
-        }
-      }
-    );
+  if (!security.ok) {
+    return security.response;
   }
 
-  if (!requireSecret(request)) {
-    return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
-  }
+  const { respond } = security;
 
   if (!supabaseAdmin) {
-    return NextResponse.json(
+    return respond.json(
       { error: "Supabase is not configured." },
       { status: 500 }
     );
   }
 
-  const { searchParams } = new URL(request.url);
-  const requestedLimit = toInt(searchParams.get("limit"), 500);
-  const limit = Math.min(Math.max(requestedLimit, 1), 2000);
-  const status = String(searchParams.get("status") || "").trim();
-  const fulfillmentFilter = String(searchParams.get("fulfillment") || "").trim();
-  const fulfillment =
-    fulfillmentFilter === "market" || fulfillmentFilter === "ship"
-      ? fulfillmentFilter
-      : "";
+  const parsedQuery = ordersQuerySchema.safeParse(parseSearchParams(request));
+  if (!parsedQuery.success) {
+    return respond.json(
+      { error: parsedQuery.error.issues[0]?.message || "Invalid query parameters." },
+      { status: 400 }
+    );
+  }
+
+  const { limit, status, fulfillment } = parsedQuery.data;
 
   let ordersQuery = supabaseAdmin
     .from("orders")
@@ -86,7 +74,7 @@ export async function GET(request) {
   const { data: ordersData, error: ordersError } = await ordersQuery;
   if (ordersError) {
     console.error("orders admin read error:", ordersError);
-    return NextResponse.json(
+    return respond.json(
       { error: "Unable to read orders." },
       { status: 500 }
     );
@@ -105,7 +93,7 @@ export async function GET(request) {
 
     if (itemsError) {
       console.error("orders admin items read error:", itemsError);
-      return NextResponse.json(
+      return respond.json(
         { error: "Unable to read order items." },
         { status: 500 }
       );
@@ -171,7 +159,7 @@ export async function GET(request) {
     };
   });
 
-  return NextResponse.json({
+  return respond.json({
     orders
   });
 }

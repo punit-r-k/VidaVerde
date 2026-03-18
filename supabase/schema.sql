@@ -168,6 +168,17 @@ create table if not exists restock_events (
   created_at timestamptz not null default now()
 );
 
+create table if not exists api_rate_limits (
+  bucket text primary key,
+  scope text not null,
+  window_started_at timestamptz not null,
+  count integer not null default 0 check (count >= 0),
+  expires_at timestamptz not null,
+  updated_at timestamptz not null default now()
+);
+
+create index if not exists api_rate_limits_expires_at_idx on api_rate_limits (expires_at);
+
 alter table restock_events drop constraint if exists restock_events_restock_qty_check;
 
 create or replace function set_updated_at()
@@ -177,6 +188,88 @@ begin
   return new;
 end;
 $$ language plpgsql;
+
+create or replace function consume_api_rate_limit(
+  p_bucket text,
+  p_scope text,
+  p_window_seconds integer,
+  p_max integer
+) returns table (
+  allowed boolean,
+  count integer,
+  remaining integer,
+  reset_at timestamptz
+)
+language plpgsql
+security definer
+set search_path = public
+as $$
+declare
+  v_now timestamptz := clock_timestamp();
+  v_window_started timestamptz;
+  v_reset_at timestamptz;
+  v_count integer;
+begin
+  if coalesce(length(trim(p_bucket)), 0) = 0 then
+    raise exception 'Rate limit bucket is required.';
+  end if;
+
+  if coalesce(length(trim(p_scope)), 0) = 0 then
+    raise exception 'Rate limit scope is required.';
+  end if;
+
+  if p_window_seconds <= 0 then
+    raise exception 'Rate limit window must be positive.';
+  end if;
+
+  if p_max <= 0 then
+    raise exception 'Rate limit max must be positive.';
+  end if;
+
+  v_window_started := to_timestamp(
+    floor(extract(epoch from v_now) / p_window_seconds) * p_window_seconds
+  );
+  v_reset_at := v_window_started + make_interval(secs => p_window_seconds);
+
+  insert into api_rate_limits as rl (
+    bucket,
+    scope,
+    window_started_at,
+    count,
+    expires_at,
+    updated_at
+  ) values (
+    p_bucket,
+    p_scope,
+    v_window_started,
+    1,
+    v_reset_at,
+    v_now
+  )
+  on conflict (bucket) do update
+    set scope = excluded.scope,
+        window_started_at = excluded.window_started_at,
+        count = case
+          when rl.expires_at <= v_now or rl.window_started_at <> excluded.window_started_at then 1
+          else rl.count + 1
+        end,
+        expires_at = excluded.expires_at,
+        updated_at = v_now
+  returning rl.count, rl.expires_at into v_count, v_reset_at;
+
+  if random() < 0.01 then
+    delete from api_rate_limits
+    where expires_at < v_now - interval '1 day';
+  end if;
+
+  return query
+  select
+    v_count <= p_max,
+    v_count,
+    greatest(p_max - least(v_count, p_max), 0),
+    v_reset_at;
+end;
+$$;
 
 drop trigger if exists set_products_updated_at on products;
 create trigger set_products_updated_at

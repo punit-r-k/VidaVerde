@@ -1,10 +1,6 @@
-import { NextResponse } from "next/server";
+import { secureAdminRoute } from "@/lib/apiSecurity";
+import { getRouteRateLimitConfig } from "@/lib/rateLimit";
 import { supabaseAdmin } from "@/lib/supabaseAdmin";
-import {
-  getRateLimitHeaders,
-  getRetryAfterSeconds,
-  rateLimitByRequest
-} from "@/lib/rateLimit";
 
 const DEFAULT_TIMEZONE = "America/Chicago";
 const LOOKBACK_DAYS = 21;
@@ -18,10 +14,13 @@ const WEEKDAY_INDEX = {
   sat: 6
 };
 
-const requireSecret = (request) => {
-  const secret = request.headers.get("x-admin-secret");
-  return secret && secret === process.env.ADMIN_RESTOCK_SECRET;
-};
+const ADMIN_PREP_RATE_LIMIT = getRouteRateLimitConfig("ADMIN_PREP_GET", {
+  windowMs: 60_000,
+  ipMax: 120,
+  userMax: 90
+});
+
+const ADMIN_PREP_ROLES = ["admin", "ops_admin"];
 
 const toDateKeyUTC = (date) => {
   return date.toISOString().slice(0, 10);
@@ -86,36 +85,24 @@ const toQty = (value) => {
 };
 
 const normalizeSku = (value) => String(value || "").trim().toUpperCase();
-const ADMIN_PREP_WINDOW_MS = 60_000;
-const ADMIN_PREP_MAX = 90;
 
 export const runtime = "nodejs";
 
 export async function GET(request) {
-  const limit = rateLimitByRequest(request, {
+  const security = await secureAdminRoute(request, {
     scope: "admin:prep:get",
-    windowMs: ADMIN_PREP_WINDOW_MS,
-    max: ADMIN_PREP_MAX
+    requiredRoles: ADMIN_PREP_ROLES,
+    rateLimit: ADMIN_PREP_RATE_LIMIT,
+    rateLimitExceededMessage: "Too many prep requests. Please wait and try again."
   });
-  if (!limit.ok) {
-    return NextResponse.json(
-      { error: "Too many prep requests. Please wait and try again." },
-      {
-        status: 429,
-        headers: {
-          ...getRateLimitHeaders(limit, ADMIN_PREP_MAX),
-          "Retry-After": String(getRetryAfterSeconds(limit.resetAt))
-        }
-      }
-    );
+  if (!security.ok) {
+    return security.response;
   }
 
-  if (!requireSecret(request)) {
-    return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
-  }
+  const { respond } = security;
 
   if (!supabaseAdmin) {
-    return NextResponse.json(
+    return respond.json(
       { error: "Supabase is not configured." },
       { status: 500 }
     );
@@ -141,7 +128,7 @@ export async function GET(request) {
 
   if (productsResult.error) {
     console.error("prep products read error:", productsResult.error);
-    return NextResponse.json(
+    return respond.json(
       { error: "Unable to read products." },
       { status: 500 }
     );
@@ -149,7 +136,7 @@ export async function GET(request) {
 
   if (itemsResult.error) {
     console.error("prep order_items read error:", itemsResult.error);
-    return NextResponse.json(
+    return respond.json(
       { error: "Unable to read order items." },
       { status: 500 }
     );
@@ -224,7 +211,7 @@ export async function GET(request) {
     });
   }
 
-  return NextResponse.json({
+  return respond.json({
     week: weekInfo,
     timezone,
     prep: prepRows

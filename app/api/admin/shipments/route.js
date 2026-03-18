@@ -1,14 +1,19 @@
-import { NextResponse } from "next/server";
+import { parseSearchParams, shipmentsQuerySchema } from "@/lib/adminSchemas";
+import { secureAdminRoute } from "@/lib/apiSecurity";
+import { getRouteRateLimitConfig } from "@/lib/rateLimit";
 import { supabaseAdmin } from "@/lib/supabaseAdmin";
-import {
-  getRateLimitHeaders,
-  getRetryAfterSeconds,
-  rateLimitByRequest
-} from "@/lib/rateLimit";
 
-const requireSecret = (request) => {
-  const secret = request.headers.get("x-admin-secret");
-  return secret && secret === process.env.ADMIN_RESTOCK_SECRET;
+const ADMIN_SHIPMENTS_RATE_LIMIT = getRouteRateLimitConfig("ADMIN_SHIPMENTS_GET", {
+  windowMs: 60_000,
+  ipMax: 120,
+  userMax: 90
+});
+
+const ADMIN_SHIPMENTS_ROLES = ["admin", "ops_admin"];
+
+const toInt = (value, fallback = 0) => {
+  const parsed = Number.parseInt(value, 10);
+  return Number.isFinite(parsed) ? parsed : fallback;
 };
 
 const toUpperText = (value, fallback) => {
@@ -16,50 +21,37 @@ const toUpperText = (value, fallback) => {
   return normalized || fallback;
 };
 
-const toInt = (value, fallback = 0) => {
-  const parsed = Number.parseInt(value, 10);
-  return Number.isFinite(parsed) ? parsed : fallback;
-};
-const ADMIN_SHIPMENTS_WINDOW_MS = 60_000;
-const ADMIN_SHIPMENTS_MAX = 90;
-
 export const runtime = "nodejs";
 
 export async function GET(request) {
-  const rate = rateLimitByRequest(request, {
+  const security = await secureAdminRoute(request, {
     scope: "admin:shipments:get",
-    windowMs: ADMIN_SHIPMENTS_WINDOW_MS,
-    max: ADMIN_SHIPMENTS_MAX
+    requiredRoles: ADMIN_SHIPMENTS_ROLES,
+    rateLimit: ADMIN_SHIPMENTS_RATE_LIMIT,
+    rateLimitExceededMessage: "Too many shipment requests. Please wait and try again."
   });
-  if (!rate.ok) {
-    return NextResponse.json(
-      { error: "Too many shipment requests. Please wait and try again." },
-      {
-        status: 429,
-        headers: {
-          ...getRateLimitHeaders(rate, ADMIN_SHIPMENTS_MAX),
-          "Retry-After": String(getRetryAfterSeconds(rate.resetAt))
-        }
-      }
-    );
+  if (!security.ok) {
+    return security.response;
   }
 
-  if (!requireSecret(request)) {
-    return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
-  }
+  const { respond } = security;
 
   if (!supabaseAdmin) {
-    return NextResponse.json(
+    return respond.json(
       { error: "Supabase is not configured." },
       { status: 500 }
     );
   }
 
-  const { searchParams } = new URL(request.url);
-  const requestedLimit = toInt(searchParams.get("limit"), 500);
-  const limit = Math.min(Math.max(requestedLimit, 1), 2000);
-  const status = String(searchParams.get("status") || "").trim();
-  const refresh = searchParams.get("refresh") === "1";
+  const parsedQuery = shipmentsQuerySchema.safeParse(parseSearchParams(request));
+  if (!parsedQuery.success) {
+    return respond.json(
+      { error: parsedQuery.error.issues[0]?.message || "Invalid query parameters." },
+      { status: 400 }
+    );
+  }
+
+  const { limit, status, refresh } = parsedQuery.data;
 
   let refreshedCount = 0;
   if (refresh) {
@@ -68,7 +60,7 @@ export async function GET(request) {
     );
     if (syncError) {
       console.error("sync_all_shipments error:", syncError);
-      return NextResponse.json(
+      return respond.json(
         { error: "Unable to refresh shipments." },
         { status: 500 }
       );
@@ -91,7 +83,7 @@ export async function GET(request) {
   const { data, error } = await query;
   if (error) {
     console.error("shipments admin read error:", error);
-    return NextResponse.json(
+    return respond.json(
       { error: "Unable to read shipments." },
       { status: 500 }
     );
@@ -124,8 +116,8 @@ export async function GET(request) {
     currency: toUpperText(row.currency, "USD"),
     notes: String(
       row.notes ||
-      (Array.isArray(row.orders) ? row.orders[0]?.note : row.orders?.note) ||
-      ""
+        (Array.isArray(row.orders) ? row.orders[0]?.note : row.orders?.note) ||
+        ""
     ),
     label_purchased_at: row.label_purchased_at || null,
     shipped_at: row.shipped_at || null,
@@ -133,7 +125,7 @@ export async function GET(request) {
     updated_at: row.updated_at
   }));
 
-  return NextResponse.json({
+  return respond.json({
     refreshed_count: refreshedCount,
     shipments
   });

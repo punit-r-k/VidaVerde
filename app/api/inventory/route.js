@@ -1,43 +1,32 @@
-import { NextResponse } from "next/server";
-import { supabaseAdmin } from "@/lib/supabaseAdmin";
+import { securePublicRoute } from "@/lib/apiSecurity";
+import { getRouteRateLimitConfig } from "@/lib/rateLimit";
 import { getShowStockSetting } from "@/lib/siteSettings";
-import {
-  getRateLimitHeaders,
-  getRetryAfterSeconds,
-  rateLimitByRequest
-} from "@/lib/rateLimit";
+import { supabaseAdmin } from "@/lib/supabaseAdmin";
 
-const INVENTORY_WINDOW_MS = 60_000;
-const INVENTORY_MAX = 180;
+const INVENTORY_RATE_LIMIT = getRouteRateLimitConfig("INVENTORY_GET", {
+  windowMs: 60_000,
+  ipMax: 180
+});
 
 export const dynamic = "force-dynamic";
 export const runtime = "nodejs";
 
 export async function GET(request) {
-  const limit = rateLimitByRequest(request, {
+  const security = await securePublicRoute(request, {
     scope: "inventory:get",
-    windowMs: INVENTORY_WINDOW_MS,
-    max: INVENTORY_MAX
+    rateLimit: INVENTORY_RATE_LIMIT,
+    rateLimitExceededMessage: "Too many inventory requests. Please wait and try again."
   });
-
-  if (!limit.ok) {
-    return NextResponse.json(
-      { error: "Too many inventory requests. Please wait and try again." },
-      {
-        status: 429,
-        headers: {
-          ...getRateLimitHeaders(limit, INVENTORY_MAX),
-          "Retry-After": String(getRetryAfterSeconds(limit.resetAt)),
-          "Cache-Control": "no-store"
-        }
-      }
-    );
+  if (!security.ok) {
+    const response = security.response;
+    response.headers.set("Cache-Control", "no-store");
+    return response;
   }
 
-  const rateHeaders = getRateLimitHeaders(limit, INVENTORY_MAX);
+  const { respond } = security;
 
   if (!supabaseAdmin) {
-    return NextResponse.json({}, { headers: { ...rateHeaders, "Cache-Control": "no-store" } });
+    return respond.json({}, { headers: { "Cache-Control": "no-store" } });
   }
 
   const [{ data, error }, showStock] = await Promise.all([
@@ -49,7 +38,7 @@ export async function GET(request) {
 
   if (error) {
     console.error("inventory read error:", error);
-    return NextResponse.json({}, { headers: { ...rateHeaders, "Cache-Control": "no-store" } });
+    return respond.json({}, { headers: { "Cache-Control": "no-store" } });
   }
 
   const map = {};
@@ -64,9 +53,8 @@ export async function GET(request) {
     };
   }
 
-  return NextResponse.json(map, {
+  return respond.json(map, {
     headers: {
-      ...rateHeaders,
       "Cache-Control": "no-store"
     }
   });

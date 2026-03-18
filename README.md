@@ -27,7 +27,18 @@ Apps Script file: `apps-script/inventory-sync.gs`
 
 Script properties required:
 - `API_BASE_URL` (example: `https://your-site-url`)
-- `ADMIN_RESTOCK_SECRET` (matches your `.env.local`)
+- `ADMIN_JWT_SECRET` (matches your server-side JWT signing secret)
+
+Optional script properties:
+- `ADMIN_JWT_ISSUER` (defaults to `vidaverde-admin`)
+- `ADMIN_JWT_AUDIENCE` (defaults to `vidaverde-admin-api`)
+- `ADMIN_JWT_SUBJECT` (defaults to `vidaverde-inventory-sync`)
+- `ADMIN_JWT_ROLES` (defaults to `ops_admin,inventory_admin`)
+
+The Apps Script now signs a fresh short-lived bearer JWT for each admin API request.
+For a staged rollout, the script still accepts a legacy `ADMIN_RESTOCK_SECRET` property
+as a fallback source for the signing secret, but the backend no longer accepts
+`x-admin-secret` header authentication.
 
 Sheet columns:
 - Column A: SKU (`VV1` ... `VV6`)
@@ -52,6 +63,7 @@ RPC functions:
 - `record_paid_order` (Stripe webhook)
 - `apply_restock` (restock delta)
 - `set_expected_restock_date`
+- `consume_api_rate_limit` (distributed API throttling)
 
 ## Stripe Payments
 
@@ -65,6 +77,53 @@ Required environment variables:
 - `NEXT_PUBLIC_STRIPE_PUBLISHABLE_KEY`
 - `STRIPE_WEBHOOK_SECRET`
 - `SITE_URL`
+
+## API Security
+
+Admin APIs under `app/api/admin/*` now require `Authorization: Bearer <jwt>`.
+Tokens are validated on every request and must:
+- be signed with `ADMIN_JWT_SECRET` using `HS256`
+- include the configured issuer and audience
+- include `exp`, `iat`, and `sub` claims
+- include role claims (`admin`, `ops_admin`, or `inventory_admin`) depending on the route
+
+Role enforcement:
+- `orders`, `shipments`, and `prep` require `admin` or `ops_admin`
+- `inventory` and `restock` require `admin` or `inventory_admin`
+
+## CORS
+
+API CORS is enforced centrally in `middleware.js`.
+Only origins listed in the environment are allowed:
+- `CORS_ALLOWED_ORIGINS`
+- `CORS_ALLOWED_ORIGINS_DEVELOPMENT`
+- `CORS_ALLOWED_ORIGINS_STAGING`
+- `CORS_ALLOWED_ORIGINS_PRODUCTION`
+
+Additional CORS controls:
+- `CORS_ALLOWED_HEADERS`
+- `CORS_ALLOWED_METHODS`
+- `CORS_ALLOW_CREDENTIALS`
+
+Do not use `*` for authenticated admin routes.
+
+## Rate Limiting
+
+Rate limiting is enforced on every API route.
+If Supabase is available and the updated `supabase/schema.sql` has been applied,
+limits are stored in Postgres via `consume_api_rate_limit` so they continue to work
+across multiple app instances. If that RPC is missing, the app falls back to an
+in-memory limiter until the schema is deployed.
+
+Environment override pattern:
+- `RATE_LIMIT_<ROUTE_KEY>_WINDOW_MS`
+- `RATE_LIMIT_<ROUTE_KEY>_IP_MAX`
+- `RATE_LIMIT_<ROUTE_KEY>_USER_MAX`
+
+Examples:
+- `RATE_LIMIT_ORDER_CREATE_IP_MAX=6`
+- `RATE_LIMIT_ADMIN_ORDERS_GET_USER_MAX=90`
+- `RATE_LIMIT_ADMIN_SHIPMENTS_GET_IP_MAX=120`
 
 ## Customize
 

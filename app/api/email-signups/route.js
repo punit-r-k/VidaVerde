@@ -1,15 +1,12 @@
-import { NextResponse } from "next/server";
-import { z } from "zod";
+import { securePublicRoute } from "@/lib/apiSecurity";
+import { getClientId, getRouteRateLimitConfig } from "@/lib/rateLimit";
 import { supabaseAdmin } from "@/lib/supabaseAdmin";
-import {
-  getRateLimitHeaders,
-  getRetryAfterSeconds,
-  rateLimitByRequest,
-  getClientId
-} from "@/lib/rateLimit";
+import { z } from "zod";
 
-const SIGNUP_WINDOW_MS = 60_000;
-const SIGNUP_MAX = 10;
+const EMAIL_SIGNUP_RATE_LIMIT = getRouteRateLimitConfig("EMAIL_SIGNUPS_CREATE", {
+  windowMs: 60_000,
+  ipMax: 10
+});
 
 const payloadSchema = z.object({
   email: z.string().trim().toLowerCase().email("Enter a valid email address."),
@@ -19,45 +16,37 @@ const payloadSchema = z.object({
 export const runtime = "nodejs";
 
 export async function POST(request) {
+  const security = await securePublicRoute(request, {
+    scope: "email-signups:create",
+    rateLimit: EMAIL_SIGNUP_RATE_LIMIT,
+    rateLimitExceededMessage: "Too many signup attempts. Please wait and try again."
+  });
+  if (!security.ok) {
+    return security.response;
+  }
+
+  const { respond } = security;
+
   if (!supabaseAdmin) {
-    return NextResponse.json(
+    return respond.json(
       { error: "Supabase is not configured." },
       { status: 500 }
     );
   }
 
   const clientId = getClientId(request);
-  const limit = rateLimitByRequest(request, {
-    scope: "email-signups:create",
-    identifier: clientId,
-    windowMs: SIGNUP_WINDOW_MS,
-    max: SIGNUP_MAX
-  });
-
-  if (!limit.ok) {
-    return NextResponse.json(
-      { error: "Too many signup attempts. Please wait and try again." },
-      {
-        status: 429,
-        headers: {
-          ...getRateLimitHeaders(limit, SIGNUP_MAX),
-          "Retry-After": String(getRetryAfterSeconds(limit.resetAt))
-        }
-      }
-    );
-  }
 
   let payload;
   try {
     payload = await request.json();
   } catch {
-    return NextResponse.json({ error: "Invalid payload." }, { status: 400 });
+    return respond.json({ error: "Invalid payload." }, { status: 400 });
   }
 
   const parsed = payloadSchema.safeParse(payload);
   if (!parsed.success) {
     const message = parsed.error.issues[0]?.message || "Invalid email address.";
-    return NextResponse.json({ error: message }, { status: 400 });
+    return respond.json({ error: message }, { status: 400 });
   }
 
   const email = parsed.data.email;
@@ -73,11 +62,11 @@ export async function POST(request) {
 
   if (error) {
     console.error("email signup insert error:", error);
-    return NextResponse.json(
+    return respond.json(
       { error: "Unable to save email signup." },
       { status: 500 }
     );
   }
 
-  return NextResponse.json({ ok: true }, { status: 201 });
+  return respond.json({ ok: true }, { status: 201 });
 }

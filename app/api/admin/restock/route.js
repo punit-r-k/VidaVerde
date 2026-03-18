@@ -1,43 +1,35 @@
-import { NextResponse } from "next/server";
+import { restockPayloadSchema } from "@/lib/adminSchemas";
+import { secureAdminRoute } from "@/lib/apiSecurity";
+import { getRouteRateLimitConfig } from "@/lib/rateLimit";
 import { supabaseAdmin } from "@/lib/supabaseAdmin";
-import {
-  getRateLimitHeaders,
-  getRetryAfterSeconds,
-  rateLimitByRequest
-} from "@/lib/rateLimit";
 
 export const runtime = "nodejs";
+
+const ADMIN_RESTOCK_RATE_LIMIT = getRouteRateLimitConfig("ADMIN_RESTOCK_POST", {
+  windowMs: 60_000,
+  ipMax: 180,
+  userMax: 120
+});
+
+const ADMIN_RESTOCK_ROLES = ["admin", "inventory_admin"];
+
 const normalizeSku = (value) => String(value || "").trim().toUpperCase();
-const ADMIN_RESTOCK_WINDOW_MS = 60_000;
-const ADMIN_RESTOCK_MAX = 120;
 
 export async function POST(request) {
-  const limit = rateLimitByRequest(request, {
+  const security = await secureAdminRoute(request, {
     scope: "admin:restock:post",
-    windowMs: ADMIN_RESTOCK_WINDOW_MS,
-    max: ADMIN_RESTOCK_MAX
+    requiredRoles: ADMIN_RESTOCK_ROLES,
+    rateLimit: ADMIN_RESTOCK_RATE_LIMIT,
+    rateLimitExceededMessage: "Too many restock requests. Please wait and try again."
   });
-
-  if (!limit.ok) {
-    return NextResponse.json(
-      { error: "Too many restock requests. Please wait and try again." },
-      {
-        status: 429,
-        headers: {
-          ...getRateLimitHeaders(limit, ADMIN_RESTOCK_MAX),
-          "Retry-After": String(getRetryAfterSeconds(limit.resetAt))
-        }
-      }
-    );
+  if (!security.ok) {
+    return security.response;
   }
 
-  const secret = request.headers.get("x-admin-secret");
-  if (!secret || secret !== process.env.ADMIN_RESTOCK_SECRET) {
-    return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
-  }
+  const { respond } = security;
 
   if (!supabaseAdmin) {
-    return NextResponse.json(
+    return respond.json(
       { error: "Supabase is not configured." },
       { status: 500 }
     );
@@ -47,15 +39,23 @@ export async function POST(request) {
   try {
     payload = await request.json();
   } catch {
-    return NextResponse.json({ error: "Invalid payload" }, { status: 400 });
+    return respond.json({ error: "Invalid payload" }, { status: 400 });
   }
 
-  const { sku, restock } = payload || {};
+  const parsedPayload = restockPayloadSchema.safeParse(payload);
+  if (!parsedPayload.success) {
+    return respond.json(
+      { error: parsedPayload.error.issues[0]?.message || "Invalid payload" },
+      { status: 400 }
+    );
+  }
+
+  const { sku, restock } = parsedPayload.data;
   const cleanSku = normalizeSku(sku);
   const qty = Number.parseInt(restock, 10);
 
   if (!cleanSku || Number.isNaN(qty)) {
-    return NextResponse.json({ error: "Invalid payload" }, { status: 400 });
+    return respond.json({ error: "Invalid payload" }, { status: 400 });
   }
 
   const { data, error } = await supabaseAdmin.rpc("apply_restock", {
@@ -65,8 +65,8 @@ export async function POST(request) {
 
   if (error) {
     console.error("apply_restock error:", error);
-    return NextResponse.json({ error: "Unable to restock" }, { status: 500 });
+    return respond.json({ error: "Unable to restock" }, { status: 500 });
   }
 
-  return NextResponse.json({ ok: true, inventory: data?.[0] || null });
+  return respond.json({ ok: true, inventory: data?.[0] || null });
 }

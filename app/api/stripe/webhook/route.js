@@ -1,19 +1,18 @@
-﻿import { NextResponse } from "next/server";
-import { supabaseAdmin } from "@/lib/supabaseAdmin";
+import { securePublicRoute } from "@/lib/apiSecurity";
+import { getRouteRateLimitConfig } from "@/lib/rateLimit";
 import {
   stripeConfig,
   stripeRequest,
   verifyStripeSignature
 } from "@/lib/stripe";
-import {
-  getRateLimitHeaders,
-  getRetryAfterSeconds,
-  rateLimitByRequest
-} from "@/lib/rateLimit";
+import { supabaseAdmin } from "@/lib/supabaseAdmin";
 
 export const runtime = "nodejs";
-const STRIPE_WEBHOOK_WINDOW_MS = 60_000;
-const STRIPE_WEBHOOK_MAX = 600;
+
+const STRIPE_WEBHOOK_RATE_LIMIT = getRouteRateLimitConfig("STRIPE_WEBHOOK_POST", {
+  windowMs: 60_000,
+  ipMax: 600
+});
 
 const parseItemsFromMetadata = (source) => {
   const raw = source?.metadata?.items;
@@ -272,33 +271,26 @@ const handlePaymentIntentSucceeded = async (intent) => {
 };
 
 export async function POST(request) {
-  const limit = rateLimitByRequest(request, {
+  const security = await securePublicRoute(request, {
     scope: "stripe:webhook:post",
-    windowMs: STRIPE_WEBHOOK_WINDOW_MS,
-    max: STRIPE_WEBHOOK_MAX
+    rateLimit: STRIPE_WEBHOOK_RATE_LIMIT,
+    rateLimitExceededMessage: "Too many webhook requests. Please wait and retry."
   });
-  if (!limit.ok) {
-    return NextResponse.json(
-      { error: "Too many webhook requests. Please wait and retry." },
-      {
-        status: 429,
-        headers: {
-          ...getRateLimitHeaders(limit, STRIPE_WEBHOOK_MAX),
-          "Retry-After": String(getRetryAfterSeconds(limit.resetAt))
-        }
-      }
-    );
+  if (!security.ok) {
+    return security.response;
   }
 
+  const { respond } = security;
+
   if (!stripeConfig) {
-    return NextResponse.json(
+    return respond.json(
       { error: "Stripe is not configured." },
       { status: 500 }
     );
   }
 
   if (!supabaseAdmin) {
-    return NextResponse.json(
+    return respond.json(
       { error: "Supabase is not configured." },
       { status: 500 }
     );
@@ -308,11 +300,11 @@ export async function POST(request) {
   const webhookSecret = process.env.STRIPE_WEBHOOK_SECRET;
 
   if (!signatureHeader) {
-    return NextResponse.json({ error: "Missing signature." }, { status: 400 });
+    return respond.json({ error: "Missing signature." }, { status: 400 });
   }
 
   if (!webhookSecret) {
-    return NextResponse.json(
+    return respond.json(
       { error: "Stripe webhook secret is not configured." },
       { status: 500 }
     );
@@ -326,14 +318,14 @@ export async function POST(request) {
   });
 
   if (!verification.ok) {
-    return NextResponse.json({ error: verification.error }, { status: 400 });
+    return respond.json({ error: verification.error }, { status: 400 });
   }
 
   let event;
   try {
     event = JSON.parse(body);
   } catch {
-    return NextResponse.json({ error: "Invalid payload." }, { status: 400 });
+    return respond.json({ error: "Invalid payload." }, { status: 400 });
   }
 
   const eventType = String(event?.type || "");
@@ -343,7 +335,7 @@ export async function POST(request) {
     eventType !== "checkout.session.async_payment_succeeded" &&
     eventType !== "payment_intent.succeeded"
   ) {
-    return NextResponse.json({ ok: true });
+    return respond.json({ ok: true });
   }
 
   if (
@@ -352,28 +344,28 @@ export async function POST(request) {
   ) {
     const session = event?.data?.object;
     if (!session || session.object !== "checkout.session") {
-      return NextResponse.json({ ok: true });
+      return respond.json({ ok: true });
     }
 
     const result = await handleCheckoutSessionEvent(session, eventType);
     if (!result.ok) {
-      return NextResponse.json(
+      return respond.json(
         { error: result.error || "Unable to record order." },
         { status: result.status || 500 }
       );
     }
 
-    return NextResponse.json({ ok: true });
+    return respond.json({ ok: true });
   }
 
   const intent = event?.data?.object;
   const result = await handlePaymentIntentSucceeded(intent);
   if (!result.ok) {
-    return NextResponse.json(
+    return respond.json(
       { error: result.error || "Unable to record order." },
       { status: result.status || 500 }
     );
   }
 
-  return NextResponse.json({ ok: true });
+  return respond.json({ ok: true });
 }

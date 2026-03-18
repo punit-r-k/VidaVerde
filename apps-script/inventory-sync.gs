@@ -153,7 +153,7 @@ function syncInventory() {
   const settings = getSettings_();
   const response = getJson_(
     `${settings.apiBaseUrl}/api/admin/inventory`,
-    settings.adminSecret
+    settings
   );
 
   const inventory = Array.isArray(response?.inventory) ? response.inventory : [];
@@ -190,7 +190,7 @@ function syncWeeklyPrep() {
   const settings = getSettings_();
   const response = getJson_(
     `${settings.apiBaseUrl}/api/admin/prep`,
-    settings.adminSecret
+    settings
   );
 
   const prepRows = Array.isArray(response?.prep) ? response.prep : [];
@@ -269,7 +269,7 @@ function syncOrders() {
   const settings = getSettings_();
   const response = getJson_(
     `${settings.apiBaseUrl}/api/admin/orders?status=paid&limit=1000`,
-    settings.adminSecret
+    settings
   );
 
   const orders = Array.isArray(response?.orders) ? response.orders : [];
@@ -356,7 +356,7 @@ function syncShipments() {
   const settings = getSettings_();
   const response = getJson_(
     `${settings.apiBaseUrl}/api/admin/shipments?refresh=1&limit=1000`,
-    settings.adminSecret
+    settings
   );
 
   const shipments = Array.isArray(response?.shipments) ? response.shipments : [];
@@ -473,7 +473,7 @@ function handleRestockEdit_(sheet, row) {
 
     const response = postJson_(
       `${settings.apiBaseUrl}/api/admin/restock`,
-      settings.adminSecret,
+      settings,
       payload
     );
 
@@ -527,7 +527,7 @@ function handleRestockDateEdit_(sheet, row) {
 
   const response = patchJson_(
     `${settings.apiBaseUrl}/api/admin/inventory`,
-    settings.adminSecret,
+    settings,
     payload
   );
 
@@ -557,7 +557,7 @@ function handlePreordersEdit_(sheet, row) {
 
   const response = patchJson_(
     `${settings.apiBaseUrl}/api/admin/inventory`,
-    settings.adminSecret,
+    settings,
     payload
   );
 
@@ -608,7 +608,7 @@ function handleShowStockToggleEdit_(sheet) {
 
   const response = patchJson_(
     `${settings.apiBaseUrl}/api/admin/inventory`,
-    settings.adminSecret,
+    settings,
     { show_stock: showStock }
   );
 
@@ -628,7 +628,7 @@ function handleShowStockToggleEdit_(sheet) {
 function syncInventoryRow_(sheet, row, sku, settings) {
   const response = getJson_(
     `${settings.apiBaseUrl}/api/admin/inventory`,
-    settings.adminSecret
+    settings
   );
 
   const inventory = Array.isArray(response?.inventory) ? response.inventory : [];
@@ -833,34 +833,93 @@ function normalizeSku_(value) {
 function getSettings_() {
   const props = PropertiesService.getScriptProperties();
   const apiBaseUrl = props.getProperty("API_BASE_URL");
-  const adminSecret = props.getProperty("ADMIN_RESTOCK_SECRET");
+  const adminJwtSecret =
+    props.getProperty("ADMIN_JWT_SECRET") || props.getProperty("ADMIN_RESTOCK_SECRET");
+  const adminJwtIssuer = props.getProperty("ADMIN_JWT_ISSUER") || "vidaverde-admin";
+  const adminJwtAudience = props.getProperty("ADMIN_JWT_AUDIENCE") || "vidaverde-admin-api";
+  const adminJwtSubject =
+    props.getProperty("ADMIN_JWT_SUBJECT") || "vidaverde-inventory-sync";
+  const adminJwtRoles = String(
+    props.getProperty("ADMIN_JWT_ROLES") || "ops_admin,inventory_admin"
+  )
+    .split(",")
+    .map((role) => role.trim())
+    .filter(Boolean);
 
-  if (!apiBaseUrl || !adminSecret) {
-    throw new Error("Missing API_BASE_URL or ADMIN_RESTOCK_SECRET script properties.");
+  if (!apiBaseUrl || !adminJwtSecret) {
+    throw new Error(
+      "Missing API_BASE_URL or ADMIN_JWT_SECRET (or legacy ADMIN_RESTOCK_SECRET) script properties."
+    );
   }
 
-  return { apiBaseUrl, adminSecret };
+  return {
+    apiBaseUrl,
+    adminJwtSecret,
+    adminJwtIssuer,
+    adminJwtAudience,
+    adminJwtSubject,
+    adminJwtRoles
+  };
 }
 
-function getJson_(url, adminSecret) {
+function encodeBase64Url_(value) {
+  const encoded = Array.isArray(value)
+    ? Utilities.base64EncodeWebSafe(value)
+    : Utilities.base64EncodeWebSafe(String(value), Utilities.Charset.UTF_8);
+  return encoded.replace(/=+$/g, "");
+}
+
+function createAdminJwt_(settings) {
+  const now = Math.floor(Date.now() / 1000);
+  const header = {
+    alg: "HS256",
+    typ: "JWT"
+  };
+  const payload = {
+    iss: settings.adminJwtIssuer,
+    aud: settings.adminJwtAudience,
+    sub: settings.adminJwtSubject,
+    roles: settings.adminJwtRoles,
+    iat: now,
+    nbf: now - 5,
+    exp: now + 60,
+    jti: Utilities.getUuid()
+  };
+
+  const encodedHeader = encodeBase64Url_(JSON.stringify(header));
+  const encodedPayload = encodeBase64Url_(JSON.stringify(payload));
+  const signingInput = `${encodedHeader}.${encodedPayload}`;
+  const signatureBytes = Utilities.computeHmacSha256Signature(
+    signingInput,
+    settings.adminJwtSecret,
+    Utilities.Charset.UTF_8
+  );
+  const signature = encodeBase64Url_(signatureBytes);
+
+  return `${signingInput}.${signature}`;
+}
+
+function buildAdminAuthHeaders_(settings) {
+  return {
+    Authorization: `Bearer ${createAdminJwt_(settings)}`
+  };
+}
+
+function getJson_(url, settings) {
   const response = UrlFetchApp.fetch(url, {
     method: "get",
-    headers: {
-      "x-admin-secret": adminSecret
-    },
+    headers: buildAdminAuthHeaders_(settings),
     muteHttpExceptions: true
   });
 
   return JSON.parse(response.getContentText());
 }
 
-function postJson_(url, adminSecret, payload) {
+function postJson_(url, settings, payload) {
   const response = UrlFetchApp.fetch(url, {
     method: "post",
     contentType: "application/json",
-    headers: {
-      "x-admin-secret": adminSecret
-    },
+    headers: buildAdminAuthHeaders_(settings),
     payload: JSON.stringify(payload),
     muteHttpExceptions: true
   });
@@ -879,13 +938,11 @@ function postJson_(url, adminSecret, payload) {
   }
 }
 
-function patchJson_(url, adminSecret, payload) {
+function patchJson_(url, settings, payload) {
   const response = UrlFetchApp.fetch(url, {
     method: "patch",
     contentType: "application/json",
-    headers: {
-      "x-admin-secret": adminSecret
-    },
+    headers: buildAdminAuthHeaders_(settings),
     payload: JSON.stringify(payload),
     muteHttpExceptions: true
   });
