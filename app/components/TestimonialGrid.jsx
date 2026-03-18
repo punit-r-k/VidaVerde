@@ -83,7 +83,8 @@ export default function TestimonialGrid({ testimonials = [] }) {
     canScrollNext: false
   });
   const closeButtonRef = useRef(null);
-  const modalTouchStartXRef = useRef(null);
+  const modalReviewRef = useRef(null);
+  const modalTouchStateRef = useRef(null);
   const trackTouchStateRef = useRef(null);
   const activeReview =
     activeIndex === null ? null : testimonials[activeIndex] || null;
@@ -172,7 +173,12 @@ export default function TestimonialGrid({ testimonials = [] }) {
   useEffect(() => {
     if (activeIndex === null) return undefined;
 
-    const previousOverflow = document.body.style.overflow;
+    const scrollY = window.scrollY;
+    const previousHtmlOverflow = document.documentElement.style.overflow;
+    const previousBodyOverflow = document.body.style.overflow;
+    const previousBodyPosition = document.body.style.position;
+    const previousBodyTop = document.body.style.top;
+    const previousBodyWidth = document.body.style.width;
     const handleKeyDown = (event) => {
       if (event.key === "Escape") {
         closeReview();
@@ -183,29 +189,63 @@ export default function TestimonialGrid({ testimonials = [] }) {
       }
     };
 
+    document.documentElement.style.overflow = "hidden";
     document.body.style.overflow = "hidden";
-    closeButtonRef.current?.focus();
+    document.body.style.position = "fixed";
+    document.body.style.top = `-${scrollY}px`;
+    document.body.style.width = "100%";
+    if (closeButtonRef.current) {
+      try {
+        closeButtonRef.current.focus({ preventScroll: true });
+      } catch {
+        closeButtonRef.current.focus();
+      }
+    }
     window.addEventListener("keydown", handleKeyDown);
 
     return () => {
-      document.body.style.overflow = previousOverflow;
+      document.documentElement.style.overflow = previousHtmlOverflow;
+      document.body.style.overflow = previousBodyOverflow;
+      document.body.style.position = previousBodyPosition;
+      document.body.style.top = previousBodyTop;
+      document.body.style.width = previousBodyWidth;
       window.removeEventListener("keydown", handleKeyDown);
+      window.scrollTo(0, scrollY);
     };
   }, [activeIndex, closeReview, showPrevious, showNext]);
 
+  useEffect(() => {
+    if (activeIndex === null) return;
+    if (modalReviewRef.current) {
+      modalReviewRef.current.scrollTop = 0;
+    }
+  }, [activeIndex]);
+
   const handleModalTouchStart = (event) => {
-    modalTouchStartXRef.current = event.touches[0]?.clientX ?? null;
+    const touch = event.touches[0];
+    if (!touch) return;
+
+    modalTouchStateRef.current = {
+      x: touch.clientX,
+      y: touch.clientY
+    };
   };
 
   const handleModalTouchEnd = (event) => {
-    if (modalTouchStartXRef.current === null) return;
+    const modalTouchState = modalTouchStateRef.current;
+    if (!modalTouchState) return;
 
-    const touchEndX =
-      event.changedTouches[0]?.clientX ?? modalTouchStartXRef.current;
-    const deltaX = touchEndX - modalTouchStartXRef.current;
-    modalTouchStartXRef.current = null;
+    const touchEnd = event.changedTouches[0];
+    const deltaX = (touchEnd?.clientX ?? modalTouchState.x) - modalTouchState.x;
+    const deltaY = (touchEnd?.clientY ?? modalTouchState.y) - modalTouchState.y;
+    modalTouchStateRef.current = null;
 
-    if (Math.abs(deltaX) < SWIPE_THRESHOLD) return;
+    if (
+      Math.abs(deltaX) < SWIPE_THRESHOLD ||
+      Math.abs(deltaX) <= Math.abs(deltaY)
+    ) {
+      return;
+    }
 
     if (deltaX > 0) {
       showPrevious();
@@ -213,6 +253,10 @@ export default function TestimonialGrid({ testimonials = [] }) {
       showNext();
     }
   };
+
+  const clearModalTouchState = useCallback(() => {
+    modalTouchStateRef.current = null;
+  }, []);
 
   const scrollTrackToIndex = useCallback(
     (index) => {
@@ -448,8 +492,6 @@ export default function TestimonialGrid({ testimonials = [] }) {
           <div
             className="voices-modal__panel"
             onClick={(event) => event.stopPropagation()}
-            onTouchStart={handleModalTouchStart}
-            onTouchEnd={handleModalTouchEnd}
           >
             <div className="voices-modal__topbar">
               <div className="voices-modal__topbar-actions">
@@ -488,7 +530,13 @@ export default function TestimonialGrid({ testimonials = [] }) {
                 <p className="voices-modal__meta">{activeReview.meta}</p>
               </aside>
 
-              <div className="voices-modal__review">
+              <div
+                ref={modalReviewRef}
+                className="voices-modal__review"
+                onTouchStart={handleModalTouchStart}
+                onTouchEnd={handleModalTouchEnd}
+                onTouchCancel={clearModalTouchState}
+              >
                 <blockquote className="voices-modal__quote">
                   {renderHighlightedText(
                     activeReview.quote,

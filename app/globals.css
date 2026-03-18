@@ -2507,7 +2507,11 @@ select:focus {
 .voices-modal__panel {
   width: min(1040px, 100%);
   max-height: min(780px, calc(100vh - 48px));
-  overflow: auto;
+  max-height: min(780px, calc(100dvh - 48px));
+  display: grid;
+  grid-template-rows: auto minmax(0, 1fr);
+  overflow: hidden;
+  overscroll-behavior: contain;
   border: 1px solid rgba(41, 54, 47, 0.12);
   border-radius: 24px;
   background: var(--surface-elevated);
@@ -2522,6 +2526,8 @@ select:focus {
   flex-wrap: wrap;
   padding: 18px 22px;
   border-bottom: 1px solid rgba(41, 54, 47, 0.08);
+  background:
+    linear-gradient(180deg, rgba(255, 253, 248, 0.98), rgba(255, 253, 248, 0.95));
 }
 
 .voices-modal__topbar-actions {
@@ -2564,11 +2570,13 @@ select:focus {
   display: grid;
   grid-template-columns: minmax(220px, 260px) minmax(0, 1fr);
   gap: 0;
+  min-height: 0;
 }
 
 .voices-modal__identity {
   padding: clamp(24px, 3vw, 34px);
   border-right: 1px solid rgba(41, 54, 47, 0.08);
+  background: rgba(243, 239, 227, 0.6);
 }
 
 .voices-modal__eyebrow {
@@ -2601,6 +2609,12 @@ select:focus {
   padding: clamp(24px, 3vw, 36px);
   display: grid;
   gap: 20px;
+  min-height: 0;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  -webkit-overflow-scrolling: touch;
+  scrollbar-width: thin;
+  scrollbar-color: rgba(35, 101, 72, 0.55) rgba(199, 216, 206, 0.3);
 }
 
 .voices-modal__quote {
@@ -2610,6 +2624,22 @@ select:focus {
   font-size: clamp(1.12rem, 1.02rem + 0.42vw, 1.46rem);
   line-height: 1.58;
   font-style: italic;
+  overflow-wrap: anywhere;
+}
+
+.voices-modal__review::-webkit-scrollbar {
+  width: 10px;
+}
+
+.voices-modal__review::-webkit-scrollbar-track {
+  background: rgba(199, 216, 206, 0.3);
+  border-radius: 999px;
+}
+
+.voices-modal__review::-webkit-scrollbar-thumb {
+  background: rgba(35, 101, 72, 0.55);
+  border-radius: 999px;
+  border: 2px solid rgba(255, 253, 248, 0.8);
 }
 
 .voices-modal__hint {
@@ -2623,6 +2653,7 @@ select:focus {
 @media (max-width: 900px) {
   .voices-modal__content {
     grid-template-columns: 1fr;
+    grid-template-rows: auto minmax(0, 1fr);
   }
 
   .voices-modal__identity {
@@ -2647,14 +2678,19 @@ select:focus {
   }
 
   .voices-modal {
-    padding: 0;
+    align-items: stretch;
+    padding:
+      max(10px, env(safe-area-inset-top, 0px))
+      max(10px, env(safe-area-inset-right, 0px))
+      max(10px, env(safe-area-inset-bottom, 0px))
+      max(10px, env(safe-area-inset-left, 0px));
   }
 
   .voices-modal__panel {
     width: 100%;
-    max-height: none;
-    height: 100vh;
-    border-radius: 0;
+    height: 100%;
+    max-height: 100%;
+    border-radius: 22px;
   }
 
   .voices-modal__topbar {
@@ -2662,17 +2698,25 @@ select:focus {
   }
 
   .voices-modal__topbar-actions {
+    width: 100%;
+    display: grid;
+    grid-template-columns: repeat(3, minmax(0, 1fr));
     gap: 8px;
   }
 
   .voices-modal__nav,
   .voices-modal__close {
+    width: 100%;
     padding: 10px 14px;
   }
 
   .voices-modal__identity,
   .voices-modal__review {
     padding: 18px;
+  }
+
+  .voices-modal__identity h3 {
+    line-height: 1.08;
   }
 
   .voices-modal__quote {
@@ -3361,10 +3405,6 @@ select:focus {
     border-top: none;
     -webkit-backdrop-filter: none;
     backdrop-filter: none;
-    transform: translateZ(0);
-    backface-visibility: hidden;
-    will-change: transform;
-    contain: paint;
   }
 
   .jump-nav__toggle {
