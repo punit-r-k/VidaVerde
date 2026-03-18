@@ -2118,17 +2118,6 @@ select:focus {
   }
 }
 
-.jump-nav-shell {
-  position: relative;
-}
-
-.jump-nav__sentinel {
-  position: absolute;
-  inset: 0 0 auto;
-  height: 1px;
-  pointer-events: none;
-}
-
 .jump-nav {
   position: sticky;
   top: 0;
@@ -3411,20 +3400,6 @@ select:focus {
 }
 
 @media (max-width: 640px) {
-  .jump-nav--mobile-managed {
-    position: relative;
-    top: auto;
-  }
-
-  .jump-nav--mobile-managed.jump-nav--pinned {
-    position: fixed;
-    top: 0;
-    left: 0;
-    right: 0;
-    z-index: 40;
-    box-shadow: 0 10px 22px rgba(41, 54, 47, 0.12);
-  }
-
   .jump-nav {
     top: 0;
     padding: 10px var(--layout-inline);
@@ -3674,10 +3649,12 @@ select:focus {
 
   .hero__content {
     padding: 8.5vh 0 7.5vh;
+    padding: 8.5svh 0 7.5svh;
   }
 
   .hero {
     min-height: 74vh;
+    min-height: 74svh;
   }
 
   .hero__content::after {
@@ -3705,6 +3682,7 @@ select:focus {
 
   .hero {
     min-height: 80vh;
+    min-height: 80svh;
   }
 
   .hero__content {
