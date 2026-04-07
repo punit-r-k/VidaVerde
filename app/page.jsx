@@ -520,7 +520,7 @@ export default async function Home() {
         <div className="footer__meta">
           <span>{marketAddress}</span>
           <span>Every Saturday, 9:00 AM - 1:00 PM</span>
-          <span>hello@vidaverde.com</span>
+          <span>vidaverdemicrogreens@gmail.com</span>
         </div>
       </footer>
     </>

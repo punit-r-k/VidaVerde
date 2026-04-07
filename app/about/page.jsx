@@ -83,7 +83,7 @@ export default function AboutPage() {
         </div>
         <div className="footer__meta">
           <span>{marketAddress}</span>
-          <span>hello@vidaverde.com</span>
+          <span>vidaverdemicrogreens@gmail.com</span>
         </div>
       </footer>
     </>
