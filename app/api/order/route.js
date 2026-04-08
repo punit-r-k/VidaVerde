@@ -167,7 +167,6 @@ export async function POST(request) {
       automatic_payment_methods: {
         enabled: true
       },
-      receipt_email: email,
       description: asMetadataValue(
         `Vida Verde ${isPickup ? "pickup" : "shipping"} order: ${orderSummary}`,
         500

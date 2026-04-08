@@ -110,7 +110,7 @@ Role enforcement:
 
 ## CORS
 
-API CORS is enforced centrally in `middleware.js`.
+API CORS is enforced centrally in `proxy.js`.
 Only origins listed in the environment are allowed:
 - `CORS_ALLOWED_ORIGINS`
 - `CORS_ALLOWED_ORIGINS_DEVELOPMENT`

@@ -59,6 +59,54 @@ const toText = (value, max = 500) => String(value || "").trim().slice(0, max);
 
 const toFulfillment = (value) => (value === "market" ? "market" : "ship");
 
+const toTitleWords = (value) =>
+  String(value || "")
+    .trim()
+    .split(/[\s_-]+/)
+    .filter(Boolean)
+    .map((part) => part.charAt(0).toUpperCase() + part.slice(1).toLowerCase())
+    .join(" ");
+
+const getFallbackPaymentMethodLabel = (source) => {
+  const types = Array.isArray(source?.payment_method_types)
+    ? source.payment_method_types
+    : [];
+  const primaryType = toText(types[0], 32).toLowerCase();
+
+  if (primaryType === "card") {
+    return "Card";
+  }
+
+  return primaryType ? toTitleWords(primaryType) : "";
+};
+
+const getChargePaymentMethodLabel = (charge) => {
+  const details = charge?.payment_method_details || {};
+  const type = toText(details?.type, 32).toLowerCase();
+
+  if (type === "card") {
+    const card = details?.card || {};
+    const brand = toTitleWords(card?.brand);
+    const last4 = toText(card?.last4, 4);
+    const walletType = toTitleWords(card?.wallet?.type);
+    const baseLabel =
+      brand && last4
+        ? `${brand} ending in ${last4}`
+        : brand || (last4 ? `Card ending in ${last4}` : "Card");
+
+    return walletType ? `${walletType} (${baseLabel})` : baseLabel;
+  }
+
+  if (type === "link") {
+    return "Link";
+  }
+
+  return type ? toTitleWords(type) : "";
+};
+
+const getChargeReceiptNumber = (charge) =>
+  toText(charge?.receipt_number || charge?.id, 255);
+
 const recordPaidOrder = async ({
   paymentSessionId,
   paymentReference,
@@ -140,6 +188,8 @@ const maybeSendCustomerConfirmationEmail = async ({
   tax,
   shipping,
   total,
+  receiptNumber,
+  paymentMethodLabel,
   customer,
   items
 }) => {
@@ -168,6 +218,8 @@ const maybeSendCustomerConfirmationEmail = async ({
     tax,
     shipping,
     total,
+    receiptNumber,
+    paymentMethodLabel,
     customer,
     items
   });
@@ -204,6 +256,8 @@ const runOrderSideEffects = async ({
   tax,
   shipping,
   total,
+  receiptNumber,
+  paymentMethodLabel,
   customer,
   items
 }) => {
@@ -233,6 +287,8 @@ const runOrderSideEffects = async ({
     tax,
     shipping,
     total,
+    receiptNumber,
+    paymentMethodLabel,
     customer,
     items
   });
@@ -290,6 +346,8 @@ const handleCheckoutSessionEvent = async (session, eventType) => {
   const subtotal = Number(session?.amount_subtotal || 0);
   const tax = Number(session?.total_details?.amount_tax || 0);
   const shipping = Number(session?.total_details?.amount_shipping || 0);
+  const receiptNumber = "";
+  const paymentMethodLabel = getFallbackPaymentMethodLabel(session);
   const paymentSessionId = toText(session?.id, 255);
   const paymentReference =
     typeof session?.payment_intent === "string" ? session.payment_intent : "";
@@ -324,6 +382,8 @@ const handleCheckoutSessionEvent = async (session, eventType) => {
     tax,
     shipping,
     total,
+    receiptNumber,
+    paymentMethodLabel,
     customer,
     items
   });
@@ -347,6 +407,9 @@ const handlePaymentIntentSucceeded = async (intent) => {
   const latestCharge = intent?.charges?.data?.[0] || {};
   const billing = latestCharge?.billing_details || {};
   const billingAddress = billing?.address || {};
+  const receiptNumber = getChargeReceiptNumber(latestCharge);
+  const paymentMethodLabel =
+    getChargePaymentMethodLabel(latestCharge) || getFallbackPaymentMethodLabel(intent);
 
   const customer = {
     name: toText(metadata.customer_name || shippingDetails?.name || billing?.name, 120),
@@ -403,6 +466,8 @@ const handlePaymentIntentSucceeded = async (intent) => {
     tax,
     shipping,
     total,
+    receiptNumber,
+    paymentMethodLabel,
     customer,
     items
   });

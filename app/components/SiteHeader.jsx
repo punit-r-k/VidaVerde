@@ -1,4 +1,5 @@
 import Image from "next/image";
+import Link from "next/link";
 
 export default function SiteHeader({ variant = "overlay" }) {
   const navClass = variant === "solid" ? "nav nav--solid" : "nav";
@@ -10,9 +11,9 @@ export default function SiteHeader({ variant = "overlay" }) {
         <span>Vida Verde Microgreens</span>
       </div>
       <div className="nav__links">
-        <a href="/#shop">Shop</a>
-        <a href="/#market">Fulshear Market</a>
-        <a href="/#founder">Founder</a>
+        <Link href="/#shop">Shop</Link>
+        <Link href="/#market">Fulshear Market</Link>
+        <Link href="/#founder">Founder</Link>
       </div>
     </nav>
   );

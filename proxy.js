@@ -15,7 +15,7 @@ const jsonError = (message, status, headers = new Headers()) => {
   return response;
 };
 
-export function middleware(request) {
+export function proxy(request) {
   if (hasAmbiguousRequestFraming(request)) {
     console.warn("Rejected ambiguous request framing", {
       path: request.nextUrl.pathname
