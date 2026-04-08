@@ -170,10 +170,15 @@ export default async function Home() {
     },
     {
       q: "Do you offer shipping?",
-      a:
-        `Not yet. We currently offer pickup only at ${MARKET_NAME}, ${MARKET_ADDRESS}, ${MARKET_DAY_LABEL.toLowerCase()} ` +
-        `from ${MARKET_PICKUP_WINDOW}. Shipping is coming soon. ${SAME_DAY_PICKUP_NOTICE} ${FOLLOWING_WEEK_PICKUP_NOTICE} ` +
-        `${WEATHER_CLOSURE_NOTICE} ${MARKET_UPDATES_NOTICE}`
+      intro: "Not yet. We currently offer pickup only. Shipping is coming soon.",
+      bullets: [
+        `Pickup: ${MARKET_NAME}`,
+        `Location: ${MARKET_ADDRESS}`,
+        `When: ${MARKET_DAY_LABEL}, ${MARKET_PICKUP_WINDOW}`,
+        SAME_DAY_PICKUP_NOTICE,
+        FOLLOWING_WEEK_PICKUP_NOTICE
+      ],
+      notes: [WEATHER_CLOSURE_NOTICE, MARKET_UPDATES_NOTICE]
     }
   ];
 
@@ -515,7 +520,22 @@ export default async function Home() {
               {faqs.map((item) => (
                 <details key={item.q}>
                   <summary>{item.q}</summary>
-                  <p>{item.a}</p>
+                  {item.a ? <p>{item.a}</p> : null}
+                  {item.intro || item.bullets || item.notes ? (
+                    <div className="faq__answer">
+                      {item.intro ? <p>{item.intro}</p> : null}
+                      {item.bullets?.length ? (
+                        <ul>
+                          {item.bullets.map((line) => (
+                            <li key={line}>{line}</li>
+                          ))}
+                        </ul>
+                      ) : null}
+                      {item.notes?.map((line) => (
+                        <p key={line}>{line}</p>
+                      ))}
+                    </div>
+                  ) : null}
                   {item.disclaimer ? (
                     <p className="faq__disclaimer">
                       <span>{item.disclaimer}</span>
