@@ -2,7 +2,7 @@ const navItems = [
   // Archived section:
   // { href: "#proof", label: "Proof" },
   { href: "#voices", label: "Reviews" },
-  { href: "#founder", label: "Story" },
+  { href: "#founder", label: "Our Story" },
   { href: "#wellness", label: "Why Live Fermented Foods Matter" },
   { href: "#shop", label: "Shop" },
   { href: "#faq", label: "FAQ" }
