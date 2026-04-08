@@ -3,7 +3,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 
 const AUTO_SCROLL_INTERVAL_MS = 7000;
-const MOBILE_BREAKPOINT_QUERY = "(max-width: 720px)";
+const MOBILE_BREAKPOINT_QUERY = "(max-width: 900px)";
 const REVIEW_PREVIEW_SENTENCE_COUNT = 2;
 const SWIPE_THRESHOLD = 48;
 
@@ -456,6 +456,28 @@ export default function TestimonialGrid({ testimonials = [] }) {
           &rsaquo;
         </button>
       </div>
+      {testimonials.length > 1 ? (
+        <div
+          className="voices__pagination"
+          aria-label="Review position"
+          role="group"
+        >
+          {testimonials.map((item, index) => {
+            const isCurrent = currentTrackIndex === index;
+
+            return (
+              <button
+                key={`dot-${item.name}`}
+                className={`voices__pagination-dot${isCurrent ? " voices__pagination-dot--active" : ""}`}
+                type="button"
+                onClick={() => scrollTrackToIndex(index)}
+                aria-label={`Show review ${index + 1} of ${testimonials.length}: ${item.name}`}
+                aria-pressed={isCurrent}
+              />
+            );
+          })}
+        </div>
+      ) : null}
       {activeReview ? (
         <div
           className="voices-modal"

@@ -121,6 +121,18 @@ export default async function Home() {
     },
     {
       quote:
+        "Vida Verda Micro-greens makes awesome and inventive sauerkraut. Before I started using their product I was not a fan of sauerkraut, but I find Vida Verda to be delicious and nutritious to the point our whole family looks to incorporate into our diet on a weekly basis.",
+      highlights: [
+        "sauerkraut",
+        "delicious and nutritious",
+        "incorporate into our diet on a weekly basis"
+      ],
+      previewSentenceCount: 1,
+      name: "David & Claire",
+      meta: "Fulshear Farmers Market"
+    },
+    {
+      quote:
         "Edison's \'Caribbean Heat\' raw sauerkraut has completely changed the way I think about fermented foods in the best possible way. The flavor is tangy and refreshingly crisp. Unlike some shelf-stable versions that can taste dull or sour, his sauerkraut has a lively taste that feels vibrant with every bite. A huge bonus is its natural fermentation. It retains beneficial probiotics that support gut health. Also, love the texture. It stays crunchy, which makes a great topping for salads, sandwiches, grain bowls, or straight from the jar (my fav!). It adds an instant flavor boost and zing to otherwise simple dishes.",
       highlights: [
         "natural fermentation",
@@ -134,18 +146,6 @@ export default async function Home() {
       ],
       previewSentenceCount: 1,
       name: "Jason Smarg",
-      meta: "Fulshear Farmers Market"
-    },
-    {
-      quote:
-        "Vida Verda Micro-greens makes awesome and inventive sauerkraut. Before I started using their product I was not a fan of sauerkraut, but I find Vida Verda to be delicious and nutritious to the point our whole family looks to incorporate into our diet on a weekly basis.",
-      highlights: [
-        "sauerkraut",
-        "delicious and nutritious",
-        "incorporate into our diet on a weekly basis"
-      ],
-      previewSentenceCount: 1,
-      name: "David & Claire",
       meta: "Fulshear Farmers Market"
     }
   ];
@@ -227,10 +227,15 @@ export default async function Home() {
         <div className="hero__content">
           <div className="hero__brand reveal" style={{ "--delay": "0.05s" }}>
             <Image src="/logo.svg" alt="Vida Verde logo" width={46} height={46} />
-            <span>vida verde sauerkraut</span>
+            <span className="hero__brand-text">
+              <span>vida verde</span>
+              <span>sauerkraut</span>
+            </span>
           </div>
           <p className="eyebrow reveal" style={{ "--delay": "0.1s" }}>
-            Unpasteurized ferments made for daily meals.
+            Unpasteurized ferments{" "}
+            <br className="hero__mobile-break" />
+            made for daily meals.
           </p>
           <h1 className="reveal" style={{ "--delay": "0.2s" }}>
             Real food.{" "}
@@ -552,7 +557,7 @@ export default async function Home() {
         <div>
           <h3 className="footer__brand">
             <Image src="/logo.svg" alt="Vida Verde logo" width={32} height={32} />
-            <span>Vida Verde Microgreens</span>
+            <span>Vida Verde Sauerkraut</span>
           </h3>
           <p>Live fermented sauerkraut and hot sauce for daily nourishment.</p>
         </div>
