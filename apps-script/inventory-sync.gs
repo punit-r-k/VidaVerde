@@ -196,37 +196,34 @@ function syncWeeklyPrep() {
   const prepRows = Array.isArray(response?.prep) ? response.prep : [];
   const weekInfo = response?.week || {};
   const pickup = response?.pickup || {};
-  const timezone = String(response?.timezone || "America/Chicago");
 
   const sheet = ensurePrepSheet_();
   sheet.clearContents();
 
+  const orderWindow =
+    String(weekInfo.collection_window_label || "").trim() ||
+    String(
+      [weekInfo.collection_start_label, weekInfo.collection_end_label]
+        .filter(Boolean)
+        .join(" to ")
+    ).trim() ||
+    [weekInfo.week_start_date, weekInfo.week_end_date]
+      .filter(Boolean)
+      .join(" to ");
   const metaValues = [[
-    "Week Start",
-    weekInfo.week_start_date || "",
-    "Week End",
-    weekInfo.week_end_date || "",
-    "Market Date (Saturday)",
-    pickup.market_date || weekInfo.market_date || "",
-    "Pickup Window",
-    pickup.pickup_window || "",
-    "Same-Day Cutoff",
-    pickup.same_day_cutoff_label || "",
-    "Market",
-    pickup.market_name || "",
-    "Address",
-    pickup.market_address || "",
-    "Timezone",
-    pickup.timezone || timezone
+    "Orders Collected",
+    orderWindow,
+    "Pickup Date",
+    pickup.market_date || weekInfo.market_date || ""
   ]];
   sheet.getRange(CONFIG.PREP.META_ROW, 1, 1, metaValues[0].length).setValues(metaValues);
 
   const headerValues = [[
-    "SKU",
     "Product",
     "Ship This Week",
     "Market This Saturday",
-    "Total To Prepare"
+    "Total To Prepare",
+    "Pre-orders"
   ]];
   sheet
     .getRange(CONFIG.PREP.HEADER_ROW, 1, 1, headerValues[0].length)
@@ -235,31 +232,35 @@ function syncWeeklyPrep() {
   if (prepRows.length === 0) {
     sheet
       .getRange(CONFIG.PREP.START_ROW, 1)
-      .setValue("No paid orders for this week yet.");
+      .setValue("No paid orders collected for this week yet.");
   } else {
     const rows = prepRows.map((row) => ([
-      normalizeSku_(row?.sku),
       String(row?.name || ""),
       Number(row?.shipping_qty || 0),
       Number(row?.market_qty || 0),
-      Number(row?.total_qty || 0)
+      Number(row?.total_qty || 0),
+      Number(row?.preorder_qty || 0)
     ]));
 
     sheet
       .getRange(CONFIG.PREP.START_ROW, 1, rows.length, rows[0].length)
       .setValues(rows);
 
-    const shipTotal = rows.reduce((sum, row) => sum + row[2], 0);
-    const marketTotal = rows.reduce((sum, row) => sum + row[3], 0);
-    const totalToPrepare = rows.reduce((sum, row) => sum + row[4], 0);
+    const shipTotal = rows.reduce((sum, row) => sum + row[1], 0);
+    const marketTotal = rows.reduce((sum, row) => sum + row[2], 0);
+    const totalToPrepare = rows.reduce((sum, row) => sum + row[3], 0);
+    const preorderTotal = rows.reduce((sum, row) => sum + row[4], 0);
     const totalsRow = CONFIG.PREP.START_ROW + rows.length;
 
     sheet
       .getRange(totalsRow, 1, 1, 5)
-      .setValues([["TOTAL", "", shipTotal, marketTotal, totalToPrepare]]);
+      .setValues([["TOTAL", shipTotal, marketTotal, totalToPrepare, preorderTotal]]);
     sheet
-      .getRange(CONFIG.PREP.START_ROW, 3, rows.length + 1, 3)
+      .getRange(CONFIG.PREP.START_ROW, 2, rows.length + 1, 4)
       .setNumberFormat("0");
+    sheet
+      .getRange(totalsRow, 1, 1, 5)
+      .setFontWeight("bold");
   }
 
   sheet

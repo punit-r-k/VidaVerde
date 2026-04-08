@@ -414,7 +414,7 @@ export default async function Home() {
                   <span>{MARKET_ADDRESS}</span>
                 </div>
                 <div>
-                  <strong>This Saturday</strong>
+                  <strong>Pickup Date</strong>
                   <span>{pickupDetails.market_date_label}</span>
                 </div>
               </div>

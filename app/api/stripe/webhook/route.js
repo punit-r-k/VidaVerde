@@ -188,6 +188,7 @@ const maybeSendCustomerConfirmationEmail = async ({
   tax,
   shipping,
   total,
+  placedAt,
   receiptNumber,
   paymentMethodLabel,
   customer,
@@ -218,6 +219,7 @@ const maybeSendCustomerConfirmationEmail = async ({
     tax,
     shipping,
     total,
+    placedAt,
     receiptNumber,
     paymentMethodLabel,
     customer,
@@ -256,6 +258,7 @@ const runOrderSideEffects = async ({
   tax,
   shipping,
   total,
+  placedAt,
   receiptNumber,
   paymentMethodLabel,
   customer,
@@ -287,6 +290,7 @@ const runOrderSideEffects = async ({
     tax,
     shipping,
     total,
+    placedAt,
     receiptNumber,
     paymentMethodLabel,
     customer,
@@ -294,7 +298,7 @@ const runOrderSideEffects = async ({
   });
 };
 
-const handleCheckoutSessionEvent = async (session, eventType) => {
+const handleCheckoutSessionEvent = async (session, eventType, eventPlacedAt = "") => {
   const isPaid =
     session?.payment_status === "paid" ||
     eventType === "checkout.session.async_payment_succeeded";
@@ -351,6 +355,11 @@ const handleCheckoutSessionEvent = async (session, eventType) => {
   const paymentSessionId = toText(session?.id, 255);
   const paymentReference =
     typeof session?.payment_intent === "string" ? session.payment_intent : "";
+  const placedAt =
+    eventPlacedAt ||
+    (typeof session?.created === "number"
+      ? new Date(session.created * 1000).toISOString()
+      : "");
 
   const recordResult = await recordPaidOrder({
     paymentSessionId,
@@ -382,6 +391,7 @@ const handleCheckoutSessionEvent = async (session, eventType) => {
     tax,
     shipping,
     total,
+    placedAt,
     receiptNumber,
     paymentMethodLabel,
     customer,
@@ -389,7 +399,7 @@ const handleCheckoutSessionEvent = async (session, eventType) => {
   });
 };
 
-const handlePaymentIntentSucceeded = async (intent) => {
+const handlePaymentIntentSucceeded = async (intent, eventPlacedAt = "") => {
   if (!intent || intent.object !== "payment_intent") {
     return { ok: true };
   }
@@ -435,6 +445,11 @@ const handlePaymentIntentSucceeded = async (intent) => {
   const shipping = 0;
   const paymentSessionId = toText(intent?.id, 255);
   const paymentReference = toText(intent?.latest_charge, 255);
+  const placedAt =
+    eventPlacedAt ||
+    (typeof intent?.created === "number"
+      ? new Date(intent.created * 1000).toISOString()
+      : "");
 
   const recordResult = await recordPaidOrder({
     paymentSessionId,
@@ -466,6 +481,7 @@ const handlePaymentIntentSucceeded = async (intent) => {
     tax,
     shipping,
     total,
+    placedAt,
     receiptNumber,
     paymentMethodLabel,
     customer,
@@ -532,6 +548,10 @@ export async function POST(request) {
   }
 
   const eventType = String(event?.type || "");
+  const eventPlacedAt =
+    typeof event?.created === "number"
+      ? new Date(event.created * 1000).toISOString()
+      : "";
 
   if (
     eventType !== "checkout.session.completed" &&
@@ -550,7 +570,7 @@ export async function POST(request) {
       return respond.json({ ok: true });
     }
 
-    const result = await handleCheckoutSessionEvent(session, eventType);
+    const result = await handleCheckoutSessionEvent(session, eventType, eventPlacedAt);
     if (!result.ok) {
       return respond.json(
         { error: result.error || "Unable to record order." },
@@ -562,7 +582,7 @@ export async function POST(request) {
   }
 
   const intent = event?.data?.object;
-  const result = await handlePaymentIntentSucceeded(intent);
+  const result = await handlePaymentIntentSucceeded(intent, eventPlacedAt);
   if (!result.ok) {
     return respond.json(
       { error: result.error || "Unable to record order." },

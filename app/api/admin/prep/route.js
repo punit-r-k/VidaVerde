@@ -1,9 +1,9 @@
 import { secureAdminRoute } from "@/lib/apiSecurity";
 import {
   MARKET_TIMEZONE,
-  getCurrentMarketWeekInfo,
-  getDateKeyInTimezone,
-  getPickupDetails
+  formatMarketDate,
+  getPickupDetails,
+  getPrepSheetWeekInfo
 } from "@/lib/pickupDetails";
 import { getRouteRateLimitConfig } from "@/lib/rateLimit";
 import { supabaseAdmin } from "@/lib/supabaseAdmin";
@@ -49,8 +49,12 @@ export async function GET(request) {
 
   const timezone = MARKET_TIMEZONE;
   const now = new Date();
-  const weekInfo = getCurrentMarketWeekInfo(timezone, now);
-  const pickup = getPickupDetails({ timeZone: timezone, now });
+  const weekInfo = getPrepSheetWeekInfo(timezone, now);
+  const pickup = {
+    ...getPickupDetails({ timeZone: timezone, now }),
+    market_date: weekInfo.market_date,
+    market_date_label: formatMarketDate(weekInfo.market_date, timezone)
+  };
   const lookback = new Date(Date.now() - LOOKBACK_DAYS * 24 * 60 * 60 * 1000);
 
   const [productsResult, itemsResult] = await Promise.all([
@@ -62,7 +66,7 @@ export async function GET(request) {
       .order("name", { ascending: true }),
     supabaseAdmin
       .from("order_items")
-      .select("sku, quantity, orders!inner(fulfillment, created_at, status)")
+      .select("sku, quantity, preorder_qty, orders!inner(fulfillment, created_at, status)")
       .gte("orders.created_at", lookback.toISOString())
       .eq("orders.status", "paid")
   ]);
@@ -84,8 +88,8 @@ export async function GET(request) {
   }
 
   const countsBySku = new Map();
-  const startKey = weekInfo.week_start_date;
-  const endKey = weekInfo.week_end_date;
+  const collectionStartMs = Date.parse(weekInfo.collection_start_at || "");
+  const collectionEndMs = Date.parse(weekInfo.collection_end_at || "");
 
   for (const row of itemsResult.data || []) {
     const sku = normalizeSku(row?.sku);
@@ -96,17 +100,24 @@ export async function GET(request) {
     const createdAt = orderData?.created_at ? new Date(orderData.created_at) : null;
     if (!createdAt || Number.isNaN(createdAt.getTime())) continue;
 
-    const localDateKey = getDateKeyInTimezone(createdAt, timezone);
-    if (localDateKey < startKey || localDateKey > endKey) continue;
+    const createdAtMs = createdAt.getTime();
+    if (Number.isFinite(collectionStartMs) && createdAtMs < collectionStartMs) continue;
+    if (Number.isFinite(collectionEndMs) && createdAtMs >= collectionEndMs) continue;
 
     const fulfillment = orderData?.fulfillment === "market" ? "market" : "ship";
-    const current = countsBySku.get(sku) || { shipping_qty: 0, market_qty: 0 };
+    const preorderQty = toQty(row?.preorder_qty);
+    const current = countsBySku.get(sku) || {
+      shipping_qty: 0,
+      market_qty: 0,
+      preorder_qty: 0
+    };
 
     if (fulfillment === "market") {
       current.market_qty += quantity;
     } else {
       current.shipping_qty += quantity;
     }
+    current.preorder_qty += preorderQty;
 
     countsBySku.set(sku, current);
   }
@@ -119,7 +130,11 @@ export async function GET(request) {
     if (!sku) continue;
 
     productMap.set(sku, true);
-    const counts = countsBySku.get(sku) || { shipping_qty: 0, market_qty: 0 };
+    const counts = countsBySku.get(sku) || {
+      shipping_qty: 0,
+      market_qty: 0,
+      preorder_qty: 0
+    };
     const totalQty = counts.shipping_qty + counts.market_qty;
     if (totalQty <= 0) continue;
 
@@ -128,6 +143,7 @@ export async function GET(request) {
       name: String(product?.name || sku),
       shipping_qty: counts.shipping_qty,
       market_qty: counts.market_qty,
+      preorder_qty: counts.preorder_qty,
       total_qty: totalQty
     });
   }
@@ -137,7 +153,11 @@ export async function GET(request) {
     .sort();
 
   for (const sku of unknownSkus) {
-    const counts = countsBySku.get(sku) || { shipping_qty: 0, market_qty: 0 };
+    const counts = countsBySku.get(sku) || {
+      shipping_qty: 0,
+      market_qty: 0,
+      preorder_qty: 0
+    };
     if (productMap.has(sku)) continue;
 
     const totalQty = counts.shipping_qty + counts.market_qty;
@@ -148,6 +168,7 @@ export async function GET(request) {
       name: sku,
       shipping_qty: counts.shipping_qty,
       market_qty: counts.market_qty,
+      preorder_qty: counts.preorder_qty,
       total_qty: totalQty
     });
   }
