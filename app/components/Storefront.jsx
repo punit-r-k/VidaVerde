@@ -15,6 +15,11 @@ import {
   getCheckoutFieldErrors,
   normalizeFulfillment
 } from "@/lib/checkoutSchema";
+import {
+  MARKET_NAME,
+  MARKET_PICKUP_LABEL,
+  MARKET_PICKUP_NOTE_LINES
+} from "@/lib/pickupDetails";
 
 const formatCurrency = (amountInCents) => {
   const n = Number(amountInCents);
@@ -25,6 +30,8 @@ const formatCurrency = (amountInCents) => {
 const INVENTORY_POLL_MS = 30000;
 const PREORDER_TIMING_NOTICE =
   "Pre-orders are not guaranteed to be filled for the next Fulshear Farmers Market. Kraut can take up to 15 days to be ready. It may be ready sooner, but that is not guaranteed.";
+const PRODUCT_PREORDER_NOTICE =
+  "Next unit is a pre-order. Not guaranteed for next farmers market; kraut can take up to 15 days.";
 const PREORDER_ACKNOWLEDGEMENT_LABEL = "Accept preorder terms & conditions.";
 const PREORDER_NOTICE_MESSAGES = new Set([
   "Please acknowledge the pre-order notice before proceeding to payment.",
@@ -841,7 +848,7 @@ export default function Storefront({ products, inventory = {} }) {
     { label: "Phone", value: summarizeValue(formValues.phone) },
     {
       label: "Fulfillment",
-      value: "Pick up at Fulshear Farmers Market"
+      value: MARKET_PICKUP_LABEL
     },
     ...(fulfillment === "ship"
       ? [
@@ -1052,8 +1059,7 @@ export default function Storefront({ products, inventory = {} }) {
                     ) : null}
                     {wouldPreorder ? (
                       <p className="product-card__preorder-note">
-                        Next unit is a pre-order. Not guaranteed for next farmers market; kraut can
-                        take up to 15 days.
+                        {PRODUCT_PREORDER_NOTICE}
                       </p>
                     ) : null}
                   </div>
@@ -1178,7 +1184,7 @@ export default function Storefront({ products, inventory = {} }) {
                       role="textbox"
                       aria-readonly="true"
                     >
-                      Pick up at Fulshear Farmers Market
+                      {MARKET_PICKUP_LABEL}
                     </div>
                     <span className="form-field__hint">Shipping option coming soon.</span>
                   </label>
@@ -1323,7 +1329,12 @@ export default function Storefront({ products, inventory = {} }) {
                   </>
                 ) : (
                   <div className="market-note">
-                    Pickup available every Saturday at the Fulshear Farmers Market. 9am-1pm
+                    <strong>{MARKET_PICKUP_LABEL}</strong>
+                    <ul>
+                      {MARKET_PICKUP_NOTE_LINES.map((line) => (
+                        <li key={line}>{line}</li>
+                      ))}
+                    </ul>
                   </div>
                 )}
 

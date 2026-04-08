@@ -1346,6 +1346,20 @@ select:focus {
   font-size: 0.85rem;
 }
 
+.market-note strong {
+  display: block;
+  margin-bottom: 6px;
+}
+
+.market-note ul {
+  margin: 0;
+  padding-left: 18px;
+}
+
+.market-note li + li {
+  margin-top: 4px;
+}
+
 .form__status {
   padding: 10px 14px;
   border-radius: var(--radius);
@@ -1814,6 +1828,11 @@ select:focus {
 .market__panel ul {
   margin: 0;
   padding-left: 18px;
+  color: rgba(255, 255, 255, 0.9);
+}
+
+.market__panel-note {
+  margin: 0;
   color: rgba(255, 255, 255, 0.9);
 }
 

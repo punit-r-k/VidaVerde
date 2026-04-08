@@ -78,6 +78,23 @@ Required environment variables:
 - `STRIPE_WEBHOOK_SECRET`
 - `SITE_URL`
 
+Optional for customer order confirmation emails:
+- `SMTP_HOST`
+- `SMTP_PORT`
+- `SMTP_SECURE`
+- `SMTP_USER`
+- `SMTP_PASS`
+- `ORDER_EMAIL_FROM`
+- `ORDER_EMAIL_REPLY_TO`
+- `ORDER_EMAIL_BCC`
+- `ORDER_EMAIL_BANNER_URL`
+
+The webhook sends the customer confirmation email after a paid order is recorded.
+To avoid duplicate sends on normal webhook retries, the database now tracks
+`orders.customer_confirmation_email_sent_at`. Apply the updated
+`supabase/schema.sql` in Supabase before relying on this in production.
+The default banner image is bundled at `public/email/order-confirmation-banner.png`.
+
 ## API Security
 
 Admin APIs under `app/api/admin/*` now require `Authorization: Bearer <jwt>`.

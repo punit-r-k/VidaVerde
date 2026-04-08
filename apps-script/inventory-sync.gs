@@ -195,6 +195,7 @@ function syncWeeklyPrep() {
 
   const prepRows = Array.isArray(response?.prep) ? response.prep : [];
   const weekInfo = response?.week || {};
+  const pickup = response?.pickup || {};
   const timezone = String(response?.timezone || "America/Chicago");
 
   const sheet = ensurePrepSheet_();
@@ -206,9 +207,17 @@ function syncWeeklyPrep() {
     "Week End",
     weekInfo.week_end_date || "",
     "Market Date (Saturday)",
-    weekInfo.market_date || "",
+    pickup.market_date || weekInfo.market_date || "",
+    "Pickup Window",
+    pickup.pickup_window || "",
+    "Same-Day Cutoff",
+    pickup.same_day_cutoff_label || "",
+    "Market",
+    pickup.market_name || "",
+    "Address",
+    pickup.market_address || "",
     "Timezone",
-    timezone
+    pickup.timezone || timezone
   ]];
   sheet.getRange(CONFIG.PREP.META_ROW, 1, 1, metaValues[0].length).setValues(metaValues);
 
@@ -254,13 +263,13 @@ function syncWeeklyPrep() {
   }
 
   sheet
-    .getRange(CONFIG.PREP.META_ROW, 1, 1, 8)
+    .getRange(CONFIG.PREP.META_ROW, 1, 1, metaValues[0].length)
     .setFontWeight("bold");
   sheet
     .getRange(CONFIG.PREP.HEADER_ROW, 1, 1, 5)
     .setFontWeight("bold");
   sheet.setFrozenRows(2);
-  sheet.autoResizeColumns(1, 5);
+  sheet.autoResizeColumns(1, Math.max(5, metaValues[0].length));
 }
 
 function syncOrders() {

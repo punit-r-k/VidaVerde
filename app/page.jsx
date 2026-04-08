@@ -6,6 +6,20 @@ import JumpNav from "./components/JumpNav";
 import TestimonialGrid from "./components/TestimonialGrid";
 import Image from "next/image";
 import { getProducts } from "@/lib/products";
+import {
+  FOLLOWING_WEEK_PICKUP_NOTICE,
+  MARKET_ADDRESS,
+  MARKET_DAY_LABEL,
+  MARKET_NAME,
+  MARKET_PICKUP_POLICY_BULLETS,
+  MARKET_PICKUP_POLICY_NOTES,
+  MARKET_PICKUP_SUMMARY,
+  MARKET_PICKUP_WINDOW,
+  MARKET_UPDATES_NOTICE,
+  SAME_DAY_PICKUP_NOTICE,
+  WEATHER_CLOSURE_NOTICE,
+  getPickupDetails
+} from "@/lib/pickupDetails";
 import { getInventoryMap } from "@/lib/stock";
 
 export const dynamic = "force-dynamic";
@@ -20,7 +34,7 @@ export default async function Home() {
     getProducts(),
     getInventoryMap()
   ]);
-  const marketAddress = "9035 Bois d'Arc Ln, Richmond, TX 77406";
+  const pickupDetails = getPickupDetails();
   const showProofSection = false;
 
   const partnerLogos = [
@@ -156,7 +170,10 @@ export default async function Home() {
     },
     {
       q: "Can I pick up instead of shipping?",
-      a: "Yes. Reserve online and pick up at Fulshear Farmers Market every Saturday."
+      a:
+        `${SAME_DAY_PICKUP_NOTICE} ${FOLLOWING_WEEK_PICKUP_NOTICE} ` +
+        `Pickup is at ${MARKET_NAME}, ${MARKET_ADDRESS}, ${MARKET_DAY_LABEL.toLowerCase()} ` +
+        `from ${MARKET_PICKUP_WINDOW}. ${WEATHER_CLOSURE_NOTICE} ${MARKET_UPDATES_NOTICE}`
     }
   ];
 
@@ -384,34 +401,36 @@ export default async function Home() {
         <section id="market" className="section section--tight section--line market">
           <div className="market__grid js-reveal" style={{ "--reveal-delay": "160ms" }}>
             <div className="market__copy">
-              <p className="eyebrow">Fulshear Farmers Market</p>
+              <p className="eyebrow">{MARKET_NAME}</p>
               <h2>Find Vida Verde in person.</h2>
-              <p>
-                Reserve online, then pick up your jars every Saturday at the
-                Fulshear Farmers Market.
-              </p>
+              <p>{MARKET_PICKUP_SUMMARY}</p>
               <div className="market__details">
                 <div>
                   <strong>When</strong>
-                  <span>Every Saturday, 9:00 AM - 1:00 PM</span>
+                  <span>{`${MARKET_DAY_LABEL}, ${MARKET_PICKUP_WINDOW}`}</span>
                 </div>
                 <div>
                   <strong>Where</strong>
-                  <span>{marketAddress}</span>
+                  <span>{MARKET_ADDRESS}</span>
                 </div>
                 <div>
-                  <strong>Pickup</strong>
-                  <span>Reserve online, pick up on site</span>
+                  <strong>This Saturday</strong>
+                  <span>{pickupDetails.market_date_label}</span>
                 </div>
               </div>
             </div>
             <div className="market__panel">
-              <h3>Market Day Essentials</h3>
+              <h3>Pickup Policy</h3>
               <ul>
-                <li>Reserve online and pick up on site every Saturday.</li>
-                <li>Bring a tote bag to carry jars safely and hands-free.</li>
-                <li>Ask which flavor pairs best with your usual meals.</li>
+                {MARKET_PICKUP_POLICY_BULLETS.map((line) => (
+                  <li key={line}>{line}</li>
+                ))}
               </ul>
+              {MARKET_PICKUP_POLICY_NOTES.map((line) => (
+                <p key={line} className="market__panel-note">
+                  {line}
+                </p>
+              ))}
               <a className="button button--light" href="#shop">
                 Reserve A Jar
               </a>
@@ -518,8 +537,8 @@ export default async function Home() {
           <p>Live fermented sauerkraut and hot sauce for daily nourishment.</p>
         </div>
         <div className="footer__meta">
-          <span>{marketAddress}</span>
-          <span>Every Saturday, 9:00 AM - 1:00 PM</span>
+          <span>{MARKET_ADDRESS}</span>
+          <span>{`${MARKET_DAY_LABEL}, ${MARKET_PICKUP_WINDOW}`}</span>
           <span>vidaverdemicrogreens@gmail.com</span>
         </div>
       </footer>

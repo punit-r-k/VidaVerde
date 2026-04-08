@@ -60,6 +60,7 @@ create table if not exists orders (
   amount_tax integer not null default 0,
   amount_shipping integer not null default 0,
   amount_total integer not null default 0,
+  customer_confirmation_email_sent_at timestamptz,
   created_at timestamptz not null default now()
 );
 
@@ -136,6 +137,14 @@ begin
     alter table orders add column payment_provider text not null default 'stripe';
   else
     alter table orders alter column payment_provider set default 'stripe';
+  end if;
+
+  if not exists (
+    select 1
+    from information_schema.columns
+    where table_name = 'orders' and column_name = 'customer_confirmation_email_sent_at'
+  ) then
+    alter table orders add column customer_confirmation_email_sent_at timestamptz;
   end if;
 end $$;
 

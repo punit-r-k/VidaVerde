@@ -1,18 +1,14 @@
 import { secureAdminRoute } from "@/lib/apiSecurity";
+import {
+  MARKET_TIMEZONE,
+  getCurrentMarketWeekInfo,
+  getDateKeyInTimezone,
+  getPickupDetails
+} from "@/lib/pickupDetails";
 import { getRouteRateLimitConfig } from "@/lib/rateLimit";
 import { supabaseAdmin } from "@/lib/supabaseAdmin";
 
-const DEFAULT_TIMEZONE = "America/Chicago";
 const LOOKBACK_DAYS = 21;
-const WEEKDAY_INDEX = {
-  sun: 0,
-  mon: 1,
-  tue: 2,
-  wed: 3,
-  thu: 4,
-  fri: 5,
-  sat: 6
-};
 
 const ADMIN_PREP_RATE_LIMIT = getRouteRateLimitConfig("ADMIN_PREP_GET", {
   windowMs: 60_000,
@@ -21,63 +17,6 @@ const ADMIN_PREP_RATE_LIMIT = getRouteRateLimitConfig("ADMIN_PREP_GET", {
 });
 
 const ADMIN_PREP_ROLES = ["admin", "ops_admin"];
-
-const toDateKeyUTC = (date) => {
-  return date.toISOString().slice(0, 10);
-};
-
-const getDatePartsInTimezone = (date, timeZone) => {
-  const formatter = new Intl.DateTimeFormat("en-US", {
-    timeZone,
-    year: "numeric",
-    month: "2-digit",
-    day: "2-digit",
-    weekday: "short"
-  });
-  const parts = formatter.formatToParts(date);
-
-  const partValue = (type) => parts.find((part) => part.type === type)?.value || "";
-  return {
-    year: Number.parseInt(partValue("year"), 10),
-    month: Number.parseInt(partValue("month"), 10),
-    day: Number.parseInt(partValue("day"), 10),
-    weekday: partValue("weekday").toLowerCase()
-  };
-};
-
-const getDateKeyInTimezone = (date, timeZone) => {
-  const formatter = new Intl.DateTimeFormat("en-US", {
-    timeZone,
-    year: "numeric",
-    month: "2-digit",
-    day: "2-digit"
-  });
-  const parts = formatter.formatToParts(date);
-  const partValue = (type) => parts.find((part) => part.type === type)?.value || "";
-  return `${partValue("year")}-${partValue("month")}-${partValue("day")}`;
-};
-
-const getWeekInfo = (timeZone) => {
-  const now = new Date();
-  const parts = getDatePartsInTimezone(now, timeZone);
-  const weekdayPrefix = (parts.weekday || "").slice(0, 3);
-  const weekdayIndex = WEEKDAY_INDEX[weekdayPrefix] ?? 0;
-  const daysFromMonday = (weekdayIndex + 6) % 7;
-
-  const monday = new Date(
-    Date.UTC(parts.year, parts.month - 1, parts.day - daysFromMonday)
-  );
-  const saturday = new Date(monday);
-  saturday.setUTCDate(monday.getUTCDate() + 5);
-  const sunday = new Date(monday);
-  sunday.setUTCDate(monday.getUTCDate() + 6);
-
-  return {
-    week_start_date: toDateKeyUTC(monday),
-    week_end_date: toDateKeyUTC(sunday),
-    market_date: toDateKeyUTC(saturday)
-  };
-};
 
 const toQty = (value) => {
   const qty = Number.parseInt(value, 10);
@@ -108,8 +47,10 @@ export async function GET(request) {
     );
   }
 
-  const timezone = DEFAULT_TIMEZONE;
-  const weekInfo = getWeekInfo(timezone);
+  const timezone = MARKET_TIMEZONE;
+  const now = new Date();
+  const weekInfo = getCurrentMarketWeekInfo(timezone, now);
+  const pickup = getPickupDetails({ timeZone: timezone, now });
   const lookback = new Date(Date.now() - LOOKBACK_DAYS * 24 * 60 * 60 * 1000);
 
   const [productsResult, itemsResult] = await Promise.all([
@@ -213,6 +154,7 @@ export async function GET(request) {
 
   return respond.json({
     week: weekInfo,
+    pickup,
     timezone,
     prep: prepRows
   });

@@ -5,6 +5,7 @@ import {
   stripeRequest,
   verifyStripeSignature
 } from "@/lib/stripe";
+import { sendOrderConfirmationEmail } from "@/lib/orderConfirmationEmail";
 import { supabaseAdmin } from "@/lib/supabaseAdmin";
 
 export const runtime = "nodejs";
@@ -100,6 +101,143 @@ const syncShipmentForOrder = async (orderId) => {
   return error;
 };
 
+const hasCustomerConfirmationEmailBeenSent = async (orderId) => {
+  if (!orderId) {
+    return { sent: false, error: null };
+  }
+
+  const { data, error } = await supabaseAdmin
+    .from("orders")
+    .select("customer_confirmation_email_sent_at")
+    .eq("id", orderId)
+    .maybeSingle();
+
+  return {
+    sent: Boolean(data?.customer_confirmation_email_sent_at),
+    error
+  };
+};
+
+const markCustomerConfirmationEmailSent = async (orderId) => {
+  if (!orderId) return null;
+
+  const { error } = await supabaseAdmin
+    .from("orders")
+    .update({
+      customer_confirmation_email_sent_at: new Date().toISOString()
+    })
+    .eq("id", orderId)
+    .is("customer_confirmation_email_sent_at", null);
+
+  return error;
+};
+
+const maybeSendCustomerConfirmationEmail = async ({
+  orderId,
+  fulfillment,
+  currency,
+  subtotal,
+  tax,
+  shipping,
+  total,
+  customer,
+  items
+}) => {
+  const sentStatus = await hasCustomerConfirmationEmailBeenSent(orderId);
+  if (sentStatus.error) {
+    console.error(
+      "customer confirmation email status check error:",
+      sentStatus.error
+    );
+    return {
+      ok: false,
+      error: "Unable to check order email status.",
+      status: 500
+    };
+  }
+
+  if (sentStatus.sent) {
+    return { ok: true };
+  }
+
+  const emailResult = await sendOrderConfirmationEmail({
+    orderId,
+    fulfillment,
+    currency,
+    subtotal,
+    tax,
+    shipping,
+    total,
+    customer,
+    items
+  });
+
+  if (emailResult.skipped) {
+    return { ok: true };
+  }
+
+  if (!emailResult.ok) {
+    console.error("order confirmation email error:", emailResult.error);
+    return {
+      ok: false,
+      error: "Unable to send order confirmation email.",
+      status: 500
+    };
+  }
+
+  const markError = await markCustomerConfirmationEmailSent(orderId);
+  if (markError) {
+    console.error(
+      "customer confirmation email sent marker error:",
+      markError
+    );
+  }
+
+  return { ok: true };
+};
+
+const runOrderSideEffects = async ({
+  orderId,
+  fulfillment,
+  currency,
+  subtotal,
+  tax,
+  shipping,
+  total,
+  customer,
+  items
+}) => {
+  if (!orderId) {
+    return {
+      ok: false,
+      error: "Unable to resolve order id.",
+      status: 500
+    };
+  }
+
+  const shipmentError = await syncShipmentForOrder(orderId);
+  if (shipmentError) {
+    console.error("sync_shipment_for_order error:", shipmentError);
+    return {
+      ok: false,
+      error: "Unable to sync shipment.",
+      status: 500
+    };
+  }
+
+  return maybeSendCustomerConfirmationEmail({
+    orderId,
+    fulfillment,
+    currency,
+    subtotal,
+    tax,
+    shipping,
+    total,
+    customer,
+    items
+  });
+};
+
 const handleCheckoutSessionEvent = async (session, eventType) => {
   const isPaid =
     session?.payment_status === "paid" ||
@@ -178,17 +316,17 @@ const handleCheckoutSessionEvent = async (session, eventType) => {
     };
   }
 
-  const shipmentError = await syncShipmentForOrder(recordResult.orderId);
-  if (shipmentError) {
-    console.error("sync_shipment_for_order error:", shipmentError);
-    return {
-      ok: false,
-      error: "Unable to sync shipment.",
-      status: 500
-    };
-  }
-
-  return { ok: true };
+  return runOrderSideEffects({
+    orderId: recordResult.orderId,
+    fulfillment: toFulfillment(metadata.fulfillment),
+    currency: String(session?.currency || "usd").toUpperCase(),
+    subtotal,
+    tax,
+    shipping,
+    total,
+    customer,
+    items
+  });
 };
 
 const handlePaymentIntentSucceeded = async (intent) => {
@@ -257,17 +395,17 @@ const handlePaymentIntentSucceeded = async (intent) => {
     };
   }
 
-  const shipmentError = await syncShipmentForOrder(recordResult.orderId);
-  if (shipmentError) {
-    console.error("sync_shipment_for_order error:", shipmentError);
-    return {
-      ok: false,
-      error: "Unable to sync shipment.",
-      status: 500
-    };
-  }
-
-  return { ok: true };
+  return runOrderSideEffects({
+    orderId: recordResult.orderId,
+    fulfillment: toFulfillment(metadata.fulfillment),
+    currency: String(intent?.currency || "usd").toUpperCase(),
+    subtotal,
+    tax,
+    shipping,
+    total,
+    customer,
+    items
+  });
 };
 
 export async function POST(request) {

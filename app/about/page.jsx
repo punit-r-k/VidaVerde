@@ -1,5 +1,6 @@
 import SiteHeader from "../components/SiteHeader";
 import Image from "next/image";
+import { MARKET_ADDRESS } from "@/lib/pickupDetails";
 
 export const metadata = {
   title: "Founder | Vida Verde",
@@ -8,8 +9,6 @@ export const metadata = {
 };
 
 export default function AboutPage() {
-  const marketAddress = "9035 Bois d'Arc Ln, Richmond, TX 77406";
-
   return (
     <>
       <header className="about-hero">
@@ -82,7 +81,7 @@ export default function AboutPage() {
           <p>Live fermented sauerkraut and hot sauce for daily nourishment.</p>
         </div>
         <div className="footer__meta">
-          <span>{marketAddress}</span>
+          <span>{MARKET_ADDRESS}</span>
           <span>vidaverdemicrogreens@gmail.com</span>
         </div>
       </footer>
