@@ -169,11 +169,11 @@ export default async function Home() {
       a: "We ferment in natural vegetable juices with no preservatives or shortcuts, and we never pasteurize. That keeps the cultures live and active."
     },
     {
-      q: "Can I pick up instead of shipping?",
+      q: "Do you offer shipping?",
       a:
-        `${SAME_DAY_PICKUP_NOTICE} ${FOLLOWING_WEEK_PICKUP_NOTICE} ` +
-        `Pickup is at ${MARKET_NAME}, ${MARKET_ADDRESS}, ${MARKET_DAY_LABEL.toLowerCase()} ` +
-        `from ${MARKET_PICKUP_WINDOW}. ${WEATHER_CLOSURE_NOTICE} ${MARKET_UPDATES_NOTICE}`
+        `Not yet. We currently offer pickup only at ${MARKET_NAME}, ${MARKET_ADDRESS}, ${MARKET_DAY_LABEL.toLowerCase()} ` +
+        `from ${MARKET_PICKUP_WINDOW}. Shipping is coming soon. ${SAME_DAY_PICKUP_NOTICE} ${FOLLOWING_WEEK_PICKUP_NOTICE} ` +
+        `${WEATHER_CLOSURE_NOTICE} ${MARKET_UPDATES_NOTICE}`
     }
   ];
 
