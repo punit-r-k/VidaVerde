@@ -3648,7 +3648,7 @@ select:focus {
 
 @media (max-width: 900px) {
   .store__panel {
-    padding-bottom: calc(env(safe-area-inset-bottom, 0px) + 104px);
+    padding-bottom: calc(env(safe-area-inset-bottom, 0px) + 48px);
   }
 
   .cart-drawer-toggle {
@@ -3901,6 +3901,10 @@ select:focus {
 
   .section__intro {
     margin-bottom: 24px;
+  }
+
+  .shop {
+    padding-bottom: 12px;
   }
 
   .section__intro h2 {
@@ -4173,6 +4177,10 @@ select:focus {
     font-size: 0.62rem;
     gap: 6px;
     letter-spacing: 0.12em;
+  }
+
+  .store__panel {
+    padding-bottom: calc(env(safe-area-inset-bottom, 0px) + 32px);
   }
 
   .cart-drawer-toggle {
