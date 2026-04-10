@@ -139,8 +139,22 @@ Environment override pattern:
 
 Examples:
 - `RATE_LIMIT_ORDER_CREATE_IP_MAX=6`
+- `RATE_LIMIT_ANALYTICS_CREATE_IP_MAX=180`
 - `RATE_LIMIT_ADMIN_ORDERS_GET_USER_MAX=90`
 - `RATE_LIMIT_ADMIN_SHIPMENTS_GET_IP_MAX=120`
+
+## Analytics Reporting
+
+First-party analytics events are stored in Supabase through `POST /api/analytics`.
+Run the local reporting script to generate a sanitized summary for Codex or manual review:
+
+```bash
+npm run analytics:report -- --range=7d
+npm run analytics:report -- --range=30d --format=json
+```
+
+The report outputs aggregates, funnels, friction points, and recommended actions only.
+It does not print service-role keys, raw event rows, or raw PII.
 
 ## Customize
 

@@ -5,6 +5,7 @@ import { useSearchParams } from "next/navigation";
 import Image from "next/image";
 import { CardElement, Elements, useElements, useStripe } from "@stripe/react-stripe-js";
 import { loadStripe } from "@stripe/stripe-js";
+import { trackAnalyticsEvent } from "@/lib/analytics";
 import {
   FORM_FIELD_ORDER,
   INITIAL_FORM_VALUES,
@@ -43,6 +44,8 @@ const SPICE_PROFILE_PATTERN =
   /(spice|hot|heat|mild|turmeric|cumin|pepper|jalapeno|habanero)/i;
 const STRIPE_PUBLISHABLE_KEY = process.env.NEXT_PUBLIC_STRIPE_PUBLISHABLE_KEY || "";
 const stripePromise = STRIPE_PUBLISHABLE_KEY ? loadStripe(STRIPE_PUBLISHABLE_KEY) : null;
+
+const sanitizeFieldName = (value) => String(value || "").trim().toLowerCase().replace(/[^a-z0-9]+/g, "_");
 
 const getSpiceProfile = (profile) => {
   const text = typeof profile === "string" ? profile.trim() : "";
@@ -91,6 +94,16 @@ function StripePaymentForm({ onPaymentState, grossTotalCents, billingDetails, cr
   };
 
   const handleStripeSubmit = async () => {
+    trackAnalyticsEvent({
+      name: "payment_submit",
+      sectionId: "shop",
+      elementId: "payment_submit",
+      checkoutStep: "payment",
+      metadata: {
+        subtotalCents: Number(grossTotalCents || 0)
+      }
+    });
+
     if (!stripe || !elements) {
       const message = "Payment form is still loading. Please try again.";
       setPaymentError(message);
@@ -219,6 +232,8 @@ function StripePaymentForm({ onPaymentState, grossTotalCents, billingDetails, cr
         onClick={handleStripeSubmit}
         disabled={isSubmitting || !stripe || !elements}
         aria-busy={isSubmitting}
+        data-analytics-id="payment_submit"
+        data-analytics-hover="true"
       >
         {isSubmitting ? "Processing..." : payNowLabel}
       </button>
@@ -246,6 +261,10 @@ export default function Storefront({ products, inventory = {} }) {
   const fieldRefs = useRef({});
   const addPulseTimeoutsRef = useRef({});
   const orderSuccessPopupTimeoutRef = useRef(null);
+  const cartSummaryRef = useRef(null);
+  const checkoutStartedRef = useRef(false);
+  const previousCheckoutStepRef = useRef("details");
+  const cartSummarySeenRef = useRef(false);
   const isPaymentStep = checkoutStep === "payment";
 
   const resetPaymentState = useCallback((options = {}) => {
@@ -265,6 +284,7 @@ export default function Storefront({ products, inventory = {} }) {
     setPreorderAcknowledged(false);
     setPreorderTouched(false);
     setCheckoutStep("details");
+    checkoutStartedRef.current = false;
   }, []);
 
   const triggerOrderSuccessPopup = useCallback(() => {
@@ -395,11 +415,29 @@ export default function Storefront({ products, inventory = {} }) {
     if (checkoutStatus === "success") {
       setStatus("success");
       setNotice("Payment received. We will email fulfillment details shortly.");
+      trackAnalyticsEvent({
+        name: "payment_result",
+        sectionId: "shop",
+        elementId: "payment_submit",
+        checkoutStep: "payment",
+        metadata: {
+          result: "success"
+        }
+      });
       triggerOrderSuccessPopup();
       resetCheckoutAfterSuccess();
     } else if (checkoutStatus === "cancel") {
       setStatus("error");
       setNotice("Payment canceled. Your cart is still saved below.");
+      trackAnalyticsEvent({
+        name: "payment_result",
+        sectionId: "shop",
+        elementId: "payment_submit",
+        checkoutStep: "payment",
+        metadata: {
+          result: "cancel"
+        }
+      });
       resetPaymentState();
     }
 
@@ -423,6 +461,10 @@ export default function Storefront({ products, inventory = {} }) {
     if (records.length === 0) return false;
     return records.some((record) => record?.show_stock !== false);
   }, [liveInventory]);
+
+  const productLookup = useMemo(() => {
+    return new Map(products.map((product) => [product.sku, product]));
+  }, [products]);
 
   const cartItems = useMemo(() => {
     return products
@@ -466,13 +508,6 @@ export default function Storefront({ products, inventory = {} }) {
   );
   const requiresAddress = fulfillment === "ship";
   const cartCountLabel = `${itemCount} item${itemCount === 1 ? "" : "s"}`;
-  const requiredFieldNames = requiresAddress
-    ? ["name", "email", "address1", "city", "state", "postalCode"]
-    : ["name", "email"];
-  const completionErrors = useMemo(
-    () => validateCheckoutForm(formValues, fulfillment),
-    [formValues, fulfillment, validateCheckoutForm]
-  );
   const cityOptions = useMemo(() => {
     const selectedCity = String(formValues.city || "").trim();
     if (!selectedCity) return US_CITY_OPTIONS;
@@ -490,11 +525,98 @@ export default function Storefront({ products, inventory = {} }) {
     }
   }, [hasPreorderItems]);
 
+  useEffect(() => {
+    if (itemCount === 0) {
+      checkoutStartedRef.current = false;
+    }
+  }, [itemCount]);
+
+  useEffect(() => {
+    const previousStep = previousCheckoutStepRef.current;
+    if (previousStep === checkoutStep) return;
+
+    previousCheckoutStepRef.current = checkoutStep;
+    trackAnalyticsEvent({
+      name: "checkout_step_changed",
+      sectionId: "shop",
+      elementId: `checkout_step_${checkoutStep}`,
+      checkoutStep,
+      metadata: {
+        source: previousStep,
+        result: checkoutStep,
+        itemCount,
+        subtotalCents: subtotal
+      }
+    });
+  }, [checkoutStep, itemCount, subtotal]);
+
+  useEffect(() => {
+    if (itemCount <= 0) {
+      cartSummarySeenRef.current = false;
+      return undefined;
+    }
+
+    const node = cartSummaryRef.current;
+    if (!node) return undefined;
+
+    const observer = new IntersectionObserver(
+      (entries) => {
+        entries.forEach((entry) => {
+          if (!entry.isIntersecting || cartSummarySeenRef.current) return;
+
+          cartSummarySeenRef.current = true;
+          trackAnalyticsEvent({
+            name: "cart_summary_view",
+            sectionId: "shop",
+            elementId: "cart_summary",
+            metadata: {
+              itemCount,
+              subtotalCents: subtotal
+            }
+          });
+        });
+      },
+      {
+        threshold: [0.35]
+      }
+    );
+
+    observer.observe(node);
+    return () => {
+      observer.disconnect();
+    };
+  }, [itemCount, subtotal]);
+
+  useEffect(() => {
+    if (!showOrderSuccessPopup) return;
+
+    trackAnalyticsEvent({
+      name: "order_success_popup_view",
+      sectionId: "shop",
+      elementId: "order_success_popup",
+      metadata: {
+        itemCount,
+        subtotalCents: subtotal
+      }
+    });
+  }, [itemCount, showOrderSuccessPopup, subtotal]);
+
   const handleMobileCheckoutJump = useCallback(() => {
     const cartSummary = document.getElementById("cart-summary");
     if (!cartSummary) return;
+
+    trackAnalyticsEvent({
+      name: "checkout_jump_mobile",
+      sectionId: "shop",
+      elementId: "cart_drawer_toggle",
+      metadata: {
+        itemCount,
+        subtotalCents: subtotal
+      }
+    });
+
     cartSummary.scrollIntoView({ behavior: "smooth", block: "start" });
-  }, []);
+  }, [itemCount, subtotal]);
 
   const buildOrderPayload = useCallback(() => {
     return {
@@ -519,6 +641,9 @@ export default function Storefront({ products, inventory = {} }) {
   }, [cartItems, formValues, fulfillment]);
 
   const handleAdd = (product) => {
+    const currentQty = cart[product.sku] || 0;
+    const nextQuantity = currentQty + 1;
+
     const existingTimeoutId = addPulseTimeoutsRef.current[product.sku];
     if (existingTimeoutId) {
       clearTimeout(existingTimeoutId);
@@ -546,20 +671,56 @@ export default function Storefront({ products, inventory = {} }) {
     } else {
       resetPaymentState();
     }
+
+    if (!checkoutStartedRef.current) {
+      checkoutStartedRef.current = true;
+      trackAnalyticsEvent({
+        name: "checkout_started",
+        sectionId: "shop",
+        elementId: "checkout_started",
+        metadata: {
+          itemCount: itemCount + 1,
+          subtotalCents: subtotal + Number(product.priceCents || 0)
+        }
+      });
+    }
+
+    trackAnalyticsEvent({
+      name: "product_add_to_cart",
+      sectionId: "shop",
+      elementId: `product_add_${product.sku.toLowerCase()}`,
+      productSku: product.sku,
+      metadata: {
+        quantity: nextQuantity,
+        itemCount: itemCount + 1,
+        subtotalCents: subtotal + Number(product.priceCents || 0)
+      }
+    });
+
     setCart((prev) => {
-      const currentQty = prev[product.sku] || 0;
       return {
         ...prev,
-        [product.sku]: currentQty + 1
+        [product.sku]: nextQuantity
       };
     });
   };
 
   const handleClearCart = () => {
+    trackAnalyticsEvent({
+      name: "cart_cleared",
+      sectionId: "shop",
+      elementId: "cart_clear",
+      metadata: {
+        itemCount,
+        subtotalCents: subtotal
+      }
+    });
+
     resetPaymentState();
     setCart({});
     setPreorderAcknowledged(false);
     setPreorderTouched(false);
+    checkoutStartedRef.current = false;
 
     if (status !== "idle") {
       setStatus("idle");
@@ -568,6 +729,26 @@ export default function Storefront({ products, inventory = {} }) {
   };
 
   const handleQuantityChange = (sku, nextQty) => {
+    const previousQuantity = cart[sku] || 0;
+    const normalizedNextQty = Math.max(0, nextQty);
+    const unitPrice = Number(productLookup.get(sku)?.priceCents || 0);
+    const nextSubtotal = Math.max(
+      subtotal + (normalizedNextQty - previousQuantity) * unitPrice,
+      0
+    );
+
+    trackAnalyticsEvent({
+      name: "cart_quantity_change",
+      sectionId: "shop",
+      elementId: `cart_qty_${sku.toLowerCase()}`,
+      productSku: sku,
+      metadata: {
+        previousQuantity,
+        nextQuantity: normalizedNextQty,
+        subtotalCents: nextSubtotal
+      }
+    });
+
     resetPaymentState({ keepPaymentStep: isPaymentStep });
     setCart((prev) => {
       if (nextQty <= 0) {
@@ -579,6 +760,21 @@ export default function Storefront({ products, inventory = {} }) {
         ...prev,
         [sku]: nextQty
       };
+    });
+  };
+
+  const handleAnalyticsFieldFocus = (event) => {
+    const name = sanitizeFieldName(event.target?.name);
+    if (!name) return;
+
+    trackAnalyticsEvent({
+      name: "checkout_field_focus",
+      sectionId: "shop",
+      elementId: `checkout_field_${name}`,
+      checkoutStep,
+      metadata: {
+        fieldName: name
+      }
     });
   };
 
@@ -621,7 +817,30 @@ export default function Storefront({ products, inventory = {} }) {
       ...prev,
       [name]: true
     }));
-    setFieldErrors(validateCheckoutForm(nextValues, fulfillment));
+    const nextErrors = validateCheckoutForm(nextValues, fulfillment);
+    setFieldErrors(nextErrors);
+
+    trackAnalyticsEvent({
+      name: "checkout_field_blur",
+      sectionId: "shop",
+      elementId: `checkout_field_${sanitizeFieldName(name)}`,
+      checkoutStep,
+      metadata: {
+        fieldName: sanitizeFieldName(name)
+      }
+    });
+
+    if (nextErrors[name]) {
+      trackAnalyticsEvent({
+        name: "checkout_field_error",
+        sectionId: "shop",
+        elementId: `checkout_field_${sanitizeFieldName(name)}`,
+        checkoutStep,
+        metadata: {
+          fieldName: sanitizeFieldName(name)
+        }
+      });
+    }
   };
 
   const handleBackToEdit = useCallback(() => {
@@ -634,6 +853,16 @@ export default function Storefront({ products, inventory = {} }) {
     const isChecked = Boolean(event.currentTarget.checked);
     setPreorderAcknowledged(isChecked);
     setPreorderTouched(true);
+    trackAnalyticsEvent({
+      name: "checkout_preorder_ack_toggled",
+      sectionId: "shop",
+      elementId: "preorder_acknowledgement",
+      checkoutStep,
+      metadata: {
+        result: isChecked ? "checked" : "unchecked",
+        preorderUnits: preorderUnitsInCart
+      }
+    });
 
     if (isChecked && status === "error" && PREORDER_NOTICE_MESSAGES.has(notice)) {
       setStatus("idle");
@@ -644,6 +873,16 @@ export default function Storefront({ products, inventory = {} }) {
   const createPaymentIntent = useCallback(async () => {
     if (hasPreorderItems && !preorderAcknowledged) {
       const message = "Please acknowledge the pre-order notice before payment.";
+      trackAnalyticsEvent({
+        name: "checkout_validation_blocked",
+        sectionId: "shop",
+        elementId: "preorder_acknowledgement",
+        checkoutStep: "payment",
+        metadata: {
+          reason: "missing_preorder_ack",
+          validationCount: 1
+        }
+      });
       setPreorderTouched(true);
       setStatus("error");
       setNotice(message);
@@ -690,6 +929,15 @@ export default function Storefront({ products, inventory = {} }) {
       }
 
       if (nextStatus === "success") {
+        trackAnalyticsEvent({
+          name: "payment_result",
+          sectionId: "shop",
+          elementId: "payment_submit",
+          checkoutStep: "payment",
+          metadata: {
+            result: "success"
+          }
+        });
         setStatus("success");
         setNotice(message || "Payment received. We will email fulfillment details shortly.");
         triggerOrderSuccessPopup();
@@ -697,6 +945,16 @@ export default function Storefront({ products, inventory = {} }) {
         return;
       }
 
+      trackAnalyticsEvent({
+        name: "payment_result",
+        sectionId: "shop",
+        elementId: "payment_submit",
+        checkoutStep: "payment",
+        metadata: {
+          result: "error",
+          errorCode: "payment_failed"
+        }
+      });
       setStatus("error");
       setNotice(message || "Payment could not be completed.");
     },
@@ -709,6 +967,16 @@ export default function Storefront({ products, inventory = {} }) {
     if (status === "submitting") return;
 
     if (cartItems.length === 0) {
+      trackAnalyticsEvent({
+        name: "checkout_validation_blocked",
+        sectionId: "shop",
+        elementId: "checkout_submit",
+        checkoutStep: "details",
+        metadata: {
+          reason: "empty_cart",
+          validationCount: 1
+        }
+      });
       setStatus("error");
       setNotice("Add jars to your cart before checking out.");
       return;
@@ -719,6 +987,16 @@ export default function Storefront({ products, inventory = {} }) {
     setFieldErrors(nextErrors);
 
     if (Object.keys(nextErrors).length > 0) {
+      trackAnalyticsEvent({
+        name: "checkout_validation_blocked",
+        sectionId: "shop",
+        elementId: "checkout_submit",
+        checkoutStep: "details",
+        metadata: {
+          reason: "field_errors",
+          validationCount: Object.keys(nextErrors).length
+        }
+      });
       setStatus("error");
       setNotice("Please fix the highlighted fields before checkout.");
       focusFirstInvalidField(nextErrors, fulfillment);
@@ -726,6 +1004,16 @@ export default function Storefront({ products, inventory = {} }) {
     }
 
     if (hasPreorderItems && !preorderAcknowledged) {
+      trackAnalyticsEvent({
+        name: "checkout_validation_blocked",
+        sectionId: "shop",
+        elementId: "preorder_acknowledgement",
+        checkoutStep: "details",
+        metadata: {
+          reason: "missing_preorder_ack",
+          validationCount: 1
+        }
+      });
       setPreorderTouched(true);
       setStatus("error");
       setNotice("Please acknowledge the pre-order notice before proceeding to payment.");
@@ -733,6 +1021,17 @@ export default function Storefront({ products, inventory = {} }) {
       return;
     }
 
+    trackAnalyticsEvent({
+      name: "checkout_submit",
+      sectionId: "shop",
+      elementId: "checkout_submit",
+      checkoutStep: "details",
+      metadata: {
+        itemCount,
+        subtotalCents: subtotal,
+        preorderUnits: preorderUnitsInCart
+      }
+    });
     setCheckoutStep("payment");
     setStatus("idle");
     setNotice("");
@@ -889,6 +1188,7 @@ export default function Storefront({ products, inventory = {} }) {
           className="cart-drawer-toggle"
           onClick={handleMobileCheckoutJump}
           aria-label={`Go to cart summary. ${cartCountLabel} in cart.`}
+          data-analytics-id="cart_drawer_toggle"
         >
           <span className="cart-drawer-toggle__lead">
             <span className="cart-drawer-toggle__icon" aria-hidden="true">
@@ -960,7 +1260,13 @@ export default function Storefront({ products, inventory = {} }) {
             const spiceProfile = getSpiceProfile(product.profile);
 
             return (
-              <article className="product-card" key={product.sku}>
+              <article
+                className="product-card"
+                key={product.sku}
+                data-analytics-id={`product_card_${product.sku.toLowerCase()}`}
+                data-analytics-product-sku={product.sku}
+                data-analytics-hover="true"
+              >
                 <Image
                   src={product.image}
                   alt={product.name}
@@ -1033,6 +1339,8 @@ export default function Storefront({ products, inventory = {} }) {
                           type="button"
                           onClick={() => handleAdd(product)}
                           aria-label={`Add ${product.name} to cart`}
+                          data-analytics-id={`product_add_${product.sku.toLowerCase()}`}
+                          data-analytics-hover="true"
                         >
                           {isOut ? "Preorder" : wouldPreorder ? (
                             <span className="product-card__button-label-stack">
@@ -1070,7 +1378,13 @@ export default function Storefront({ products, inventory = {} }) {
         </div>
 
         <aside className="store__panel">
-          <div id="cart-summary" tabIndex={-1} className="cart cart--sticky">
+          <div
+            id="cart-summary"
+            ref={cartSummaryRef}
+            tabIndex={-1}
+            className="cart cart--sticky"
+            data-analytics-id="cart_summary"
+          >
             <div className="cart__header">
               <div>
                 <h3>Your Cart</h3>
@@ -1081,6 +1395,7 @@ export default function Storefront({ products, inventory = {} }) {
                   type="button"
                   className="cart__clear"
                   onClick={handleClearCart}
+                  data-analytics-id="cart_clear"
                 >
                   Clear
                 </button>
@@ -1090,7 +1405,13 @@ export default function Storefront({ products, inventory = {} }) {
             {renderCartDetails("desktop", { allowQuantityEdit: !isPaymentStep })}
           </div>
 
-          <form id="checkout-form" className="order-form" onSubmit={handleSubmit} noValidate>
+          <form
+            id="checkout-form"
+            className="order-form"
+            onSubmit={handleSubmit}
+            onFocusCapture={handleAnalyticsFieldFocus}
+            noValidate
+          >
             <h3>{isPaymentStep ? "Review & Pay" : "Complete Your Order"}</h3>
             <p>
               {hasPreorderItems
@@ -1390,6 +1711,8 @@ export default function Storefront({ products, inventory = {} }) {
                   type="submit"
                   disabled={status === "submitting"}
                   aria-busy={status === "submitting"}
+                  data-analytics-id="checkout_submit"
+                  data-analytics-hover="true"
                 >
                   {status === "submitting" ? "Preparing Payment..." : "Proceed to Payment"}
                 </button>
@@ -1397,7 +1720,12 @@ export default function Storefront({ products, inventory = {} }) {
             ) : (
               <>
                 <div className="checkout-review">
-                  <details className="checkout-dropdown" open>
+                  <details
+                    className="checkout-dropdown"
+                    open
+                    data-analytics-id="checkout_review_details"
+                    data-analytics-type="checkout-review"
+                  >
                     <summary>
                       <span>Customer details</span>
                       <strong>{fulfillment === "ship" ? "Shipping" : "Pickup"}</strong>
@@ -1463,7 +1791,12 @@ export default function Storefront({ products, inventory = {} }) {
                   </div>
                 ) : null}
 
-                <button className="button button--light" type="button" onClick={handleBackToEdit}>
+                <button
+                  className="button button--light"
+                  type="button"
+                  onClick={handleBackToEdit}
+                  data-analytics-id="checkout_back_to_edit"
+                >
                   Back to Edit Information
                 </button>
 

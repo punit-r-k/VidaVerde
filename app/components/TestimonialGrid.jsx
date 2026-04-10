@@ -1,6 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useRef, useState } from "react";
+import { trackAnalyticsEvent } from "@/lib/analytics";
 
 const AUTO_SCROLL_INTERVAL_MS = 7000;
 const MOBILE_BREAKPOINT_QUERY = "(max-width: 900px)";
@@ -74,6 +75,7 @@ const renderHighlightedText = (text, highlights = [], keyPrefix) => {
 
 export default function TestimonialGrid({ testimonials = [] }) {
   const trackRef = useRef(null);
+  const seenCardsRef = useRef(new Set());
   const [activeIndex, setActiveIndex] = useState(null);
   const [currentTrackIndex, setCurrentTrackIndex] = useState(0);
   const [isAutoScrollEnabled, setIsAutoScrollEnabled] = useState(true);
@@ -143,6 +145,14 @@ export default function TestimonialGrid({ testimonials = [] }) {
 
   const openReview = useCallback((index) => {
     setActiveIndex(index);
+    trackAnalyticsEvent({
+      name: "testimonial_open",
+      sectionId: "voices",
+      elementId: `testimonial_open_${index + 1}`,
+      metadata: {
+        currentIndex: index + 1
+      }
+    });
   }, []);
 
   const closeReview = useCallback(() => {
@@ -152,21 +162,43 @@ export default function TestimonialGrid({ testimonials = [] }) {
   const showPrevious = useCallback(() => {
     if (!testimonials.length) return;
 
-    setActiveIndex((currentIndex) =>
-      currentIndex === null
-        ? null
-        : (currentIndex - 1 + testimonials.length) % testimonials.length
-    );
+    setActiveIndex((currentIndex) => {
+      if (currentIndex === null) return null;
+
+      const nextIndex = (currentIndex - 1 + testimonials.length) % testimonials.length;
+      trackAnalyticsEvent({
+        name: "testimonial_nav",
+        sectionId: "voices",
+        elementId: "testimonial_nav_prev",
+        metadata: {
+          direction: "prev",
+          currentIndex: currentIndex + 1,
+          targetIndex: nextIndex + 1
+        }
+      });
+      return nextIndex;
+    });
   }, [testimonials.length]);
 
   const showNext = useCallback(() => {
     if (!testimonials.length) return;
 
-    setActiveIndex((currentIndex) =>
-      currentIndex === null
-        ? null
-        : (currentIndex + 1) % testimonials.length
-    );
+    setActiveIndex((currentIndex) => {
+      if (currentIndex === null) return null;
+
+      const nextIndex = (currentIndex + 1) % testimonials.length;
+      trackAnalyticsEvent({
+        name: "testimonial_nav",
+        sectionId: "voices",
+        elementId: "testimonial_nav_next",
+        metadata: {
+          direction: "next",
+          currentIndex: currentIndex + 1,
+          targetIndex: nextIndex + 1
+        }
+      });
+      return nextIndex;
+    });
   }, [testimonials.length]);
 
   useEffect(() => {
@@ -234,18 +266,34 @@ export default function TestimonialGrid({ testimonials = [] }) {
   }, []);
 
   const scrollTrackToIndex = useCallback(
-    (index) => {
+    (index, reason = "manual") => {
       const track = trackRef.current;
       const cards = getTrackCards();
       if (!track || !cards.length) return;
 
       const safeIndex = ((index % cards.length) + cards.length) % cards.length;
+      const currentIndex = getNearestTrackIndex(track.scrollLeft);
+
+      if (reason !== "auto" && safeIndex !== currentIndex) {
+        trackAnalyticsEvent({
+          name: "testimonial_carousel_scroll",
+          sectionId: "voices",
+          elementId: `testimonial_scroll_${reason}`,
+          metadata: {
+            source: reason,
+            currentIndex: currentIndex + 1,
+            targetIndex: safeIndex + 1,
+            wasAutoScroll: false
+          }
+        });
+      }
+
       track.scrollTo({
         left: cards[safeIndex].offsetLeft,
         behavior: "smooth"
       });
     },
-    [getTrackCards]
+    [getNearestTrackIndex, getTrackCards]
   );
 
   const scrollTrackByCard = useCallback(
@@ -260,7 +308,7 @@ export default function TestimonialGrid({ testimonials = [] }) {
         cards.length - 1
       );
 
-      scrollTrackToIndex(nextIndex);
+      scrollTrackToIndex(nextIndex, direction > 0 ? "arrow_next" : "arrow_prev");
     },
     [getNearestTrackIndex, getTrackCards, scrollTrackToIndex]
   );
@@ -342,7 +390,7 @@ export default function TestimonialGrid({ testimonials = [] }) {
     }
 
     const timeoutId = window.setTimeout(() => {
-      scrollTrackToIndex(currentTrackIndex + 1);
+      scrollTrackToIndex(currentTrackIndex + 1, "auto");
     }, AUTO_SCROLL_INTERVAL_MS);
 
     return () => {
@@ -373,6 +421,49 @@ export default function TestimonialGrid({ testimonials = [] }) {
     if (!isMobileViewport) return;
     updateBeltState();
   }, [isMobileViewport, testimonials.length, updateBeltState]);
+
+  useEffect(() => {
+    const track = trackRef.current;
+    if (!track) return undefined;
+
+    const observer = new IntersectionObserver(
+      (entries) => {
+        entries.forEach((entry) => {
+          if (entry.intersectionRatio < 0.55) return;
+
+          const testimonialIndex = Number.parseInt(
+            entry.target.getAttribute("data-analytics-testimonial-index") || "",
+            10
+          );
+
+          if (!Number.isFinite(testimonialIndex) || seenCardsRef.current.has(testimonialIndex)) {
+            return;
+          }
+
+          seenCardsRef.current.add(testimonialIndex);
+          trackAnalyticsEvent({
+            name: "testimonial_card_view",
+            sectionId: "voices",
+            elementId: `testimonial_card_${testimonialIndex + 1}`,
+            metadata: {
+              impressionIndex: testimonialIndex + 1
+            }
+          });
+        });
+      },
+      {
+        root: track,
+        threshold: [0.55]
+      }
+    );
+
+    const cards = Array.from(track.querySelectorAll("[data-testimonial-card]"));
+    cards.forEach((card) => observer.observe(card));
+
+    return () => {
+      observer.disconnect();
+    };
+  }, [testimonials.length]);
 
   return (
     <>
@@ -411,6 +502,9 @@ export default function TestimonialGrid({ testimonials = [] }) {
                 key={item.name}
                 className={`voices-card${isActive ? " voices-card--active" : ""}`}
                 data-testimonial-card
+                data-analytics-id={`testimonial_card_${index + 1}`}
+                data-analytics-hover="true"
+                data-analytics-testimonial-index={index}
               >
                 <div className="voices-card__body">
                   <p className="voices-card__quote">
@@ -435,6 +529,7 @@ export default function TestimonialGrid({ testimonials = [] }) {
                     aria-haspopup="dialog"
                     aria-label={`Read full review from ${item.name}`}
                     onClick={() => openReview(index)}
+                    data-analytics-id={`testimonial_open_${index + 1}`}
                   >
                     Read more
                   </button>
@@ -470,9 +565,10 @@ export default function TestimonialGrid({ testimonials = [] }) {
                 key={`dot-${item.name}`}
                 className={`voices__pagination-dot${isCurrent ? " voices__pagination-dot--active" : ""}`}
                 type="button"
-                onClick={() => scrollTrackToIndex(index)}
+                onClick={() => scrollTrackToIndex(index, "pagination")}
                 aria-label={`Show review ${index + 1} of ${testimonials.length}: ${item.name}`}
                 aria-pressed={isCurrent}
+                data-analytics-id={`testimonial_dot_${index + 1}`}
               />
             );
           })}
@@ -492,6 +588,7 @@ export default function TestimonialGrid({ testimonials = [] }) {
                   type="button"
                   onClick={showPrevious}
                   aria-label="Show previous review"
+                  data-analytics-id="testimonial_nav_prev"
                 >
                   Prev
                 </button>
@@ -500,6 +597,7 @@ export default function TestimonialGrid({ testimonials = [] }) {
                   type="button"
                   onClick={showNext}
                   aria-label="Show next review"
+                  data-analytics-id="testimonial_nav_next"
                 >
                   Next
                 </button>

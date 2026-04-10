@@ -8,6 +8,7 @@
     "build": "node -e \"try{require('fs').rmSync('.next',{recursive:true,force:true})}catch(e){}\" && next build",
     "start": "next start",
     "lint": "eslint .",
+    "analytics:report": "node scripts/analytics-report.mjs",
     "sync:fallback": "node scripts/sync-fallback-products.js",
     "security:repo": "node scripts/repo-security-checks.mjs",
     "test:security": "node --test --test-concurrency=1 tests/security/security.test.mjs"

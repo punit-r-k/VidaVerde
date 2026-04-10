@@ -1,5 +1,7 @@
 import "./globals.css";
 import { Fraunces, Sora } from "next/font/google";
+import { Suspense } from "react";
+import AnalyticsRuntime from "./components/AnalyticsRuntime";
 
 const fraunces = Fraunces({
   subsets: ["latin"],
@@ -26,7 +28,12 @@ export const metadata = {
 export default function RootLayout({ children }) {
   return (
     <html lang="en" className={`${fraunces.variable} ${sora.variable}`}>
-      <body>{children}</body>
+      <body>
+        <Suspense fallback={null}>
+          <AnalyticsRuntime />
+        </Suspense>
+        {children}
+      </body>
     </html>
   );
 }

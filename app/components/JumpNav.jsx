@@ -31,7 +31,12 @@ export default function JumpNav() {
       </label>
       <div className="jump-nav__links">
         {navItems.map((item) => (
-          <a key={item.href} href={item.href}>
+          <a
+            key={item.href}
+            href={item.href}
+            data-analytics-id={`jump_nav_${item.label.toLowerCase().replace(/[^a-z0-9]+/g, "_")}`}
+            data-analytics-type="nav"
+          >
             {item.label}
           </a>
         ))}

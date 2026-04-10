@@ -11,7 +11,7 @@ export const metadata = {
 export default function AboutPage() {
   return (
     <>
-      <header className="about-hero">
+      <header className="about-hero" data-analytics-section="about_hero">
         <SiteHeader variant="solid" />
         <div className="about-hero__grid">
           <div className="about-hero__copy">
@@ -72,7 +72,7 @@ export default function AboutPage() {
       <main>
       </main>
 
-      <footer className="footer">
+      <footer className="footer" data-analytics-section="footer">
         <div>
           <h3 className="footer__brand">
             <Image src="/logo.svg" alt="Vida Verde logo" width={32} height={32} />

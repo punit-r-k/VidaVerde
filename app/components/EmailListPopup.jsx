@@ -1,7 +1,8 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import Image from "next/image";
+import { trackAnalyticsEvent } from "@/lib/analytics";
 
 const DISMISS_KEY = "vidaverde-email-popup-dismissed-v1";
 const OPEN_DELAY_MS = 1200;
@@ -27,13 +28,38 @@ export default function EmailListPopup() {
     return () => window.clearTimeout(timerId);
   }, []);
 
+  const closePopup = useCallback((reason = "dismiss") => {
+    window.localStorage.setItem(DISMISS_KEY, "1");
+    if (reason !== "success") {
+      trackAnalyticsEvent({
+        name: "email_popup_dismiss",
+        sectionId: "hero",
+        elementId: "email_popup_dialog",
+        metadata: {
+          source: "email_popup",
+          reason
+        }
+      });
+    }
+    setOpen(false);
+  }, []);
+
   useEffect(() => {
     if (!open) return;
+
+    trackAnalyticsEvent({
+      name: "email_popup_open",
+      sectionId: "hero",
+      elementId: "email_popup_dialog",
+      metadata: {
+        source: "email_popup"
+      }
+    });
 
     const previousOverflow = document.body.style.overflow;
     const onEscape = (event) => {
       if (event.key === "Escape") {
-        closePopup();
+        closePopup("escape");
       }
     };
 
@@ -44,12 +70,7 @@ export default function EmailListPopup() {
       document.body.style.overflow = previousOverflow;
       window.removeEventListener("keydown", onEscape);
     };
-  }, [open]);
-
-  const closePopup = () => {
-    window.localStorage.setItem(DISMISS_KEY, "1");
-    setOpen(false);
-  };
+  }, [closePopup, open]);
 
   const handleSubmit = async (event) => {
     event.preventDefault();
@@ -68,6 +89,14 @@ export default function EmailListPopup() {
     setIsSubmitting(true);
     setErrorMessage("");
     setSubmitted(false);
+    trackAnalyticsEvent({
+      name: "email_popup_submit",
+      sectionId: "hero",
+      elementId: "email_popup_submit",
+      metadata: {
+        source: "email_popup"
+      }
+    });
 
     try {
       const response = await fetch("/api/email-signups", {
@@ -89,12 +118,31 @@ export default function EmailListPopup() {
       window.localStorage.setItem(DISMISS_KEY, "1");
       setSubmitted(true);
       setEmail("");
+      trackAnalyticsEvent({
+        name: "email_popup_result",
+        sectionId: "hero",
+        elementId: "email_popup_submit",
+        metadata: {
+          source: "email_popup",
+          result: "success"
+        }
+      });
 
       window.setTimeout(() => {
-        setOpen(false);
+        closePopup("success");
       }, 1400);
     } catch (error) {
       setErrorMessage(error?.message || DEFAULT_ERROR);
+      trackAnalyticsEvent({
+        name: "email_popup_result",
+        sectionId: "hero",
+        elementId: "email_popup_submit",
+        metadata: {
+          source: "email_popup",
+          result: "error",
+          errorCode: "submission_failed"
+        }
+      });
     } finally {
       setIsSubmitting(false);
     }
@@ -103,19 +151,22 @@ export default function EmailListPopup() {
   if (!open) return null;
 
   return (
-    <div className="email-popup" onClick={closePopup}>
+    <div className="email-popup" onClick={() => closePopup("overlay")}>
       <div
         className="email-popup__dialog"
         role="dialog"
         aria-modal="true"
         aria-labelledby="email-popup-title"
         onClick={(event) => event.stopPropagation()}
+        data-analytics-id="email_popup_dialog"
+        data-analytics-hover="true"
       >
         <button
           type="button"
           className="email-popup__close"
           aria-label="Close email signup popup"
-          onClick={closePopup}
+          onClick={() => closePopup("close_button")}
+          data-analytics-id="email_popup_close"
         >
           x
         </button>
@@ -152,6 +203,8 @@ export default function EmailListPopup() {
               type="submit"
               className={`email-popup__button${submitted ? " email-popup__button--success" : ""}`}
               disabled={isSubmitting || submitted}
+              data-analytics-id="email_popup_submit"
+              data-analytics-hover="true"
             >
               {submitted ? "You are in!" : isSubmitting ? "Joining..." : "I am in"}
             </button>
@@ -170,7 +223,8 @@ export default function EmailListPopup() {
           <button
             type="button"
             className="email-popup__skip"
-            onClick={closePopup}
+            onClick={() => closePopup("no_thanks")}
+            data-analytics-id="email_popup_skip"
           >
             No thanks
           </button>

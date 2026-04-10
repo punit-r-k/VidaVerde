@@ -209,7 +209,7 @@ export default async function Home() {
     <>
       <EmailListPopup />
       <ScrollReveal />
-      <header className="hero">
+      <header className="hero" data-analytics-section="hero">
         <video
           className="hero__video"
           autoPlay
@@ -248,10 +248,22 @@ export default async function Home() {
             We make small-batch, live fermented sauerkraut and hot sauces made to help restore gut balance naturally. A healthier gut microbiome supports digestion, immunity, energy, mood, and overall well-being.
           </p>
           <div className="hero__actions reveal" style={{ "--delay": "0.4s" }}>
-            <a className="button button--light" href="#shop">
+            <a
+              className="button button--light"
+              href="#shop"
+              data-analytics-id="hero_shop_cta"
+              data-analytics-type="cta"
+              data-analytics-hover="true"
+            >
               Shop The Jars
             </a>
-            <a className="button button--ghost" href="#market">
+            <a
+              className="button button--ghost"
+              href="#market"
+              data-analytics-id="hero_market_cta"
+              data-analytics-type="cta"
+              data-analytics-hover="true"
+            >
               Find us in person
             </a>
           </div>
@@ -286,7 +298,11 @@ export default async function Home() {
           </section>
         ) : null}
 
-        <section id="voices" className="section section--compact section--fade voices">
+        <section
+          id="voices"
+          className="section section--compact section--fade voices"
+          data-analytics-section="voices"
+        >
           <div className="voices__shell js-reveal" style={{ "--reveal-delay": "80ms" }}>
             <div className="voices__intro">
               <p className="eyebrow">Customer Voices</p>
@@ -296,7 +312,11 @@ export default async function Home() {
           </div>
         </section>
 
-        <section id="wellness" className="section section--compact section--fade pulse pulse--why">
+        <section
+          id="wellness"
+          className="section section--compact section--fade pulse pulse--why"
+          data-analytics-section="wellness"
+        >
           <div className="pulse__shell js-reveal" style={{ "--reveal-delay": "120ms" }}>
             <div className="pulse__intro pulse__intro--why">
               <p className="eyebrow">Foundation</p>
@@ -325,7 +345,10 @@ export default async function Home() {
           </div>
         </section>
 
-        <section className="section section--compact section--fade pulse pulse--difference">
+        <section
+          className="section section--compact section--fade pulse pulse--difference"
+          data-analytics-section="difference"
+        >
           <div className="pulse__shell pulse__shell--linked js-reveal" style={{ "--reveal-delay": "160ms" }}>
             <div className="pulse__difference-layout">
               <div className="pulse__intro pulse__intro--difference">
@@ -351,7 +374,10 @@ export default async function Home() {
           </div>
         </section>
 
-        <section className="section section--tight section--line buy-cta">
+        <section
+          className="section section--tight section--line buy-cta"
+          data-analytics-section="buy_cta"
+        >
           <div className="buy-cta__shell js-reveal" style={{ "--reveal-delay": "140ms" }}>
             <div className="buy-cta__copy">
               <p className="eyebrow">Ready To Start</p>
@@ -363,17 +389,33 @@ export default async function Home() {
               <p>Choose a flavor you already enjoy so the routine sticks.</p>
             </div>
             <div className="buy-cta__actions">
-              <a className="button button--dark" href="#shop">
+              <a
+                className="button button--dark"
+                href="#shop"
+                data-analytics-id="buy_cta_shop"
+                data-analytics-type="cta"
+                data-analytics-hover="true"
+              >
                 Shop The Collection
               </a>
-              <a className="button button--light" href="#market">
+              <a
+                className="button button--light"
+                href="#market"
+                data-analytics-id="buy_cta_market"
+                data-analytics-type="cta"
+                data-analytics-hover="true"
+              >
                 Saturday Pickup Info
               </a>
             </div>
           </div>
         </section>
 
-        <section id="shop" className="section section--tight section--plain shop">
+        <section
+          id="shop"
+          className="section section--tight section--plain shop"
+          data-analytics-section="shop"
+        >
           <div className="section__intro section__intro--compact js-reveal" style={{ "--reveal-delay": "120ms" }}>
             <p className="eyebrow">The Collection</p>
             <h2>Six products: four sauerkraut profiles and two hot sauces.</h2>
@@ -408,7 +450,11 @@ export default async function Home() {
           <Storefront products={products} inventory={inventory} />
         </section>
 
-        <section id="market" className="section section--tight section--line market">
+        <section
+          id="market"
+          className="section section--tight section--line market"
+          data-analytics-section="market"
+        >
           <div className="market__grid js-reveal" style={{ "--reveal-delay": "160ms" }}>
             <div className="market__copy">
               <p className="eyebrow">{MARKET_NAME}</p>
@@ -441,14 +487,24 @@ export default async function Home() {
                   {line}
                 </p>
               ))}
-              <a className="button button--light" href="#shop">
+              <a
+                className="button button--light"
+                href="#shop"
+                data-analytics-id="market_reserve_cta"
+                data-analytics-type="cta"
+                data-analytics-hover="true"
+              >
                 Reserve A Jar
               </a>
             </div>
           </div>
         </section>
 
-        <section id="join-email" className="section section--compact section--plain email-cta">
+        <section
+          id="join-email"
+          className="section section--compact section--plain email-cta"
+          data-analytics-section="join_email"
+        >
           <div className="email-cta__shell js-reveal" style={{ "--reveal-delay": "170ms" }}>
             <p className="eyebrow">Stay Updated</p>
             <h2>Join our email list.</h2>
@@ -459,7 +515,7 @@ export default async function Home() {
           </div>
         </section>
 
-        <section id="founder" className="about-hero">
+        <section id="founder" className="about-hero" data-analytics-section="founder">
           <div
             className="about-hero__grid about-hero__grid--inline js-reveal"
             style={{ "--reveal-delay": "100ms" }}
@@ -515,15 +571,23 @@ export default async function Home() {
           />
         </div>
 
-        <section id="faq" className="section section--compact section--plain faq">
+        <section
+          id="faq"
+          className="section section--compact section--plain faq"
+          data-analytics-section="faq"
+        >
           <div className="faq__shell js-reveal" style={{ "--reveal-delay": "180ms" }}>
             <div className="faq__intro">
               <p className="eyebrow">FAQ</p>
               <h2>Quick answers before you place your first order.</h2>
             </div>
             <div className="faq__list">
-              {faqs.map((item) => (
-                <details key={item.q}>
+              {faqs.map((item, index) => (
+                <details
+                  key={item.q}
+                  data-analytics-id={`faq_${index + 1}`}
+                  data-analytics-type="faq"
+                >
                   <summary>{item.q}</summary>
                   {item.a ? <p>{item.a}</p> : null}
                   {item.intro || item.bullets || item.notes ? (
@@ -553,7 +617,7 @@ export default async function Home() {
         </section>
       </main>
 
-      <footer className="footer">
+      <footer className="footer" data-analytics-section="footer">
         <div>
           <h3 className="footer__brand">
             <Image src="/logo.svg" alt="Vida Verde logo" width={32} height={32} />

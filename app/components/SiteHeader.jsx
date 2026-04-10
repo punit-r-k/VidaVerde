@@ -11,9 +11,23 @@ export default function SiteHeader({ variant = "overlay" }) {
         <span>Vida Verde Sauerkraut</span>
       </div>
       <div className="nav__links">
-        <Link href="/#shop">Shop</Link>
-        <Link href="/#market">Fulshear Market</Link>
-        <Link href="/#founder">Founder</Link>
+        <Link href="/#shop" data-analytics-id="site_header_shop" data-analytics-type="nav">
+          Shop
+        </Link>
+        <Link
+          href="/#market"
+          data-analytics-id="site_header_market"
+          data-analytics-type="nav"
+        >
+          Fulshear Market
+        </Link>
+        <Link
+          href="/#founder"
+          data-analytics-id="site_header_founder"
+          data-analytics-type="nav"
+        >
+          Founder
+        </Link>
       </div>
     </nav>
   );

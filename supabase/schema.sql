@@ -106,8 +106,32 @@ create table if not exists email_signups (
   created_at timestamptz not null default now()
 );
 
+create table if not exists analytics_events (
+  id uuid primary key default gen_random_uuid(),
+  event_name text not null,
+  occurred_at timestamptz not null default now(),
+  visitor_id text not null,
+  session_id text not null,
+  page_view_id text not null,
+  page_path text not null,
+  page_search text,
+  referrer_path text,
+  section_id text,
+  element_id text,
+  product_sku text,
+  checkout_step text check (checkout_step in ('details', 'payment')),
+  metadata jsonb not null default '{}'::jsonb check (jsonb_typeof(metadata) = 'object'),
+  created_at timestamptz not null default now()
+);
+
 create index if not exists email_signups_email_idx on email_signups (email);
 create index if not exists email_signups_created_at_idx on email_signups (created_at desc);
+create index if not exists analytics_events_created_at_idx on analytics_events (created_at desc);
+create index if not exists analytics_events_event_created_at_idx on analytics_events (event_name, created_at desc);
+create index if not exists analytics_events_page_created_at_idx on analytics_events (page_path, created_at desc);
+create index if not exists analytics_events_section_created_at_idx on analytics_events (section_id, created_at desc);
+create index if not exists analytics_events_product_created_at_idx on analytics_events (product_sku, created_at desc);
+create index if not exists analytics_events_session_created_at_idx on analytics_events (session_id, created_at desc);
 create index if not exists shipments_status_created_at_idx on shipments (status, created_at desc);
 create index if not exists shipments_created_at_idx on shipments (created_at desc);
 
@@ -737,6 +761,7 @@ begin
     'orders',
     'shipments',
     'email_signups',
+    'analytics_events',
     'order_items',
     'preorder_queue',
     'restock_events',

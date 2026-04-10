@@ -1,6 +1,7 @@
 "use client";
 
 import { useId, useState } from "react";
+import { trackAnalyticsEvent } from "@/lib/analytics";
 
 const DEFAULT_ERROR = "Unable to save your email right now. Please try again.";
 const SUCCESS_MESSAGE = "Thank you for joining our email list!";
@@ -36,6 +37,14 @@ export default function EmailSignupForm({ source = "website_email_cta" }) {
     setStatusMessage("");
     setHasError(false);
     setIsSuccess(false);
+    trackAnalyticsEvent({
+      name: "email_signup_submit",
+      sectionId: "join_email",
+      elementId: `email_signup_submit_${source}`,
+      metadata: {
+        source
+      }
+    });
 
     try {
       const response = await fetch("/api/email-signups", {
@@ -58,10 +67,29 @@ export default function EmailSignupForm({ source = "website_email_cta" }) {
       setStatusMessage(SUCCESS_MESSAGE);
       setHasError(false);
       setIsSuccess(true);
+      trackAnalyticsEvent({
+        name: "email_signup_result",
+        sectionId: "join_email",
+        elementId: `email_signup_submit_${source}`,
+        metadata: {
+          source,
+          result: "success"
+        }
+      });
     } catch (error) {
       setStatusMessage(error?.message || DEFAULT_ERROR);
       setHasError(true);
       setIsSuccess(false);
+      trackAnalyticsEvent({
+        name: "email_signup_result",
+        sectionId: "join_email",
+        elementId: `email_signup_submit_${source}`,
+        metadata: {
+          source,
+          result: "error",
+          errorCode: "submission_failed"
+        }
+      });
     } finally {
       setIsSubmitting(false);
     }
@@ -77,6 +105,16 @@ export default function EmailSignupForm({ source = "website_email_cta" }) {
           id={inputId}
           type="email"
           value={email}
+          onFocus={() => {
+            trackAnalyticsEvent({
+              name: "email_signup_focus",
+              sectionId: "join_email",
+              elementId: `email_signup_input_${source}`,
+              metadata: {
+                source
+              }
+            });
+          }}
           onChange={(event) => {
             setEmail(event.target.value);
             if (hasError) {
@@ -95,6 +133,8 @@ export default function EmailSignupForm({ source = "website_email_cta" }) {
           type="submit"
           className={`button button--dark email-signup-form__submit${isSuccess ? " email-signup-form__submit--success" : ""}`}
           disabled={isSubmitting || isSuccess}
+          data-analytics-id={`email_signup_submit_${source}`}
+          data-analytics-hover="true"
         >
           {isSuccess ? "Thanks!" : isSubmitting ? "Joining..." : "Join The List"}
         </button>

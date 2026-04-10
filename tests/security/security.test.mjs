@@ -5,6 +5,10 @@ import net from "node:net";
 import path from "node:path";
 import test from "node:test";
 import { fileURLToPath } from "node:url";
+import {
+  buildAnalyticsReportFromRows,
+  formatAnalyticsReportMarkdown
+} from "../../lib/analytics/report.mjs";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const repoRoot = path.resolve(__dirname, "..", "..");
@@ -349,6 +353,160 @@ test("security regression suite", { timeout: 300_000 }, async (t) => {
 
     assert.equal(response.status, 400);
     assert.match(JSON.stringify(json), /invalid/i);
+  });
+
+  await t.test("analytics ingest rejects unknown events and oversized batches before persistence", async () => {
+    const invalidEvent = await requestJson("/api/analytics", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        Origin: baseUrl
+      },
+      body: JSON.stringify({
+        events: [
+          {
+            name: "totally_fake_event",
+            occurredAt: new Date().toISOString(),
+            visitorId: "v_test",
+            sessionId: "s_test",
+            pageViewId: "pv_test",
+            pagePath: "/"
+          }
+        ]
+      })
+    });
+
+    assert.equal(invalidEvent.response.status, 400);
+
+    const oversizedBatch = await requestJson("/api/analytics", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        Origin: baseUrl
+      },
+      body: JSON.stringify({
+        events: Array.from({ length: 40 }, (_, index) => ({
+          name: "cta_click",
+          occurredAt: new Date().toISOString(),
+          visitorId: `v_${index}`,
+          sessionId: `s_${index}`,
+          pageViewId: `pv_${index}`,
+          pagePath: "/",
+          elementId: `cta_${index}`
+        }))
+      })
+    });
+
+    assert.equal(oversizedBatch.response.status, 400);
+  });
+
+  await t.test("analytics ingest rejects cross-origin requests", async () => {
+    const response = await fetch(`${baseUrl}/api/analytics`, {
+      method: "POST",
+      headers: {
+        Origin: "https://evil.example",
+        "Content-Type": "application/json"
+      },
+      body: JSON.stringify({
+        events: [
+          {
+            name: "cta_click",
+            occurredAt: new Date().toISOString(),
+            visitorId: "v_test",
+            sessionId: "s_test",
+            pageViewId: "pv_test",
+            pagePath: "/",
+            elementId: "hero_shop_cta"
+          }
+        ]
+      })
+    });
+
+    assert.equal(response.status, 403);
+  });
+
+  await t.test("analytics reporting output stays aggregated and redacted", async () => {
+    const report = buildAnalyticsReportFromRows(
+      [
+        {
+          event_name: "page_view",
+          visitor_id: "v_1",
+          session_id: "s_1",
+          page_path: "/",
+          section_id: "hero",
+          element_id: "",
+          product_sku: "",
+          metadata: {}
+        },
+        {
+          event_name: "product_card_view",
+          visitor_id: "v_1",
+          session_id: "s_1",
+          page_path: "/",
+          section_id: "shop",
+          element_id: "product_card_vv1",
+          product_sku: "VV1",
+          metadata: {}
+        },
+        {
+          event_name: "product_add_to_cart",
+          visitor_id: "v_1",
+          session_id: "s_1",
+          page_path: "/",
+          section_id: "shop",
+          element_id: "product_add_vv1",
+          product_sku: "VV1",
+          metadata: {}
+        },
+        {
+          event_name: "checkout_field_error",
+          visitor_id: "v_1",
+          session_id: "s_1",
+          page_path: "/",
+          section_id: "shop",
+          element_id: "checkout_field_email",
+          product_sku: "",
+          metadata: {
+            fieldName: "email",
+            attempted_value: "customer@example.com",
+            api_key: "sk_test_should_never_appear"
+          }
+        },
+        {
+          event_name: "email_popup_open",
+          visitor_id: "v_2",
+          session_id: "s_2",
+          page_path: "/",
+          section_id: "hero",
+          element_id: "email_popup_dialog",
+          product_sku: "",
+          metadata: {}
+        },
+        {
+          event_name: "email_popup_dismiss",
+          visitor_id: "v_2",
+          session_id: "s_2",
+          page_path: "/",
+          section_id: "hero",
+          element_id: "email_popup_dialog",
+          product_sku: "",
+          metadata: {
+            reason: "no_thanks"
+          }
+        }
+      ],
+      { rangeLabel: "7d", generatedAt: "2026-04-09T12:00:00.000Z" }
+    );
+
+    const markdown = formatAnalyticsReportMarkdown(report);
+    const json = JSON.stringify(report);
+
+    assert.match(markdown, /Summary/);
+    assert.match(markdown, /Recommended Actions/);
+    assert.doesNotMatch(markdown, /customer@example\.com/i);
+    assert.doesNotMatch(markdown, /sk_test_should_never_appear/i);
+    assert.doesNotMatch(json, /customer@example\.com/i);
+    assert.doesNotMatch(json, /sk_test_should_never_appear/i);
   });
 
   await t.test("CORS allows only trusted origins", async () => {
