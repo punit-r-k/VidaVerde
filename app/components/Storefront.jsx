@@ -18,6 +18,8 @@ import {
 } from "@/lib/checkoutSchema";
 import {
   MARKET_NAME,
+  MARKET_PICKUP_ACKNOWLEDGEMENT_LABEL,
+  MARKET_PICKUP_ACKNOWLEDGEMENT_NOTICE,
   MARKET_PICKUP_LABEL,
   MARKET_PICKUP_NOTE_LINES
 } from "@/lib/pickupDetails";
@@ -30,10 +32,11 @@ const formatCurrency = (amountInCents) => {
 
 const INVENTORY_POLL_MS = 30000;
 const PREORDER_TIMING_NOTICE =
-  "Pre-orders are not guaranteed to be filled for the next Fulshear Farmers Market. Kraut can take up to 15 days to be ready. It may be ready sooner, but that is not guaranteed.";
+  `Pre-orders are estimates only. Fermentation timelines vary, and preorder items may take up to 15 days before pickup is available. The next ${MARKET_NAME} date is not guaranteed for preorder items.`;
 const PRODUCT_PREORDER_NOTICE =
   "Next unit is a pre-order. Not guaranteed for next farmers market; kraut can take up to 15 days.";
-const PREORDER_ACKNOWLEDGEMENT_LABEL = "Accept preorder terms & conditions.";
+const PREORDER_ACKNOWLEDGEMENT_LABEL =
+  "I understand preorder timing is estimated and not guaranteed for the next market.";
 const PREORDER_NOTICE_MESSAGES = new Set([
   "Please acknowledge the pre-order notice before proceeding to payment.",
   "Please acknowledge the pre-order notice before payment."
@@ -256,6 +259,8 @@ export default function Storefront({ products, inventory = {} }) {
   const [addPulse, setAddPulse] = useState({});
   const [showOrderSuccessPopup, setShowOrderSuccessPopup] = useState(false);
   const [orderSuccessPopupKey, setOrderSuccessPopupKey] = useState(0);
+  const [pickupAcknowledged, setPickupAcknowledged] = useState(false);
+  const [pickupTouched, setPickupTouched] = useState(false);
   const [preorderAcknowledged, setPreorderAcknowledged] = useState(false);
   const [preorderTouched, setPreorderTouched] = useState(false);
   const fieldRefs = useRef({});
@@ -281,6 +286,8 @@ export default function Storefront({ products, inventory = {} }) {
     setFieldErrors({});
     setTouchedFields({});
     setSubmitAttempted(false);
+    setPickupAcknowledged(false);
+    setPickupTouched(false);
     setPreorderAcknowledged(false);
     setPreorderTouched(false);
     setCheckoutStep("details");
@@ -326,6 +333,13 @@ export default function Storefront({ products, inventory = {} }) {
     const node = fieldRefs.current[firstInvalid];
     if (!node) return;
 
+    node.focus();
+    node.scrollIntoView({ behavior: "smooth", block: "center" });
+  }, []);
+
+  const focusPickupAcknowledgement = useCallback(() => {
+    const node = fieldRefs.current.pickupAcknowledgement;
+    if (!node) return;
     node.focus();
     node.scrollIntoView({ behavior: "smooth", block: "center" });
   }, []);
@@ -499,12 +513,15 @@ export default function Storefront({ products, inventory = {} }) {
   const subtotal = cartItems.reduce((sum, item) => sum + item.lineTotal, 0);
   const preorderUnitsInCart = cartItems.reduce((sum, item) => sum + item.preorderUnits, 0);
   const hasPreorderItems = preorderUnitsInCart > 0;
+  const pickupAcknowledgementError = fulfillment === "market" &&
+    !pickupAcknowledged &&
+    (submitAttempted || pickupTouched);
   const preorderAcknowledgementError = hasPreorderItems &&
     !preorderAcknowledged &&
     (submitAttempted || preorderTouched);
   const showGlobalNotice = Boolean(notice) && !(
     status === "error" &&
-    (isPaymentStep || preorderAcknowledgementError)
+    (isPaymentStep || pickupAcknowledgementError || preorderAcknowledgementError)
   );
   const requiresAddress = fulfillment === "ship";
   const cartCountLabel = `${itemCount} item${itemCount === 1 ? "" : "s"}`;
@@ -517,6 +534,12 @@ export default function Storefront({ products, inventory = {} }) {
     );
     return hasMatch ? US_CITY_OPTIONS : [selectedCity, ...US_CITY_OPTIONS];
   }, [formValues.city]);
+
+  useEffect(() => {
+    if (fulfillment === "market") return;
+    setPickupAcknowledged(false);
+    setPickupTouched(false);
+  }, [fulfillment]);
 
   useEffect(() => {
     if (!hasPreorderItems) {
@@ -632,13 +655,16 @@ export default function Storefront({ products, inventory = {} }) {
         postalCode: String(formValues.postalCode || "").trim(),
         note: String(formValues.note || "").trim()
       },
+      consents: {
+        pickupPolicyAccepted: fulfillment === "market" ? pickupAcknowledged : false
+      },
       // Only send sku + quantity. Server decides sold vs preorder.
       items: cartItems.map((item) => ({
         sku: item.sku,
         quantity: item.quantity
       }))
     };
-  }, [cartItems, formValues, fulfillment]);
+  }, [cartItems, formValues, fulfillment, pickupAcknowledged]);
 
   const handleAdd = (product) => {
     const currentQty = cart[product.sku] || 0;
@@ -718,6 +744,8 @@ export default function Storefront({ products, inventory = {} }) {
 
     resetPaymentState();
     setCart({});
+    setPickupAcknowledged(false);
+    setPickupTouched(false);
     setPreorderAcknowledged(false);
     setPreorderTouched(false);
     checkoutStartedRef.current = false;
@@ -849,6 +877,26 @@ export default function Storefront({ products, inventory = {} }) {
     setNotice("Review your details, then proceed to payment again.");
   }, [resetPaymentState]);
 
+  const handlePickupAcknowledgementChange = (event) => {
+    const isChecked = Boolean(event.currentTarget.checked);
+    setPickupAcknowledged(isChecked);
+    setPickupTouched(true);
+    trackAnalyticsEvent({
+      name: "checkout_pickup_ack_toggled",
+      sectionId: "shop",
+      elementId: "pickup_acknowledgement",
+      checkoutStep,
+      metadata: {
+        result: isChecked ? "checked" : "unchecked"
+      }
+    });
+
+    if (isChecked && status === "error" && notice === "Please accept the pickup policy before proceeding to payment.") {
+      setStatus("idle");
+      setNotice("");
+    }
+  };
+
   const handlePreorderAcknowledgementChange = (event) => {
     const isChecked = Boolean(event.currentTarget.checked);
     setPreorderAcknowledged(isChecked);
@@ -871,6 +919,25 @@ export default function Storefront({ products, inventory = {} }) {
   };
 
   const createPaymentIntent = useCallback(async () => {
+    if (fulfillment === "market" && !pickupAcknowledged) {
+      const message = "Please accept the pickup policy before proceeding to payment.";
+      trackAnalyticsEvent({
+        name: "checkout_validation_blocked",
+        sectionId: "shop",
+        elementId: "pickup_acknowledgement",
+        checkoutStep: "payment",
+        metadata: {
+          reason: "missing_pickup_ack",
+          validationCount: 1
+        }
+      });
+      setPickupTouched(true);
+      setStatus("error");
+      setNotice(message);
+      focusPickupAcknowledgement();
+      throw new Error(message);
+    }
+
     if (hasPreorderItems && !preorderAcknowledged) {
       const message = "Please acknowledge the pre-order notice before payment.";
       trackAnalyticsEvent({
@@ -914,9 +981,11 @@ export default function Storefront({ products, inventory = {} }) {
   }, [
     buildOrderPayload,
     focusFirstInvalidField,
+    focusPickupAcknowledgement,
     focusPreorderAcknowledgement,
     fulfillment,
     hasPreorderItems,
+    pickupAcknowledged,
     preorderAcknowledged
   ]);
 
@@ -1003,6 +1072,24 @@ export default function Storefront({ products, inventory = {} }) {
       return;
     }
 
+    if (fulfillment === "market" && !pickupAcknowledged) {
+      trackAnalyticsEvent({
+        name: "checkout_validation_blocked",
+        sectionId: "shop",
+        elementId: "pickup_acknowledgement",
+        checkoutStep: "details",
+        metadata: {
+          reason: "missing_pickup_ack",
+          validationCount: 1
+        }
+      });
+      setPickupTouched(true);
+      setStatus("error");
+      setNotice("Please accept the pickup policy before proceeding to payment.");
+      focusPickupAcknowledgement();
+      return;
+    }
+
     if (hasPreorderItems && !preorderAcknowledged) {
       trackAnalyticsEvent({
         name: "checkout_validation_blocked",
@@ -1035,6 +1122,45 @@ export default function Storefront({ products, inventory = {} }) {
     setCheckoutStep("payment");
     setStatus("idle");
     setNotice("");
+  };
+
+  const renderPickupAcknowledgement = () => {
+    if (fulfillment !== "market") return null;
+
+    return (
+      <div className={`preorder-acknowledgement-wrap${
+        pickupAcknowledgementError ? " preorder-acknowledgement-wrap--error" : ""
+      }`}>
+        <label className="preorder-acknowledgement">
+          <input
+            ref={setFieldRef("pickupAcknowledgement")}
+            type="checkbox"
+            name="pickupAcknowledgement"
+            checked={pickupAcknowledged}
+            onChange={handlePickupAcknowledgementChange}
+            onBlur={() => setPickupTouched(true)}
+            aria-invalid={pickupAcknowledgementError}
+            aria-describedby={
+              pickupAcknowledgementError
+                ? "pickup-acknowledgement-error"
+                : undefined
+            }
+            required
+          />
+          <span>{MARKET_PICKUP_ACKNOWLEDGEMENT_LABEL}</span>
+        </label>
+        <p className="preorder-acknowledgement__notice">{MARKET_PICKUP_ACKNOWLEDGEMENT_NOTICE}</p>
+        {pickupAcknowledgementError ? (
+          <span
+            id="pickup-acknowledgement-error"
+            className="form-field__error"
+            role="alert"
+          >
+            Please check this box to accept the pickup policy.
+          </span>
+        ) : null}
+      </div>
+    );
   };
 
   const renderCartDetails = (keyPrefix, { allowQuantityEdit = true } = {}) => (
@@ -1671,6 +1797,8 @@ export default function Storefront({ products, inventory = {} }) {
                   ></textarea>
                 </label>
 
+                {renderPickupAcknowledgement()}
+
                 {hasPreorderItems ? (
                   <div className={`preorder-acknowledgement-wrap${
                     preorderAcknowledgementError ? " preorder-acknowledgement-wrap--error" : ""
@@ -1756,6 +1884,8 @@ export default function Storefront({ products, inventory = {} }) {
                     {PREORDER_TIMING_NOTICE}
                   </div>
                 ) : null}
+
+                {renderPickupAcknowledgement()}
 
                 {hasPreorderItems ? (
                   <div className={`preorder-acknowledgement-wrap${

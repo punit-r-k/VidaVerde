@@ -1,0 +1,26 @@
+
+> vidaverde@0.1.0 dev
+> node -e "try{require('fs').rmSync('.next',{recursive:true,force:true})}catch(e){}" && next dev
+
+▲ Next.js 16.2.3 (Turbopack)
+- Local:         http://localhost:3001
+- Network:       http://192.168.1.92:3001
+- Environments: .env.local
+✓ Ready in 1048ms
+Creating turbopack project {
+  dir: 'C:\\Users\\punit\\OneDrive\\Documents\\GitHub\\VidaVerde',
+  testMode: true
+}
+
+○ Compiling / ...
+ GET / 200 in 6.7s (next.js: 5.1s, application-code: 1535ms)
+ GET / 200 in 589ms (next.js: 15ms, application-code: 574ms)
+ GET / 200 in 438ms (next.js: 5ms, application-code: 433ms)
+ GET / 200 in 440ms (next.js: 16ms, application-code: 425ms)
+✓ Compiled in 2.1s
+✓ Compiled in 57ms
+✓ Compiled in 273ms
+ GET /privacy-policy 200 in 3.1s (next.js: 2.1s, application-code: 927ms)
+ GET /privacy-policy 200 in 93ms (next.js: 6ms, application-code: 88ms)
+✓ Compiled in 19ms
+✓ Compiled in 255ms

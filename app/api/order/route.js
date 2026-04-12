@@ -3,6 +3,7 @@ import {
   checkoutPayloadSchema,
   mapCheckoutIssuesToFieldErrors
 } from "@/lib/checkoutSchema";
+import { MARKET_PICKUP_POLICY_VERSION } from "@/lib/pickupDetails";
 import { getProductMap } from "@/lib/products";
 import { getRouteRateLimitConfig } from "@/lib/rateLimit";
 import { stripeConfig, stripeRequest } from "@/lib/stripe";
@@ -66,11 +67,19 @@ export async function POST(request) {
 
   const {
     customer,
+    consents,
     items: normalizedItems,
     fulfillment: normalizedFulfillment
   } = parsedPayload.data;
   const { name, email } = customer;
   const isPickup = normalizedFulfillment === "market";
+
+  if (isPickup && !consents?.pickupPolicyAccepted) {
+    return respond.json(
+      { error: "Pickup policy acceptance is required for market pickup." },
+      { status: 400 }
+    );
+  }
 
   const skus = normalizedItems.map((item) => item.sku);
   const productMap = await getProductMap(skus);
@@ -150,6 +159,12 @@ export async function POST(request) {
     order_skus: asMetadataValue(skuSummary, 500),
     order_item_count: asMetadataValue(totalUnits, 32)
   };
+
+  if (isPickup) {
+    metadata.pickup_policy_accepted = "true";
+    metadata.pickup_policy_version = asMetadataValue(MARKET_PICKUP_POLICY_VERSION, 32);
+    metadata.pickup_policy_accepted_at = asMetadataValue(new Date().toISOString(), 64);
+  }
 
   const serializedItems = JSON.stringify(itemsPayload);
   if (serializedItems.length > 500) {

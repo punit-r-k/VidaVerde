@@ -1,9 +1,11 @@
 import Storefront from "./components/Storefront";
 import EmailListPopup from "./components/EmailListPopup";
 import EmailSignupForm from "./components/EmailSignupForm";
-import ScrollReveal from "./components/ScrollReveal";
+import MarketPickupPolicy from "./components/MarketPickupPolicy";
+import RevealOnScroll from "./components/RevealOnScroll";
 import JumpNav from "./components/JumpNav";
 import TestimonialGrid from "./components/TestimonialGrid";
+import SiteFooter from "./components/SiteFooter";
 import Image from "next/image";
 import { getProducts } from "@/lib/products";
 import {
@@ -11,8 +13,7 @@ import {
   MARKET_ADDRESS,
   MARKET_DAY_LABEL,
   MARKET_NAME,
-  MARKET_PICKUP_POLICY_BULLETS,
-  MARKET_PICKUP_POLICY_NOTES,
+  MARKET_PICKUP_POLICY_ITEMS,
   MARKET_PICKUP_SUMMARY,
   MARKET_PICKUP_WINDOW,
   MARKET_UPDATES_NOTICE,
@@ -205,10 +206,11 @@ export default async function Home() {
     }
   ];
 
+  const marketPolicyItems = MARKET_PICKUP_POLICY_ITEMS;
+
   return (
     <>
       <EmailListPopup />
-      <ScrollReveal />
       <header className="hero" data-analytics-section="hero">
         <video
           className="hero__video"
@@ -276,7 +278,7 @@ export default async function Home() {
       <main>
         {showProofSection ? (
           <section id="proof" className="section section--tight section--line signals">
-            <div className="signals__shell js-reveal">
+            <RevealOnScroll className="signals__shell" preset="softScale">
               <div className="signals__intro">
                 <p className="eyebrow">Trusted Around Houston</p>
                 <h2>Weekly market customers choose us for consistent raw fermentation.</h2>
@@ -294,7 +296,7 @@ export default async function Home() {
                   </div>
                 ))}
               </div>
-            </div>
+            </RevealOnScroll>
           </section>
         ) : null}
 
@@ -303,13 +305,13 @@ export default async function Home() {
           className="section section--compact section--fade voices"
           data-analytics-section="voices"
         >
-          <div className="voices__shell js-reveal" style={{ "--reveal-delay": "80ms" }}>
+          <RevealOnScroll className="voices__shell" delay={0.08} preset="driftRight">
             <div className="voices__intro">
               <p className="eyebrow">Customer Voices</p>
               <h2>Real feedback from weekly customers building a daily ferment routine.</h2>
             </div>
             <TestimonialGrid testimonials={testimonials} />
-          </div>
+          </RevealOnScroll>
         </section>
 
         <section
@@ -317,7 +319,7 @@ export default async function Home() {
           className="section section--compact section--fade pulse pulse--why"
           data-analytics-section="wellness"
         >
-          <div className="pulse__shell js-reveal" style={{ "--reveal-delay": "120ms" }}>
+          <RevealOnScroll className="pulse__shell" delay={0.12} preset="rise">
             <div className="pulse__intro pulse__intro--why">
               <p className="eyebrow">Foundation</p>
               <h2>Why Live Fermented Foods Matter</h2>
@@ -342,14 +344,18 @@ export default async function Home() {
               <span className="pulse__continuity-label">Next in the story</span>
               <p>How we apply these live-food principles in every jar.</p>
             </div>
-          </div>
+          </RevealOnScroll>
         </section>
 
         <section
           className="section section--compact section--fade pulse pulse--difference"
           data-analytics-section="difference"
         >
-          <div className="pulse__shell pulse__shell--linked js-reveal" style={{ "--reveal-delay": "160ms" }}>
+          <RevealOnScroll
+            className="pulse__shell pulse__shell--linked"
+            delay={0.16}
+            preset="driftLeft"
+          >
             <div className="pulse__difference-layout">
               <div className="pulse__intro pulse__intro--difference">
                 <p className="eyebrow">In Every Jar</p>
@@ -371,14 +377,14 @@ export default async function Home() {
                 <p>Every jar is alive, bringing together flavor and function.</p>
               </div>
             </div>
-          </div>
+          </RevealOnScroll>
         </section>
 
         <section
           className="section section--tight section--line buy-cta"
           data-analytics-section="buy_cta"
         >
-          <div className="buy-cta__shell js-reveal" style={{ "--reveal-delay": "140ms" }}>
+          <RevealOnScroll className="buy-cta__shell" delay={0.14} preset="tiltLift">
             <div className="buy-cta__copy">
               <p className="eyebrow">Ready To Start</p>
               <h2>
@@ -408,7 +414,7 @@ export default async function Home() {
                 Saturday Pickup Info
               </a>
             </div>
-          </div>
+          </RevealOnScroll>
         </section>
 
         <section
@@ -416,7 +422,7 @@ export default async function Home() {
           className="section section--tight section--plain shop"
           data-analytics-section="shop"
         >
-          <div className="section__intro section__intro--compact js-reveal" style={{ "--reveal-delay": "120ms" }}>
+          <RevealOnScroll className="section__intro section__intro--compact" delay={0.12} preset="softScale">
             <p className="eyebrow">The Collection</p>
             <h2>Six products: four sauerkraut profiles and two hot sauces.</h2>
             <p>
@@ -424,7 +430,7 @@ export default async function Home() {
               Some offerings are infused with microgreens to add natural probiotics and prebiotics, with seasonal rotating batches released throughout the year.
               For optimal health benefits, enjoy them raw and refrain from cooking.
             </p>
-          </div>
+          </RevealOnScroll>
 
           <div className="collection__bar" aria-label="Default dietary profile">
             <span className="collection__bar-title">Allergen-friendly</span>
@@ -452,41 +458,23 @@ export default async function Home() {
 
         <section
           id="market"
-          className="section section--tight section--line market"
+          className="section section--compact section--line market"
           data-analytics-section="market"
         >
-          <div className="market__grid js-reveal" style={{ "--reveal-delay": "160ms" }}>
-            <div className="market__copy">
+          <RevealOnScroll className="market__grid" delay={0.16} preset="driftRight">
+            <div className="market__intro">
               <p className="eyebrow">{MARKET_NAME}</p>
               <h2>Find Vida Verde in person.</h2>
-              <p>{MARKET_PICKUP_SUMMARY}</p>
-              <div className="market__details">
-                <div>
-                  <strong>When</strong>
-                  <span>{`${MARKET_DAY_LABEL}, ${MARKET_PICKUP_WINDOW}`}</span>
-                </div>
-                <div>
-                  <strong>Where</strong>
-                  <span>{MARKET_ADDRESS}</span>
-                </div>
-                <div>
-                  <strong>Pickup Date</strong>
-                  <span>{pickupDetails.market_date_label}</span>
-                </div>
-              </div>
+              <p className="market__summary">{MARKET_PICKUP_SUMMARY}</p>
             </div>
-            <div className="market__panel">
-              <h3>Pickup Policy</h3>
-              <ul>
-                {MARKET_PICKUP_POLICY_BULLETS.map((line) => (
-                  <li key={line}>{line}</li>
-                ))}
-              </ul>
-              {MARKET_PICKUP_POLICY_NOTES.map((line) => (
-                <p key={line} className="market__panel-note">
-                  {line}
-                </p>
-              ))}
+
+            <aside className="market__cta">
+              <p className="market__cta-label">This week&apos;s pickup</p>
+              <h3>{pickupDetails.market_date_label}</h3>
+              <p>
+                Order any time before {pickupDetails.same_day_cutoff_label} for pickup that
+                Saturday, if stock is available.
+              </p>
               <a
                 className="button button--light"
                 href="#shop"
@@ -496,8 +484,26 @@ export default async function Home() {
               >
                 Reserve A Jar
               </a>
+            </aside>
+
+            <div className="market__board">
+              <div className="market__facts">
+                <article className="market__card">
+                  <span className="market__card-label">When</span>
+                  <strong>{`${MARKET_DAY_LABEL}, ${MARKET_PICKUP_WINDOW}`}</strong>
+                  <p>Reserve online, then pick up on site during the market window.</p>
+                </article>
+
+                <article className="market__card">
+                  <span className="market__card-label">Where</span>
+                  <strong>{MARKET_NAME}</strong>
+                  <p>{MARKET_ADDRESS}</p>
+                </article>
+              </div>
+
+              <MarketPickupPolicy items={marketPolicyItems} />
             </div>
-          </div>
+          </RevealOnScroll>
         </section>
 
         <section
@@ -505,20 +511,21 @@ export default async function Home() {
           className="section section--compact section--plain email-cta"
           data-analytics-section="join_email"
         >
-          <div className="email-cta__shell js-reveal" style={{ "--reveal-delay": "170ms" }}>
+          <RevealOnScroll className="email-cta__shell" delay={0.17} preset="softScale">
             <p className="eyebrow">Stay Updated</p>
             <h2>Join our email list.</h2>
             <p>
               Get new batch drops, seasonal flavor releases, and Saturday pickup reminders.
             </p>
             <EmailSignupForm source="homepage_join_email" />
-          </div>
+          </RevealOnScroll>
         </section>
 
         <section id="founder" className="about-hero" data-analytics-section="founder">
-          <div
-            className="about-hero__grid about-hero__grid--inline js-reveal"
-            style={{ "--reveal-delay": "100ms" }}
+          <RevealOnScroll
+            className="about-hero__grid about-hero__grid--inline"
+            delay={0.1}
+            preset="driftLeft"
           >
             <div className="about-hero__copy">
               <p className="eyebrow">Founder Story</p>
@@ -558,7 +565,7 @@ export default async function Home() {
                 <span>— Edison Neto, Vida Verde Founder</span>
               </div>
             </div>
-          </div>
+          </RevealOnScroll>
         </section>
 
         <div className="founder-faq-divider" aria-hidden="true">
@@ -576,7 +583,7 @@ export default async function Home() {
           className="section section--compact section--plain faq"
           data-analytics-section="faq"
         >
-          <div className="faq__shell js-reveal" style={{ "--reveal-delay": "180ms" }}>
+          <RevealOnScroll className="faq__shell" delay={0.18} preset="rise">
             <div className="faq__intro">
               <p className="eyebrow">FAQ</p>
               <h2>Quick answers before you place your first order.</h2>
@@ -613,24 +620,11 @@ export default async function Home() {
                 </details>
               ))}
             </div>
-          </div>
+          </RevealOnScroll>
         </section>
       </main>
 
-      <footer className="footer" data-analytics-section="footer">
-        <div>
-          <h3 className="footer__brand">
-            <Image src="/logo.svg" alt="Vida Verde logo" width={32} height={32} />
-            <span>Vida Verde Sauerkraut</span>
-          </h3>
-          <p>Live fermented sauerkraut and hot sauce for daily nourishment.</p>
-        </div>
-        <div className="footer__meta">
-          <span>{MARKET_ADDRESS}</span>
-          <span>{`${MARKET_DAY_LABEL}, ${MARKET_PICKUP_WINDOW}`}</span>
-          <span>vidaverdemicrogreens@gmail.com</span>
-        </div>
-      </footer>
+      <SiteFooter />
     </>
   );
 }
