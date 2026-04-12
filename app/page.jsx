@@ -354,7 +354,7 @@ export default async function Home() {
           <RevealOnScroll
             className="pulse__shell pulse__shell--linked"
             delay={0.16}
-            preset="driftLeft"
+            preset="fade"
           >
             <div className="pulse__difference-layout">
               <div className="pulse__intro pulse__intro--difference">
