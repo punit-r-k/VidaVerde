@@ -153,21 +153,41 @@ export default async function Home() {
 
   const faqs = [
     {
-      q: "How much should I eat per day?",
-      a: "Start with 1 tablespoon daily for a few days, then move to about 2 tablespoons with meals. Add it straight, or use it on salads, sandwiches, eggs, bowls, and vegetables."
+      q: "Which jar should I start with if I am new to sauerkraut?",
+      intro: "If you want the easiest entry point, start with one of the milder krauts first:",
+      bullets: [
+        "Endless Summer for a clean, classic kraut profile with light carrot sweetness",
+        "Red Coral for a brighter, slightly fuller finish from beets and carrots",
+        "Sunset if you want a warmer savory note from turmeric and cumin",
+        "Caribbean Heat if you already know you want some jalapeno kick"
+      ],
+      notes: [
+        "Most first-time customers do best by choosing a flavor that already fits the meals they like to eat."
+      ]
     },
     {
-      q: "What makes this different from probiotic supplements?",
-      a: "Our probiotics come in a natural food matrix, not a capsule. You get live cultures together with real fermented vegetables, flavor, and nutrients in one daily food.",
-      disclaimer: medicalDisclaimer
+      q: "Do I need to refrigerate it right away?",
+      a: "Yes. These are live, unpasteurized ferments, so keep them cold after pickup and return them to the refrigerator after serving. Leaving them out too long can affect flavor, texture, and overall quality."
     },
     {
-      q: "How do I know if I may need gut support?",
-      a: "Common signs include bloating, irregular digestion, fatigue, brain fog, skin issues, frequent colds, and sugar cravings."
+      q: "What should I expect when I open a live ferment jar?",
+      a: "A tangy aroma, a little pressure release, or slight brine movement can be normal in a live fermented product. Open the jar cold and slowly, especially the first time, and use a clean utensil each time you serve from it."
     },
     {
-      q: "What standards do you follow?",
-      a: "We ferment in natural vegetable juices with no preservatives or shortcuts, and we never pasteurize. That keeps the cultures live and active."
+      q: "How spicy are the hot options?",
+      intro: "The heat level varies quite a bit across the lineup:",
+      bullets: [
+        "Caribbean Heat has a steady jalapeno kick but stays approachable",
+        "Green Kick Hot Sauce is mild and herbal",
+        "Hell Yeah! Hot Sauce is the hottest option and should be used a little at a time"
+      ],
+      notes: [
+        "If you are heat-sensitive, start with the krauts or Green Kick before moving up."
+      ]
+    },
+    {
+      q: "How do I keep the jar tasting its best after opening?",
+      a: "Keep it refrigerated, close the lid well, and use a clean fork or spoon each time. For krauts, it also helps to keep the vegetables tucked down in the brine when possible so the texture and flavor stay fresher."
     },
     {
       q: "Do you offer shipping?",
