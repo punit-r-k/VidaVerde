@@ -84,7 +84,25 @@ export default function MarketPickupPolicy({ items = [] }) {
   const contentId = useId();
 
   return (
-    <div className="market__policy-dropdown">
+    <motion.div
+      className="market__policy-dropdown"
+      initial={shouldReduceMotion ? false : { opacity: 0 }}
+      whileInView={shouldReduceMotion ? undefined : { opacity: 1 }}
+      viewport={{
+        once: true,
+        amount: 0.18,
+        margin: "0px 0px -10% 0px"
+      }}
+      transition={
+        shouldReduceMotion
+          ? undefined
+          : {
+              duration: 0.68,
+              delay: 0.28,
+              ease: EASE_OUT
+            }
+      }
+    >
       <button
         type="button"
         className={`market__policy-toggle button button--ghost${isOpen ? " is-open" : ""}`}
@@ -130,6 +148,6 @@ export default function MarketPickupPolicy({ items = [] }) {
           </motion.div>
         ) : null}
       </AnimatePresence>
-    </div>
+    </motion.div>
   );
 }

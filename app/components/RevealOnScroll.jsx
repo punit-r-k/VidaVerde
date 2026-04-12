@@ -38,6 +38,14 @@ const REVEAL_PRESETS = {
       x: 0
     }
   },
+  fade: {
+    hidden: {
+      opacity: 0
+    },
+    visible: {
+      opacity: 1
+    }
+  },
   softScale: {
     hidden: {
       opacity: 0,

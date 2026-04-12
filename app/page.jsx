@@ -461,14 +461,14 @@ export default async function Home() {
           className="section section--compact section--line market"
           data-analytics-section="market"
         >
-          <RevealOnScroll className="market__grid" delay={0.16} preset="driftRight">
-            <div className="market__intro">
+          <div className="market__grid">
+            <RevealOnScroll className="market__intro" delay={0.12} preset="driftRight">
               <p className="eyebrow">{MARKET_NAME}</p>
               <h2>Find Vida Verde in person.</h2>
               <p className="market__summary">{MARKET_PICKUP_SUMMARY}</p>
-            </div>
+            </RevealOnScroll>
 
-            <aside className="market__cta">
+            <RevealOnScroll className="market__cta" delay={0.16} preset="driftLeft">
               <p className="market__cta-label">This week&apos;s pickup</p>
               <h3>{pickupDetails.market_date_label}</h3>
               <p>
@@ -484,10 +484,10 @@ export default async function Home() {
               >
                 Reserve A Jar
               </a>
-            </aside>
+            </RevealOnScroll>
 
             <div className="market__board">
-              <div className="market__facts">
+              <RevealOnScroll className="market__facts" delay={0.2} duration={0.68} preset="fade">
                 <article className="market__card">
                   <span className="market__card-label">When</span>
                   <strong>{`${MARKET_DAY_LABEL}, ${MARKET_PICKUP_WINDOW}`}</strong>
@@ -499,11 +499,11 @@ export default async function Home() {
                   <strong>{MARKET_NAME}</strong>
                   <p>{MARKET_ADDRESS}</p>
                 </article>
-              </div>
+              </RevealOnScroll>
 
               <MarketPickupPolicy items={marketPolicyItems} />
             </div>
-          </RevealOnScroll>
+          </div>
         </section>
 
         <section
@@ -522,12 +522,8 @@ export default async function Home() {
         </section>
 
         <section id="founder" className="about-hero" data-analytics-section="founder">
-          <RevealOnScroll
-            className="about-hero__grid about-hero__grid--inline"
-            delay={0.1}
-            preset="driftLeft"
-          >
-            <div className="about-hero__copy">
+          <div className="about-hero__grid about-hero__grid--inline">
+            <RevealOnScroll className="about-hero__copy" delay={0.08} preset="driftRight">
               <p className="eyebrow">Founder Story</p>
               <h1>Built from a home fermentation practice in Richmond.</h1>
               <p>
@@ -547,8 +543,8 @@ export default async function Home() {
                 producing tons by hand and witnessing thousands of customer
                 transformations.
               </p>
-            </div>
-            <div className="about-hero__media">
+            </RevealOnScroll>
+            <RevealOnScroll className="about-hero__media" delay={0.14} preset="driftLeft">
               <div className="about__portrait about-hero__portrait">
                 <Image
                   src="/founder-photo.webp"
@@ -564,8 +560,8 @@ export default async function Home() {
                 tested, and proven.&quot;</p>
                 <span>— Edison Neto, Vida Verde Founder</span>
               </div>
-            </div>
-          </RevealOnScroll>
+            </RevealOnScroll>
+          </div>
         </section>
 
         <div className="founder-faq-divider" aria-hidden="true">
