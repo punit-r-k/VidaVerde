@@ -2527,6 +2527,11 @@ select:focus {
   color: rgba(255, 255, 255, 0.78);
 }
 
+.footer > :first-child {
+  display: grid;
+  gap: 14px;
+}
+
 .footer h3 {
   font-family: var(--font-fraunces), serif;
   font-weight: 500;
@@ -2561,8 +2566,44 @@ select:focus {
 .footer__socials {
   display: flex;
   flex-wrap: wrap;
-  justify-content: flex-end;
+  justify-content: flex-start;
   gap: 14px;
+}
+
+.footer__social-link {
+  width: 44px;
+  height: 44px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border: 1px solid rgba(246, 241, 232, 0.76);
+  border-radius: 999px;
+  background: transparent;
+  color: var(--surface);
+  transition:
+    background-color 180ms ease,
+    color 180ms ease,
+    border-color 180ms ease,
+    transform 180ms ease;
+}
+
+.footer__social-link:hover,
+.footer__social-link:focus-visible {
+  background-color: var(--surface);
+  color: var(--status-out);
+  border-color: var(--status-out);
+  transform: translateY(-1px);
+}
+
+.footer__social-icon {
+  width: 28px;
+  height: 28px;
+  display: block;
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 1.9;
+  stroke-linecap: round;
+  stroke-linejoin: round;
 }
 
 .footer__link {
@@ -4730,6 +4771,11 @@ select:focus {
   .footer__socials {
     justify-content: flex-start;
     gap: 10px 14px;
+  }
+
+  .footer__social-link {
+    width: 40px;
+    height: 40px;
   }
 
   .policy-hero__content {

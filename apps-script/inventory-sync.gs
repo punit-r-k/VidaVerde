@@ -3,6 +3,7 @@ const CONFIG = {
   PREP_SHEET_NAME: "Prepare for this week",
   ORDERS_SHEET_NAME: "Orders",
   SHIPMENTS_SHEET_NAME: "Shipments",
+  EMAIL_SIGNUPS_SHEET_NAME: "Email List",
   SETTINGS_SHEET_NAME: "Settings",
   HEADER_ROW: 1,
   START_ROW: 2,
@@ -36,6 +37,10 @@ const CONFIG = {
     START_ROW: 2
   },
   SHIPMENTS: {
+    HEADER_ROW: 1,
+    START_ROW: 2
+  },
+  EMAIL_SIGNUPS: {
     HEADER_ROW: 1,
     START_ROW: 2
   }
@@ -121,7 +126,8 @@ function masterSync() {
     { name: "Inventory", run: syncInventory },
     { name: "Weekly Prep", run: syncWeeklyPrep },
     { name: "Orders", run: syncOrders },
-    { name: "Shipments", run: syncShipments }
+    { name: "Shipments", run: syncShipments },
+    { name: "Email List", run: syncEmailSignups }
   ];
   const failed = [];
 
@@ -141,7 +147,7 @@ function masterSync() {
   }
 
   SpreadsheetApp.getActive().toast(
-    "Inventory, prep, orders, and shipments synced.",
+    "Inventory, prep, orders, shipments, and email signups synced.",
     "Vida Verde",
     5
   );
@@ -449,6 +455,57 @@ function syncShipments() {
   sheet.autoResizeColumns(1, 16);
 }
 
+function syncEmailSignups() {
+  ensureSettingsSheet_();
+
+  const settings = getSettings_();
+  const response = getJson_(
+    `${settings.apiBaseUrl}/api/admin/email-signups?limit=5000`,
+    settings
+  );
+
+  const emailSignups = Array.isArray(response?.email_signups)
+    ? response.email_signups
+    : [];
+  const sheet = ensureEmailSignupsSheet_();
+  sheet.clearContents();
+
+  const headerValues = [[
+    "Signed Up At",
+    "Email",
+    "Source"
+  ]];
+  sheet
+    .getRange(CONFIG.EMAIL_SIGNUPS.HEADER_ROW, 1, 1, headerValues[0].length)
+    .setValues(headerValues);
+
+  if (emailSignups.length === 0) {
+    sheet
+      .getRange(CONFIG.EMAIL_SIGNUPS.START_ROW, 1)
+      .setValue("No email signups yet.");
+  } else {
+    const rows = emailSignups.map((signup) => ([
+      signup?.created_at ? new Date(signup.created_at) : "",
+      String(signup?.email || ""),
+      String(signup?.source || "website")
+    ]));
+
+    sheet
+      .getRange(CONFIG.EMAIL_SIGNUPS.START_ROW, 1, rows.length, rows[0].length)
+      .setValues(rows);
+
+    sheet
+      .getRange(CONFIG.EMAIL_SIGNUPS.START_ROW, 1, rows.length, 1)
+      .setNumberFormat("yyyy-mm-dd hh:mm");
+  }
+
+  sheet
+    .getRange(CONFIG.EMAIL_SIGNUPS.HEADER_ROW, 1, 1, 3)
+    .setFontWeight("bold");
+  sheet.setFrozenRows(1);
+  sheet.autoResizeColumns(1, 3);
+}
+
 function handleRestockEdit_(sheet, row) {
   const lock = LockService.getDocumentLock() || LockService.getScriptLock();
   lock.waitLock(30000);
@@ -733,6 +790,17 @@ function ensureShipmentsSheet_() {
   return sheet;
 }
 
+function ensureEmailSignupsSheet_() {
+  const book = SpreadsheetApp.getActive();
+  let sheet = book.getSheetByName(CONFIG.EMAIL_SIGNUPS_SHEET_NAME);
+
+  if (!sheet) {
+    sheet = book.insertSheet(CONFIG.EMAIL_SIGNUPS_SHEET_NAME);
+  }
+
+  return sheet;
+}
+
 function formatShipmentAddress_(shipment) {
   const addressParts = [
     String(shipment?.address1 || "").trim(),
@@ -911,8 +979,28 @@ function createAdminJwt_(settings) {
 
 function buildAdminAuthHeaders_(settings) {
   return {
-    Authorization: `Bearer ${createAdminJwt_(settings)}`
+    Authorization: `Bearer ${createAdminJwt_(settings)}`,
+    Accept: "application/json"
   };
+}
+
+function parseJsonResponse_(response) {
+  const status = response.getResponseCode();
+  const text = response.getContentText();
+
+  try {
+    const parsed = text ? JSON.parse(text) : {};
+    if (parsed && typeof parsed === "object") {
+      return { status, ...parsed };
+    }
+    return { status, data: parsed };
+  } catch (error) {
+    return {
+      status,
+      error: "Invalid JSON response",
+      raw: text
+    };
+  }
 }
 
 function getJson_(url, settings) {
@@ -922,7 +1010,24 @@ function getJson_(url, settings) {
     muteHttpExceptions: true
   });
 
-  return JSON.parse(response.getContentText());
+  const parsed = parseJsonResponse_(response);
+  if (parsed.status === 404) {
+    throw new Error(
+      `GET ${url} failed (404): Route not found on the deployed site. Redeploy ${settings.apiBaseUrl} with the latest code so /api/admin/email-signups exists.`
+    );
+  }
+  if (parsed.status < 200 || parsed.status >= 300) {
+    throw new Error(
+      `GET ${url} failed (${parsed.status}): ${parsed.error || parsed.message || parsed.raw || "Unknown error"}`
+    );
+  }
+  if (parsed.error) {
+    throw new Error(
+      `GET ${url} returned an error payload: ${parsed.error}`
+    );
+  }
+
+  return parsed;
 }
 
 function postJson_(url, settings, payload) {
@@ -934,18 +1039,7 @@ function postJson_(url, settings, payload) {
     muteHttpExceptions: true
   });
 
-  const status = response.getResponseCode();
-  const text = response.getContentText();
-
-  try {
-    const parsed = JSON.parse(text);
-    if (parsed && typeof parsed === "object") {
-      return { status, ...parsed };
-    }
-    return { status, data: parsed };
-  } catch (error) {
-    return { status, error: "Invalid JSON response", raw: text };
-  }
+  return parseJsonResponse_(response);
 }
 
 function patchJson_(url, settings, payload) {
@@ -957,16 +1051,5 @@ function patchJson_(url, settings, payload) {
     muteHttpExceptions: true
   });
 
-  const status = response.getResponseCode();
-  const text = response.getContentText();
-
-  try {
-    const parsed = JSON.parse(text);
-    if (parsed && typeof parsed === "object") {
-      return { status, ...parsed };
-    }
-    return { status, data: parsed };
-  } catch (error) {
-    return { status, error: "Invalid JSON response", raw: text };
-  }
+  return parseJsonResponse_(response);
 }

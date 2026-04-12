@@ -22,6 +22,7 @@ npm run dev
 
 Inventory is stored in Supabase and synced to the `Inventory` sheet via Apps Script.
 Column C is a restock delta; it is cleared after a successful sync to prevent double-counting.
+The same Apps Script now also syncs email signups into a separate `Email List` sheet.
 
 Apps Script file: `apps-script/inventory-sync.gs`
 
@@ -54,6 +55,10 @@ Spreadsheet toggle for stock visibility:
 - The Apps Script creates a `Settings` sheet.
 - Use `Settings!B2` (`Show stock on website`) checkbox to show/hide stock pills
   such as `Only 5 left` and `Sold Out` on the storefront.
+
+Email signup sheet:
+- A dedicated `Email List` sheet is created automatically during sync.
+- Columns: `Signed Up At`, `Email`, `Source`
 
 ## Supabase Schema
 

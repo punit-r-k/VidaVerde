@@ -10,6 +10,24 @@ const SUPPORT_EMAIL = "vidaverdemicrogreens@gmail.com";
 const INSTAGRAM_URL = "https://www.instagram.com/vidaverdemicrogreens/";
 const FACEBOOK_URL = "https://www.facebook.com/vidaverdemicrogreens";
 
+function InstagramIcon(props) {
+  return (
+    <svg viewBox="0 0 24 24" aria-hidden="true" {...props}>
+      <rect x="3.5" y="3.5" width="17" height="17" rx="4.5" />
+      <circle cx="12" cy="12" r="4.2" />
+      <circle cx="17.2" cy="6.8" r="1" fill="currentColor" stroke="none" />
+    </svg>
+  );
+}
+
+function FacebookIcon(props) {
+  return (
+    <svg viewBox="0 0 24 24" aria-hidden="true" {...props}>
+      <path d="M14.2 20V12.9h2.6l.4-2.9h-3V8.2c0-.9.3-1.5 1.6-1.5H17V4.1c-.4-.1-1.2-.1-2-.1-2.1 0-3.5 1.3-3.5 3.6V10H9v2.9h2.5V20Z" />
+    </svg>
+  );
+}
+
 export default function SiteFooter({ showMarketSchedule = true }) {
   return (
     <footer className="footer" data-analytics-section="footer">
@@ -19,6 +37,26 @@ export default function SiteFooter({ showMarketSchedule = true }) {
           <span>Vida Verde Sauerkraut</span>
         </h3>
         <p>Live fermented sauerkraut and hot sauce for daily nourishment.</p>
+        <div className="footer__socials" aria-label="Social links">
+          <a
+            className="footer__social-link"
+            href={INSTAGRAM_URL}
+            target="_blank"
+            rel="noreferrer"
+            aria-label="Visit Vida Verde on Instagram"
+          >
+            <InstagramIcon className="footer__social-icon" />
+          </a>
+          <a
+            className="footer__social-link"
+            href={FACEBOOK_URL}
+            target="_blank"
+            rel="noreferrer"
+            aria-label="Visit Vida Verde on Facebook"
+          >
+            <FacebookIcon className="footer__social-icon" />
+          </a>
+        </div>
       </div>
       <div className="footer__meta">
         <span>{MARKET_ADDRESS}</span>
@@ -28,24 +66,6 @@ export default function SiteFooter({ showMarketSchedule = true }) {
         <a className="footer__link" href={`mailto:${SUPPORT_EMAIL}`}>
           {SUPPORT_EMAIL}
         </a>
-        <div className="footer__socials">
-          <a
-            className="footer__link"
-            href={INSTAGRAM_URL}
-            target="_blank"
-            rel="noreferrer"
-          >
-            Instagram
-          </a>
-          <a
-            className="footer__link"
-            href={FACEBOOK_URL}
-            target="_blank"
-            rel="noreferrer"
-          >
-            Facebook
-          </a>
-        </div>
         <Link className="footer__link" href="/privacy-policy">
           Privacy Policy
         </Link>

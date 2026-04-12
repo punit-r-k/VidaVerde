@@ -78,6 +78,8 @@ export default function TestimonialGrid({ testimonials = [] }) {
   const seenCardsRef = useRef(new Set());
   const [activeIndex, setActiveIndex] = useState(null);
   const [currentTrackIndex, setCurrentTrackIndex] = useState(0);
+  const [paginationStops, setPaginationStops] = useState([0]);
+  const [currentPaginationIndex, setCurrentPaginationIndex] = useState(0);
   const [isAutoScrollEnabled, setIsAutoScrollEnabled] = useState(true);
   const [isMobileViewport, setIsMobileViewport] = useState(false);
   const [beltState, setBeltState] = useState({
@@ -120,6 +122,72 @@ export default function TestimonialGrid({ testimonials = [] }) {
     [getTrackCards]
   );
 
+  const getPaginationScrollStops = useCallback(() => {
+    const track = trackRef.current;
+    const cards = getTrackCards();
+    if (!track || !cards.length) return [0];
+
+    const maxScrollLeft = Math.max(track.scrollWidth - track.clientWidth, 0);
+    const stops = cards.map((card) => Math.min(card.offsetLeft, maxScrollLeft));
+    const uniqueStops = [];
+
+    stops.forEach((stop) => {
+      const previousStop = uniqueStops[uniqueStops.length - 1];
+      if (previousStop === undefined || Math.abs(previousStop - stop) > 2) {
+        uniqueStops.push(stop);
+      }
+    });
+
+    return uniqueStops.length ? uniqueStops : [0];
+  }, [getTrackCards]);
+
+  const getNearestPaginationIndex = useCallback(
+    (scrollLeft) => {
+      const track = trackRef.current;
+      const stops = getPaginationScrollStops();
+      if (!track || !stops.length) return 0;
+
+      const targetScrollLeft =
+        typeof scrollLeft === "number" ? scrollLeft : track.scrollLeft;
+      let nearestIndex = 0;
+      let nearestDistance = Number.POSITIVE_INFINITY;
+
+      stops.forEach((stop, index) => {
+        const distance = Math.abs(stop - targetScrollLeft);
+        if (distance < nearestDistance) {
+          nearestDistance = distance;
+          nearestIndex = index;
+        }
+      });
+
+      return nearestIndex;
+    },
+    [getPaginationScrollStops]
+  );
+
+  const syncPaginationState = useCallback(
+    (scrollLeft) => {
+      const nextStops = getPaginationScrollStops();
+
+      setPaginationStops((currentStops) => {
+        if (
+          currentStops.length === nextStops.length &&
+          currentStops.every((stop, index) => Math.abs(stop - nextStops[index]) <= 2)
+        ) {
+          return currentStops;
+        }
+
+        return nextStops;
+      });
+
+      const nextPaginationIndex = getNearestPaginationIndex(scrollLeft);
+      setCurrentPaginationIndex((currentIndex) =>
+        currentIndex === nextPaginationIndex ? currentIndex : nextPaginationIndex
+      );
+    },
+    [getNearestPaginationIndex, getPaginationScrollStops]
+  );
+
   const updateBeltState = useCallback(() => {
     const track = trackRef.current;
     if (!track) return;
@@ -141,7 +209,9 @@ export default function TestimonialGrid({ testimonials = [] }) {
     setCurrentTrackIndex((currentIndex) =>
       currentIndex === nextTrackIndex ? currentIndex : nextTrackIndex
     );
-  }, [getNearestTrackIndex]);
+
+    syncPaginationState(track.scrollLeft);
+  }, [getNearestTrackIndex, syncPaginationState]);
 
   const openReview = useCallback((index) => {
     setActiveIndex(index);
@@ -294,6 +364,37 @@ export default function TestimonialGrid({ testimonials = [] }) {
       });
     },
     [getNearestTrackIndex, getTrackCards]
+  );
+
+  const scrollTrackToPaginationIndex = useCallback(
+    (index, reason = "pagination") => {
+      const track = trackRef.current;
+      const stops = getPaginationScrollStops();
+      if (!track || !stops.length) return;
+
+      const safeIndex = ((index % stops.length) + stops.length) % stops.length;
+      const currentIndex = getNearestPaginationIndex(track.scrollLeft);
+
+      if (reason !== "auto" && safeIndex !== currentIndex) {
+        trackAnalyticsEvent({
+          name: "testimonial_carousel_scroll",
+          sectionId: "voices",
+          elementId: `testimonial_scroll_${reason}`,
+          metadata: {
+            source: reason,
+            currentIndex: currentIndex + 1,
+            targetIndex: safeIndex + 1,
+            wasAutoScroll: false
+          }
+        });
+      }
+
+      track.scrollTo({
+        left: stops[safeIndex],
+        behavior: "smooth"
+      });
+    },
+    [getNearestPaginationIndex, getPaginationScrollStops]
   );
 
   const scrollTrackByCard = useCallback(
@@ -551,22 +652,22 @@ export default function TestimonialGrid({ testimonials = [] }) {
           &rsaquo;
         </button>
       </div>
-      {testimonials.length > 1 ? (
+      {paginationStops.length > 1 ? (
         <div
           className="voices__pagination"
           aria-label="Review position"
           role="group"
         >
-          {testimonials.map((item, index) => {
-            const isCurrent = currentTrackIndex === index;
+          {paginationStops.map((stop, index) => {
+            const isCurrent = currentPaginationIndex === index;
 
             return (
               <button
-                key={`dot-${item.name}`}
+                key={`dot-${stop}-${index}`}
                 className={`voices__pagination-dot${isCurrent ? " voices__pagination-dot--active" : ""}`}
                 type="button"
-                onClick={() => scrollTrackToIndex(index, "pagination")}
-                aria-label={`Show review ${index + 1} of ${testimonials.length}: ${item.name}`}
+                onClick={() => scrollTrackToPaginationIndex(index, "pagination")}
+                aria-label={`Show testimonial position ${index + 1} of ${paginationStops.length}`}
                 aria-pressed={isCurrent}
                 data-analytics-id={`testimonial_dot_${index + 1}`}
               />
