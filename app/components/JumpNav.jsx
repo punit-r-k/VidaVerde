@@ -42,6 +42,11 @@ export default function JumpNav() {
           <span></span>
         </span>
       </label>
+      <label
+        htmlFor={navToggleId}
+        className="jump-nav__backdrop"
+        aria-hidden="true"
+      />
       <div className="jump-nav__links">
         {navItems.map((item) => (
           <SectionNavLink

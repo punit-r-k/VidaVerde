@@ -2681,6 +2681,10 @@ select:focus {
   display: none;
 }
 
+.jump-nav__backdrop {
+  display: none;
+}
+
 .jump-nav__links {
   margin: 0 auto;
   max-width: var(--layout-max);
@@ -4118,6 +4122,8 @@ select:focus {
     width: min(100%, var(--layout-max));
     margin: 0 auto;
     display: inline-flex;
+    position: relative;
+    z-index: 2;
     align-items: center;
     justify-content: space-between;
     gap: 12px;
@@ -4159,10 +4165,24 @@ select:focus {
     transform: translateY(-5px) rotate(-45deg);
   }
 
+  .jump-nav__backdrop {
+    display: none;
+  }
+
+  .jump-nav__checkbox:checked ~ .jump-nav__backdrop {
+    display: block;
+    position: fixed;
+    inset: 0;
+    z-index: 1;
+    cursor: pointer;
+  }
+
   .jump-nav__links {
     display: none;
     width: min(100%, var(--layout-max));
     margin: 8px auto 0;
+    position: relative;
+    z-index: 2;
     grid-template-columns: 1fr;
     gap: 8px;
   }
