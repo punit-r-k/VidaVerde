@@ -64,7 +64,18 @@ This file is a practical map of the most important customer flows, operations fl
   - The homepage market section and checkout flow both depend on this shared source.
   - The policy version is sent into order metadata so checkout records which pickup terms were accepted.
 
-### 7. Email Capture
+### 7. Pickup Reminder Email Flow
+- Email composition and send flow: `lib/pickupReminderEmail.js`
+- Admin trigger route: `app/api/admin/pickup-reminders/route.js`
+- Scheduling hook: `apps-script/inventory-sync.gs`
+- Behavior:
+  - Friday reminder emails target paid market-pickup orders that are already scheduled for the coming Saturday.
+  - The reminder email reuses the same branded banner image as the order confirmation email.
+  - Standard ready pickup reservations are tracked with `orders.pickup_reminder_email_sent_at`.
+  - Later preorder-release pickup reminders are tracked separately with `preorder_release_events.pickup_reminder_email_sent_at`.
+  - The Apps Script can trigger the reminder flow manually or via a weekly Friday 12pm America/Chicago time trigger.
+
+### 8. Email Capture
 - Popup capture: `app/components/EmailListPopup.jsx`
 - Inline CTA capture: `app/components/EmailSignupForm.jsx`
 - API: `app/api/email-signups/route.js`
@@ -73,7 +84,7 @@ This file is a practical map of the most important customer flows, operations fl
   - Both email capture surfaces post into the same API route.
   - Signups are stored in Supabase with source, client IP identifier, and user agent.
 
-### 8. First-Party Analytics
+### 9. First-Party Analytics
 - Client runtime: `app/components/AnalyticsRuntime.jsx`
 - Shared event definitions and sanitization: `lib/analytics.js`
 - API: `app/api/analytics/route.js`

@@ -53,6 +53,8 @@ function onOpen() {
     .createMenu("Vida Verde")
     .addItem("Master Sync", "masterSync")
     .addItem("Setup Edit Trigger", "setupEditTrigger")
+    .addItem("Send Pickup Reminders Now", "sendPickupReminders")
+    .addItem("Setup Friday Reminder Trigger", "setupFridayReminderTrigger")
     .addToUi();
 }
 
@@ -120,6 +122,30 @@ function setupEditTrigger() {
   SpreadsheetApp.getUi().alert("Installable edit trigger reset.");
 }
 
+function setupFridayReminderTrigger() {
+  const triggers = ScriptApp.getProjectTriggers().filter((trigger) => {
+    return (
+      trigger.getHandlerFunction() === "sendPickupReminders" &&
+      trigger.getEventType() === ScriptApp.EventType.CLOCK
+    );
+  });
+
+  for (const trigger of triggers) {
+    ScriptApp.deleteTrigger(trigger);
+  }
+
+  ScriptApp.newTrigger("sendPickupReminders")
+    .timeBased()
+    .onWeekDay(ScriptApp.WeekDay.FRIDAY)
+    .atHour(12)
+    .inTimezone("America/Chicago")
+    .create();
+
+  SpreadsheetApp.getUi().alert(
+    "Friday pickup reminder trigger reset for 12pm America/Chicago."
+  );
+}
+
 function masterSync() {
   const ui = SpreadsheetApp.getUi();
   const steps = [
@@ -148,6 +174,52 @@ function masterSync() {
 
   SpreadsheetApp.getActive().toast(
     "Inventory, prep, orders, shipments, and email signups synced.",
+    "Vida Verde",
+    5
+  );
+}
+
+function sendPickupReminders() {
+  ensureSettingsSheet_();
+
+  const settings = getSettings_();
+  const response = postJson_(
+    `${settings.apiBaseUrl}/api/admin/pickup-reminders`,
+    settings,
+    {}
+  );
+
+  if (!response?.ok) {
+    Logger.log(
+      "Pickup reminder send failed (status: %s, error: %s)",
+      response?.status ?? "unknown",
+      response?.error || response?.message || response?.raw || "unknown"
+    );
+    SpreadsheetApp.getActive().toast(
+      "Pickup reminder send failed. Check Apps Script logs.",
+      "Vida Verde",
+      5
+    );
+    return;
+  }
+
+  const sentCount = Number(response?.sentCount || 0);
+  const pickupDate = String(response?.pickupDate || "").trim();
+  const targetLabel = pickupDate || "the next pickup day";
+
+  if (response?.skipped) {
+    SpreadsheetApp.getActive().toast(
+      `Pickup reminders skipped for ${targetLabel}: ${response?.reason || "email is not configured."}`,
+      "Vida Verde",
+      5
+    );
+    return;
+  }
+
+  SpreadsheetApp.getActive().toast(
+    sentCount > 0
+      ? `${sentCount} pickup reminder email(s) sent for ${targetLabel}.`
+      : `No pickup reminder emails needed for ${targetLabel}.`,
     "Vida Verde",
     5
   );

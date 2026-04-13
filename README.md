@@ -122,9 +122,19 @@ To avoid duplicate sends on normal webhook retries, the database now tracks
 The default banner image is bundled at `public/email/order-confirmation-banner.png`.
 
 Preorder-ready pickup emails are sent separately from `lib/preorderReadyEmail.js`
-when a restock releases market-pickup preorder units. Those emails use the current
-pickup date details and tell customers to call or text `(713) 478-1878` if they
-cannot make the market and need another arrangement.
+when a restock releases market-pickup preorder units. Those emails use the same
+banner image as the order confirmation email, include the current pickup date
+details, and tell customers to call or text `(713) 478-1878` if they cannot make
+the market and need another arrangement.
+
+Friday pickup reminder emails are sent from `lib/pickupReminderEmail.js` through
+`POST /api/admin/pickup-reminders`. They reuse the same banner image as the order
+confirmation email and rely on reminder markers stored in:
+- `orders.pickup_reminder_email_sent_at`
+- `preorder_release_events.pickup_reminder_email_sent_at`
+
+The Google Apps Script includes `setupFridayReminderTrigger()` to schedule this
+admin action for Fridays at 12pm America/Chicago.
 
 ## API Security
 

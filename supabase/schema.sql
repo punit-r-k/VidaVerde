@@ -61,6 +61,7 @@ create table if not exists orders (
   amount_shipping integer not null default 0,
   amount_total integer not null default 0,
   customer_confirmation_email_sent_at timestamptz,
+  pickup_reminder_email_sent_at timestamptz,
   created_at timestamptz not null default now()
 );
 
@@ -170,6 +171,14 @@ begin
   ) then
     alter table orders add column customer_confirmation_email_sent_at timestamptz;
   end if;
+
+  if not exists (
+    select 1
+    from information_schema.columns
+    where table_name = 'orders' and column_name = 'pickup_reminder_email_sent_at'
+  ) then
+    alter table orders add column pickup_reminder_email_sent_at timestamptz;
+  end if;
 end $$;
 
 create table if not exists order_items (
@@ -202,6 +211,7 @@ create table if not exists preorder_release_events (
   sku text not null references products(sku) on update cascade,
   quantity integer not null check (quantity > 0),
   ready_pickup_email_sent_at timestamptz,
+  pickup_reminder_email_sent_at timestamptz,
   created_at timestamptz not null default now()
 );
 
@@ -236,6 +246,20 @@ begin
       and column_name = 'ready_pickup_email_sent_at'
   ) then
     alter table preorder_release_events add column ready_pickup_email_sent_at timestamptz;
+  end if;
+
+  if exists (
+    select 1
+    from information_schema.tables
+    where table_schema = 'public'
+      and table_name = 'preorder_release_events'
+  ) and not exists (
+    select 1
+    from information_schema.columns
+    where table_name = 'preorder_release_events'
+      and column_name = 'pickup_reminder_email_sent_at'
+  ) then
+    alter table preorder_release_events add column pickup_reminder_email_sent_at timestamptz;
   end if;
 end $$;
 
