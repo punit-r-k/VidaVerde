@@ -22,7 +22,11 @@ npm run dev
 
 Inventory is stored in Supabase and synced to the `Inventory` sheet via Apps Script.
 Column C is a restock delta; it is cleared after a successful sync to prevent double-counting.
-The same Apps Script now also syncs email signups into a separate `Email List` sheet.
+The same Apps Script also syncs the weekly prep, orders, shipments, and email
+signup tabs used by operations.
+When a positive restock releases market-pickup preorder units, the backend can also
+send preorder-ready pickup emails, refresh the prep sheet, and return a count that
+the sheet shows as a toast.
 
 Apps Script file: `apps-script/inventory-sync.gs`
 
@@ -51,6 +55,12 @@ Sheet columns:
 - Column G: Expected restock date
 - Column H: Total Sales
 
+Additional sheet behavior:
+- The `Prepare for this week` tab now includes preorder units released by restocks
+  in the active prep window as fresh demand for the current batch.
+- The prep, orders, and shipments tabs normalize phone numbers into readable sheet
+  output such as `+1 (346) 387-2454`.
+
 Spreadsheet toggle for stock visibility:
 - The Apps Script creates a `Settings` sheet.
 - Use `Settings!B2` (`Show stock on website`) checkbox to show/hide stock pills
@@ -63,10 +73,17 @@ Email signup sheet:
 ## Supabase Schema
 
 Schema + seed data live in `supabase/schema.sql`.
-It defines tables for `products`, `inventory`, `orders`, `order_items`, and `preorder_queue`.
+It defines tables for `products`, `inventory`, `orders`, `order_items`,
+`preorder_queue`, `preorder_release_events`, `shipments`, and analytics data.
+
+Preorder-specific data model:
+- `preorder_queue` stores the remaining preorder backlog by order and SKU.
+- `preorder_release_events` stores each quantity released by incoming stock so prep
+  generation and preorder-ready pickup emails can react to newly available units.
+
 RPC functions:
 - `record_paid_order` (Stripe webhook)
-- `apply_restock` (restock delta)
+- `apply_restock` (restock delta plus preorder release event creation)
 - `set_expected_restock_date`
 - `consume_api_rate_limit` (distributed API throttling)
 
@@ -83,7 +100,7 @@ Required environment variables:
 - `STRIPE_WEBHOOK_SECRET`
 - `SITE_URL`
 
-Optional for customer order confirmation emails:
+Optional for customer order confirmation and preorder-ready pickup emails:
 - `SMTP_HOST`
 - `SMTP_PORT`
 - `SMTP_SECURE`
@@ -99,6 +116,11 @@ To avoid duplicate sends on normal webhook retries, the database now tracks
 `orders.customer_confirmation_email_sent_at`. Apply the updated
 `supabase/schema.sql` in Supabase before relying on this in production.
 The default banner image is bundled at `public/email/order-confirmation-banner.png`.
+
+Preorder-ready pickup emails are sent separately from `lib/preorderReadyEmail.js`
+when a restock releases market-pickup preorder units. Those emails use the current
+pickup date details and tell customers to call or text `(713) 478-1878` if they
+cannot make the market and need another arrangement.
 
 ## API Security
 

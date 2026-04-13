@@ -132,7 +132,7 @@ Source:
 The `Prepare for this week` sheet shows:
 
 - `Orders Collected`
-- `Pickup Date`
+- `Saturday Pickup`
 
 ### Orders Collected
 
@@ -142,14 +142,14 @@ Format example:
 
 - `Sat, Apr 4, 8:00am to Sat, Apr 11, 7:59am`
 
-### Pickup Date
+### Saturday Pickup
 
 This displays the Saturday market date associated with that displayed prep batch.
 
 Important detail:
 
-- Because the prep sheet can remain on the current week until `2:00pm Saturday`, the displayed `Pickup Date` also remains on the current Saturday until that time.
-- Once the sheet rolls at `2:00pm`, both `Orders Collected` and `Pickup Date` advance together.
+- Because the prep sheet can remain on the current week until `2:00pm Saturday`, the displayed `Saturday Pickup` value also remains on the current Saturday until that time.
+- Once the sheet rolls at `2:00pm`, both `Orders Collected` and `Saturday Pickup` advance together.
 
 Source:
 - `apps-script/inventory-sync.gs`
@@ -166,19 +166,74 @@ The prep sheet groups paid orders in the currently displayed prep window into:
 
 Meaning:
 
-- `Ship This Week`: paid shipping orders in the active prep window
-- `Market This Saturday`: paid market-pickup orders in the active prep window
+- `Ship This Week`: ready shipping units in the active prep window, including preorder
+  units released by restocks during that displayed window
+- `Market This Saturday`: ready market-pickup units in the active prep window,
+  including preorder units released by restocks during that displayed window
 - `Total To Prepare`: `shipping_qty + market_qty`
-- `Pre-orders`: preorder quantity recorded for those items in that prep window
+- `Pre-orders`: remaining preorder backlog shown in the sheet's separate preorder
+  section, sourced from live inventory `preorders_remaining` when the `Inventory`
+  tab is available
 
 The prep API only counts:
 
 - paid orders
-- orders whose creation timestamp falls within the active prep sheet's collection window
+- ready reservation units from orders whose creation timestamp falls within the active
+  prep sheet's collection window
+- preorder release events whose `created_at` timestamp falls within the active prep
+  sheet's collection window
 
 Source:
 - `app/api/admin/prep/route.js`
 - `apps-script/inventory-sync.gs`
+- `supabase/schema.sql`
+
+## Restock Release Timing
+
+Incoming stock can reduce preorder backlog before the entire original preorder row is
+fully complete.
+
+When that happens:
+
+- `apply_restock` allocates stock FIFO across `preorder_queue`
+- each released quantity is written into `preorder_release_events` at the moment the
+  stock is applied
+- the prep API treats those released units like fresh demand for the currently
+  displayed prep window
+- released market-pickup items also join Saturday pickup verification immediately
+
+Operational meaning:
+
+- If stock is received during the currently displayed prep window, the newly released
+  units join this week's prep totals right away.
+- Any preorder quantity that has not been released yet stays in the separate
+  `Pre-orders To Handle Separately` section.
+- Because the prep sheet display rolls at `2:00pm` Saturday, a release created before
+  that roll still belongs to the currently displayed batch, even though same-day
+  customer ordering already closed at `8:00am`.
+
+Source:
+- `app/api/admin/prep/route.js`
+- `apps-script/inventory-sync.gs`
+- `supabase/schema.sql`
+
+## Preorder Ready Email Timing
+
+Preorder-ready pickup emails are driven by preorder release events, not by the moment
+an entire preorder row reaches `fulfilled_at`.
+
+Current behavior:
+
+- positive restocks can trigger a ready-email check for the affected SKU
+- unsent `preorder_release_events` for paid market orders are grouped by order
+- the email uses the current pickup date details at send time
+- the message tells customers to call or text `(713) 478-1878` if they cannot make
+  the market and need another arrangement
+
+Source:
+- `app/api/admin/restock/route.js`
+- `lib/preorderReadyEmail.js`
+- `supabase/schema.sql`
 
 ## Confirmation Email Timing
 
