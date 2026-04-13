@@ -40,6 +40,7 @@
   --layout-max: 1200px;
   --layout-gutter: clamp(20px, 5vw, 72px);
   --layout-inline: max(var(--layout-gutter), calc((100vw - var(--layout-max)) / 2));
+  --section-nav-offset: 72px;
   --section-space-base: clamp(68px, 9vw, 112px);
   --section-space-tight: clamp(56px, 7vw, 88px);
   --section-space-compact: clamp(44px, 6vw, 68px);
@@ -53,6 +54,7 @@
 
 html {
   overflow-x: hidden;
+  scroll-padding-top: var(--section-nav-offset);
 }
 
 body {
@@ -76,6 +78,16 @@ body::after {
 body > * {
   position: relative;
   z-index: 1;
+}
+
+#proof,
+#voices,
+#wellness,
+#shop,
+#market,
+#founder,
+#faq {
+  scroll-margin-top: var(--section-nav-offset);
 }
 
 .about-hero,
@@ -3299,11 +3311,11 @@ select:focus {
 
 .about-hero__grid--inline {
   margin: 0 auto;
-  max-width: var(--layout-max);
+  max-width: calc(var(--layout-max) + (var(--layout-gutter) * 2));
   display: grid;
   grid-template-columns: repeat(12, minmax(0, 1fr));
   gap: clamp(18px, 2.8vw, 36px);
-  padding: clamp(54px, 7vw, 84px) 0 clamp(18px, 2.5vw, 30px);
+  padding: clamp(54px, 7vw, 84px) var(--layout-gutter) clamp(18px, 2.5vw, 30px);
 }
 
 .about-hero__grid--inline .about-hero__copy {
@@ -3895,15 +3907,13 @@ select:focus {
 .js-reveal {
   opacity: 1;
   transform: none;
-  transition:
-    opacity 0.48s ease,
-    transform 0.48s ease;
-  transition-delay: var(--reveal-delay, 0ms);
+  backface-visibility: hidden;
+  transform: translateZ(0);
 }
 
 .js-reveal.is-visible {
   opacity: 1;
-  transform: translateY(0) scale(1);
+  transform: translateZ(0);
 }
 
 .js-reveal .section__disclaimer::before,
@@ -4033,6 +4043,17 @@ select:focus {
   .about-hero__grid--inline {
     padding-top: 48px;
     padding-bottom: 18px;
+  }
+
+  .about-hero__grid--inline .about-hero__copy {
+    max-width: 64ch;
+    justify-self: center;
+  }
+
+  .about-hero__grid--inline .about-hero__media {
+    width: 100%;
+    max-width: min(720px, 100%);
+    justify-self: center;
   }
 
   .about-hero__grid--inline .about-hero__media {
@@ -4409,6 +4430,7 @@ select:focus {
 
   :root {
     --layout-gutter: 20px;
+    --section-nav-offset: 74px;
     --section-space-base: 52px;
     --section-space-tight: 42px;
     --section-space-compact: 32px;

@@ -1,3 +1,8 @@
+"use client";
+
+import { useRef } from "react";
+import SectionNavLink from "./SectionNavLink";
+
 const navItems = [
   // Archived section:
   // { href: "#proof", label: "Proof" },
@@ -10,6 +15,13 @@ const navItems = [
 
 export default function JumpNav() {
   const navToggleId = "jump-nav-toggle";
+  const navCheckboxRef = useRef(null);
+
+  const collapseMenu = () => {
+    if (navCheckboxRef.current) {
+      navCheckboxRef.current.checked = false;
+    }
+  };
 
   return (
     <nav className="jump-nav" aria-label="Page section navigation">
@@ -17,6 +29,7 @@ export default function JumpNav() {
         type="checkbox"
         id={navToggleId}
         className="jump-nav__checkbox"
+        ref={navCheckboxRef}
       />
       <label
         htmlFor={navToggleId}
@@ -31,14 +44,15 @@ export default function JumpNav() {
       </label>
       <div className="jump-nav__links">
         {navItems.map((item) => (
-          <a
+          <SectionNavLink
             key={item.href}
             href={item.href}
+            beforeScroll={collapseMenu}
             data-analytics-id={`jump_nav_${item.label.toLowerCase().replace(/[^a-z0-9]+/g, "_")}`}
             data-analytics-type="nav"
           >
             {item.label}
-          </a>
+          </SectionNavLink>
         ))}
       </div>
     </nav>

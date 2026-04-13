@@ -1,5 +1,5 @@
 import Image from "next/image";
-import Link from "next/link";
+import SectionNavLink from "./SectionNavLink";
 
 export default function SiteHeader({ variant = "overlay" }) {
   const navClass = variant === "solid" ? "nav nav--solid" : "nav";
@@ -11,23 +11,23 @@ export default function SiteHeader({ variant = "overlay" }) {
         <span>Vida Verde Sauerkraut</span>
       </div>
       <div className="nav__links">
-        <Link href="/#shop" data-analytics-id="site_header_shop" data-analytics-type="nav">
+        <SectionNavLink href="/#shop" data-analytics-id="site_header_shop" data-analytics-type="nav">
           Shop
-        </Link>
-        <Link
+        </SectionNavLink>
+        <SectionNavLink
           href="/#market"
           data-analytics-id="site_header_market"
           data-analytics-type="nav"
         >
           Fulshear Market
-        </Link>
-        <Link
+        </SectionNavLink>
+        <SectionNavLink
           href="/#founder"
           data-analytics-id="site_header_founder"
           data-analytics-type="nav"
         >
           Founder
-        </Link>
+        </SectionNavLink>
       </div>
     </nav>
   );

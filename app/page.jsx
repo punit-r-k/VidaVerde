@@ -4,6 +4,7 @@ import EmailSignupForm from "./components/EmailSignupForm";
 import MarketPickupPolicy from "./components/MarketPickupPolicy";
 import RevealOnScroll from "./components/RevealOnScroll";
 import JumpNav from "./components/JumpNav";
+import SectionNavLink from "./components/SectionNavLink";
 import TestimonialGrid from "./components/TestimonialGrid";
 import FaqAccordion from "./components/FaqAccordion";
 import SiteFooter from "./components/SiteFooter";
@@ -259,7 +260,7 @@ export default async function Home() {
             We make small-batch, live fermented sauerkraut and hot sauces made to help restore gut balance naturally. A healthier gut microbiome supports digestion, immunity, energy, mood, and overall well-being.
           </p>
           <div className="hero__actions reveal" style={{ "--delay": "0.4s" }}>
-            <a
+            <SectionNavLink
               className="button button--light"
               href="#shop"
               data-analytics-id="hero_shop_cta"
@@ -267,8 +268,8 @@ export default async function Home() {
               data-analytics-hover="true"
             >
               Shop The Jars
-            </a>
-            <a
+            </SectionNavLink>
+            <SectionNavLink
               className="button button--ghost"
               href="#market"
               data-analytics-id="hero_market_cta"
@@ -276,7 +277,7 @@ export default async function Home() {
               data-analytics-hover="true"
             >
               Find us in person
-            </a>
+            </SectionNavLink>
           </div>
         </div>
         <div className="hero__scroll">Scroll</div>
@@ -404,7 +405,7 @@ export default async function Home() {
               <p>Choose a flavor you already enjoy so the routine sticks.</p>
             </div>
             <div className="buy-cta__actions">
-              <a
+              <SectionNavLink
                 className="button button--dark"
                 href="#shop"
                 data-analytics-id="buy_cta_shop"
@@ -412,8 +413,8 @@ export default async function Home() {
                 data-analytics-hover="true"
               >
                 Shop The Collection
-              </a>
-              <a
+              </SectionNavLink>
+              <SectionNavLink
                 className="button button--light"
                 href="#market"
                 data-analytics-id="buy_cta_market"
@@ -421,7 +422,7 @@ export default async function Home() {
                 data-analytics-hover="true"
               >
                 Saturday Pickup Info
-              </a>
+              </SectionNavLink>
             </div>
           </RevealOnScroll>
         </section>
@@ -484,7 +485,7 @@ export default async function Home() {
                 Order any time before {pickupDetails.same_day_cutoff_label} for pickup that
                 Saturday, if stock is available.
               </p>
-              <a
+              <SectionNavLink
                 className="button button--light"
                 href="#shop"
                 data-analytics-id="market_reserve_cta"
@@ -492,7 +493,7 @@ export default async function Home() {
                 data-analytics-hover="true"
               >
                 Reserve A Jar
-              </a>
+              </SectionNavLink>
             </RevealOnScroll>
 
             <div className="market__board">

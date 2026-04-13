@@ -61,6 +61,7 @@ create table if not exists orders (
   amount_shipping integer not null default 0,
   amount_total integer not null default 0,
   customer_confirmation_email_sent_at timestamptz,
+  customer_confirmation_email_claimed_at timestamptz,
   pickup_reminder_email_sent_at timestamptz,
   created_at timestamptz not null default now()
 );
@@ -170,6 +171,14 @@ begin
     where table_name = 'orders' and column_name = 'customer_confirmation_email_sent_at'
   ) then
     alter table orders add column customer_confirmation_email_sent_at timestamptz;
+  end if;
+
+  if not exists (
+    select 1
+    from information_schema.columns
+    where table_name = 'orders' and column_name = 'customer_confirmation_email_claimed_at'
+  ) then
+    alter table orders add column customer_confirmation_email_claimed_at timestamptz;
   end if;
 
   if not exists (
