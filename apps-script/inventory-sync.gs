@@ -265,7 +265,7 @@ function syncWeeklyPrep() {
   } else {
     const pickupRows = pickupOrders.map((order) => ([
       String(order?.customer_name || ""),
-      String(order?.customer_phone || ""),
+      formatPhoneForSheet_(order?.customer_phone),
       String(order?.customer_email || ""),
       formatPickupOrderItems_(order),
       Number(order?.item_count || 0)
@@ -486,7 +486,7 @@ function syncOrders() {
         formatOrderFulfillment_(order?.fulfillment),
         String(order?.customer_name || ""),
         String(order?.customer_email || ""),
-        String(order?.customer_phone || ""),
+        formatPhoneForSheet_(order?.customer_phone),
         formatOrderAddress_(order),
         formatOrderItems_(order),
         Number(order?.item_count || 0),
@@ -575,7 +575,7 @@ function syncShipments() {
         String(shipment?.payment_session_id || ""),
         String(shipment?.customer_name || ""),
         String(shipment?.customer_email || ""),
-        String(shipment?.customer_phone || ""),
+        formatPhoneForSheet_(shipment?.customer_phone),
         formatShipmentAddress_(shipment),
         formatShipmentItems_(shipment),
         Number(shipment?.item_count || 0),
@@ -1081,6 +1081,47 @@ function formatShipmentItems_(shipment) {
     .join(", ");
 
   return fallbackSummary;
+}
+
+function getPhoneDigits_(value) {
+  return String(value || "").replace(/\D/g, "");
+}
+
+function formatUsPhone_(digits) {
+  if (!digits) return "";
+  if (digits.length < 4) return `(${digits}`;
+  if (digits.length < 7) {
+    return `(${digits.slice(0, 3)}) ${digits.slice(3)}`;
+  }
+  return `(${digits.slice(0, 3)}) ${digits.slice(3, 6)}-${digits.slice(6)}`;
+}
+
+function formatPhoneForSheet_(value) {
+  const raw = String(value || "").trim();
+  if (!raw) return "";
+
+  const digits = getPhoneDigits_(raw).slice(0, 15);
+  if (!digits) return "";
+
+  if (!raw.startsWith("+")) {
+    if (digits.length <= 10) {
+      return formatUsPhone_(digits);
+    }
+
+    if (digits.length === 11 && digits.startsWith("1")) {
+      return `+1 ${formatUsPhone_(digits.slice(1))}`;
+    }
+
+    return `+${digits}`;
+  }
+
+  if (digits.startsWith("1") && digits.length <= 11) {
+    const usDigits = digits.slice(1);
+    if (!usDigits) return "+1";
+    return `+1 ${formatUsPhone_(usDigits)}`;
+  }
+
+  return `+${digits}`;
 }
 
 function writeShowStockSetting_(showStock) {
