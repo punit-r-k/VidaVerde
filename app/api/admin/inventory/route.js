@@ -137,42 +137,14 @@ export async function PATCH(request) {
   );
 
   if (hasPreordersField) {
-    const parsedPreorders = Number.parseInt(payload?.preorders_remaining, 10);
-
-    if (!cleanSku || Number.isNaN(parsedPreorders) || parsedPreorders < 0) {
+    if (!cleanSku) {
       return respond.json({ error: "Invalid payload." }, { status: 400 });
     }
 
-    const { data, error } = await supabaseAdmin
-      .from("inventory")
-      .update({ preorders_remaining: parsedPreorders })
-      .eq("sku", cleanSku)
-      .select("sku, on_hand, preorders_remaining, units_sold, expected_restock_date")
-      .single();
-
-    if (error) {
-      console.error("preorders update error:", error);
-      return respond.json(
-        { error: "Unable to update preorder count." },
-        { status: 500 }
-      );
-    }
-
-    if (!data) {
-      return respond.json({ error: "SKU not found." }, { status: 404 });
-    }
-
     return respond.json({
-      ok: true,
-      inventory: {
-        sku: data.sku,
-        on_hand: data.on_hand ?? 0,
-        preorders_remaining: data.preorders_remaining ?? 0,
-        units_sold: data.units_sold ?? 0,
-        expected_restock_date: data.expected_restock_date || null,
-        status: (data.on_hand ?? 0) > 0 ? "In Stock" : "Out of Stock"
-      }
-    });
+      error:
+        "Preorders are managed automatically from paid orders and cannot be edited directly. This keeps fulfillment first-come-first-served."
+    }, { status: 409 });
   }
 
   if (!cleanSku) {

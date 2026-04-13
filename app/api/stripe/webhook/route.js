@@ -117,8 +117,14 @@ const recordPaidOrder = async ({
   shipping,
   total,
   customer,
-  items
+  items,
+  placedAt
 }) => {
+  const customerPayload = {
+    ...(customer || {}),
+    placed_at: toText(placedAt, 64)
+  };
+
   const { data: orderId, error: recordError } = await supabaseAdmin.rpc("record_paid_order", {
     p_session_id: paymentSessionId,
     p_payment_reference: paymentReference,
@@ -129,7 +135,7 @@ const recordPaidOrder = async ({
     p_amount_tax: tax,
     p_amount_shipping: shipping,
     p_amount_total: total,
-    p_customer: customer,
+    p_customer: customerPayload,
     p_items: items
   });
 
@@ -371,7 +377,8 @@ const handleCheckoutSessionEvent = async (session, eventType, eventPlacedAt = ""
     shipping,
     total,
     customer,
-    items
+    items,
+    placedAt
   });
 
   if (recordResult.error) {
@@ -461,7 +468,8 @@ const handlePaymentIntentSucceeded = async (intent, eventPlacedAt = "") => {
     shipping,
     total,
     customer,
-    items
+    items,
+    placedAt
   });
 
   if (recordResult.error) {

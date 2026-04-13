@@ -51,7 +51,7 @@ Sheet columns:
 - Column C: Stock input (restock delta)
 - Column D: Stock Status (on_hand)
 - Column E: Status (In Stock / Out of Stock)
-- Column F: # of Preorders (editable; syncs to backend `preorders_remaining`)
+- Column F: # of Preorders (read-only; derived from paid orders and the preorder queue)
 - Column G: Expected restock date
 - Column H: Total Sales
 
@@ -60,6 +60,8 @@ Additional sheet behavior:
   in the active prep window as fresh demand for the current batch.
 - The prep, orders, and shipments tabs normalize phone numbers into readable sheet
   output such as `+1 (346) 387-2454`.
+- Manual edits to the preorder count column are reverted. Preorder backlog is managed
+  from actual paid orders so fulfillment stays first-come-first-served.
 
 Spreadsheet toggle for stock visibility:
 - The Apps Script creates a `Settings` sheet.
@@ -80,6 +82,8 @@ Preorder-specific data model:
 - `preorder_queue` stores the remaining preorder backlog by order and SKU.
 - `preorder_release_events` stores each quantity released by incoming stock so prep
   generation and preorder-ready pickup emails can react to newly available units.
+- New paid orders stamp `orders`, `order_items`, and `preorder_queue` with the Stripe
+  payment success time so restocks can fulfill preorders in true order sequence.
 
 RPC functions:
 - `record_paid_order` (Stripe webhook)

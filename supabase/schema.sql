@@ -388,6 +388,10 @@ set search_path = public
 as $$
 declare
   v_order_id uuid;
+  v_order_created_at timestamptz := coalesce(
+    nullif(trim(both from coalesce(p_customer->>'placed_at', '')), '')::timestamptz,
+    now()
+  );
   v_item jsonb;
   v_sku text;
   v_qty integer;
@@ -422,7 +426,8 @@ begin
     amount_subtotal,
     amount_tax,
     amount_shipping,
-    amount_total
+    amount_total,
+    created_at
   ) values (
     p_session_id,
     nullif(p_payment_reference, ''),
@@ -442,7 +447,8 @@ begin
     coalesce(p_amount_subtotal, 0),
     coalesce(p_amount_tax, 0),
     coalesce(p_amount_shipping, 0),
-    coalesce(p_amount_total, 0)
+    coalesce(p_amount_total, 0),
+    v_order_created_at
   )
   returning id into v_order_id;
 
@@ -474,12 +480,12 @@ begin
           updated_at = now()
       where sku = v_sku;
 
-    insert into order_items (order_id, sku, quantity, price_cents, preorder_qty)
-      values (v_order_id, v_sku, v_qty, v_price, v_preorder);
+    insert into order_items (order_id, sku, quantity, price_cents, preorder_qty, created_at)
+      values (v_order_id, v_sku, v_qty, v_price, v_preorder, v_order_created_at);
 
     if v_preorder > 0 then
-      insert into preorder_queue (order_id, sku, quantity, remaining)
-        values (v_order_id, v_sku, v_preorder, v_preorder);
+      insert into preorder_queue (order_id, sku, quantity, remaining, created_at)
+        values (v_order_id, v_sku, v_preorder, v_preorder, v_order_created_at);
     end if;
   end loop;
 

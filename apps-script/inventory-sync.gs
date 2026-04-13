@@ -784,59 +784,14 @@ function handlePreordersEdit_(sheet, row) {
   const sku = normalizeSku_(sheet.getRange(row, CONFIG.COLS.SKU).getValue());
   if (!sku) return;
 
-  const rawValue = sheet.getRange(row, CONFIG.COLS.PREORDERS).getValue();
-  const preorders = rawValue === "" || rawValue === null ? 0 : Number(rawValue);
-
-  if (!Number.isFinite(preorders) || preorders < 0) {
-    Logger.log("Invalid preorder value for %s: %s", sku, rawValue);
-    return;
-  }
-
-  const targetPreorders = Math.trunc(preorders);
   const settings = getSettings_();
-  const payload = {
-    sku,
-    preorders_remaining: targetPreorders
-  };
-
-  const response = patchJson_(
-    `${settings.apiBaseUrl}/api/admin/inventory`,
-    settings,
-    payload
+  SpreadsheetApp.getActive().toast(
+    `Preorders for ${sku} are managed automatically from paid orders and cannot be edited manually.`,
+    "Vida Verde",
+    5
   );
 
-  if (!response?.ok) {
-    Logger.log(
-      "Preorders update failed for %s (status: %s, error: %s)",
-      sku,
-      response?.status ?? "unknown",
-      response?.error || response?.message || response?.raw || "unknown"
-    );
-    return;
-  }
-
-  const returnedPreorders = Number(response?.inventory?.preorders_remaining);
-  if (!Number.isFinite(returnedPreorders) || returnedPreorders !== targetPreorders) {
-    Logger.log(
-      "Preorders mismatch for %s. Sent: %s, Returned: %s. Check API deploy at %s",
-      sku,
-      targetPreorders,
-      response?.inventory?.preorders_remaining,
-      settings.apiBaseUrl
-    );
-    SpreadsheetApp.getActive().toast(
-      `Preorders update not saved for ${sku}. Check API deployment.`,
-      "Vida Verde",
-      5
-    );
-    return;
-  }
-
-  if (response.inventory) {
-    writeRow_(sheet, row, response.inventory);
-  } else {
-    syncInventoryRow_(sheet, row, sku, settings);
-  }
+  syncInventoryRow_(sheet, row, sku, settings);
 
   try {
     syncWeeklyPrep();
