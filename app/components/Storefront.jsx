@@ -2,7 +2,6 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useSearchParams } from "next/navigation";
-import Image from "next/image";
 import { CardElement, Elements, useElements, useStripe } from "@stripe/react-stripe-js";
 import { loadStripe } from "@stripe/stripe-js";
 import { trackAnalyticsEvent } from "@/lib/analytics";
@@ -759,6 +758,7 @@ export default function Storefront({ products, inventory = {} }) {
   const handleQuantityChange = (sku, nextQty) => {
     const previousQuantity = cart[sku] || 0;
     const normalizedNextQty = Math.max(0, nextQty);
+    const nextItemCount = Math.max(itemCount + normalizedNextQty - previousQuantity, 0);
     const unitPrice = Number(productLookup.get(sku)?.priceCents || 0);
     const nextSubtotal = Math.max(
       subtotal + (normalizedNextQty - previousQuantity) * unitPrice,
@@ -777,16 +777,30 @@ export default function Storefront({ products, inventory = {} }) {
       }
     });
 
-    resetPaymentState({ keepPaymentStep: isPaymentStep });
+    resetPaymentState({ keepPaymentStep: isPaymentStep && nextItemCount > 0 });
+
+    if (nextItemCount === 0) {
+      setPickupAcknowledged(false);
+      setPickupTouched(false);
+      setPreorderAcknowledged(false);
+      setPreorderTouched(false);
+      checkoutStartedRef.current = false;
+    }
+
+    if (status !== "idle") {
+      setStatus("idle");
+      setNotice("");
+    }
+
     setCart((prev) => {
-      if (nextQty <= 0) {
+      if (normalizedNextQty <= 0) {
         const { [sku]: _, ...rest } = prev;
         return rest;
       }
 
       return {
         ...prev,
-        [sku]: nextQty
+        [sku]: normalizedNextQty
       };
     });
   };
@@ -1393,13 +1407,9 @@ export default function Storefront({ products, inventory = {} }) {
                 data-analytics-product-sku={product.sku}
                 data-analytics-hover="true"
               >
-                <Image
-                  src={product.image}
-                  alt={product.name}
-                  width={800}
-                  height={600}
-                  sizes="(max-width: 900px) 100vw, (max-width: 1400px) 50vw, 33vw"
-                />
+                <div className="product-card__placeholder" aria-hidden="true">
+                  <span>Photos Coming Soon</span>
+                </div>
                 <div className="product-card__content">
                   <div>
                     <div className="product-card__header">
@@ -1528,7 +1538,7 @@ export default function Storefront({ products, inventory = {} }) {
               ) : null}
             </div>
 
-            {renderCartDetails("desktop", { allowQuantityEdit: !isPaymentStep })}
+            {renderCartDetails("desktop")}
           </div>
 
           <form

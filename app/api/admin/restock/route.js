@@ -1,5 +1,6 @@
 import { restockPayloadSchema } from "@/lib/adminSchemas";
 import { secureAdminRoute } from "@/lib/apiSecurity";
+import { sendPreorderReadyPickupEmails } from "@/lib/preorderReadyEmail";
 import { getRouteRateLimitConfig } from "@/lib/rateLimit";
 import { supabaseAdmin } from "@/lib/supabaseAdmin";
 
@@ -68,5 +69,24 @@ export async function POST(request) {
     return respond.json({ error: "Unable to restock" }, { status: 500 });
   }
 
-  return respond.json({ ok: true, inventory: data?.[0] || null });
+  let preorderReadyEmailResult = null;
+
+  if (qty > 0) {
+    preorderReadyEmailResult = await sendPreorderReadyPickupEmails({
+      sku: cleanSku
+    });
+
+    if (!preorderReadyEmailResult.ok) {
+      console.error(
+        "preorder ready pickup email error:",
+        preorderReadyEmailResult.errors || preorderReadyEmailResult.error
+      );
+    }
+  }
+
+  return respond.json({
+    ok: true,
+    inventory: data?.[0] || null,
+    preorder_ready_pickup_emails_sent: preorderReadyEmailResult?.sentCount || 0
+  });
 }

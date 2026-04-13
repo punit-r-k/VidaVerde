@@ -200,11 +200,19 @@ function syncWeeklyPrep() {
   );
 
   const prepRows = Array.isArray(response?.prep) ? response.prep : [];
+  const pickupOrders = Array.isArray(response?.pickup_orders) ? response.pickup_orders : [];
   const weekInfo = response?.week || {};
   const pickup = response?.pickup || {};
+  const normalizedPrepRows = prepRows.map((row) => normalizePrepRow_(row));
+  const productionRows = normalizedPrepRows.filter((row) => Number(row?.total_qty || 0) > 0);
+  const prepNamesBySku = buildPrepNameMap_(normalizedPrepRows);
+  const inventoryPreorderRows = getInventoryPreorderRows_(prepNamesBySku);
+  const preorderRows = inventoryPreorderRows !== null
+    ? inventoryPreorderRows
+    : normalizedPrepRows.filter((row) => Number(row?.preorder_qty || 0) > 0);
 
   const sheet = ensurePrepSheet_();
-  sheet.clearContents();
+  sheet.clear();
 
   const orderWindow =
     String(weekInfo.collection_window_label || "").trim() ||
@@ -216,67 +224,215 @@ function syncWeeklyPrep() {
     [weekInfo.week_start_date, weekInfo.week_end_date]
       .filter(Boolean)
       .join(" to ");
+  const pickupDateLabel =
+    String(pickup.market_date_label || "").trim() ||
+    String(pickup.market_date || weekInfo.market_date || "").trim();
   const metaValues = [[
     "Orders Collected",
     orderWindow,
-    "Pickup Date",
-    pickup.market_date || weekInfo.market_date || ""
-  ]];
-  sheet.getRange(CONFIG.PREP.META_ROW, 1, 1, metaValues[0].length).setValues(metaValues);
-
-  const headerValues = [[
-    "Product",
-    "Ship This Week",
-    "Market This Saturday",
-    "Total To Prepare",
-    "Pre-orders"
+    "Saturday Pickup",
+    pickupDateLabel
   ]];
   sheet
-    .getRange(CONFIG.PREP.HEADER_ROW, 1, 1, headerValues[0].length)
-    .setValues(headerValues);
+    .getRange(CONFIG.PREP.META_ROW, 1, 1, metaValues[0].length)
+    .setValues(metaValues)
+    .setFontWeight("bold");
 
-  if (prepRows.length === 0) {
+  let currentRow = 2;
+
+  const pickupSectionRow = currentRow;
+  sheet.getRange(pickupSectionRow, 1).setValue("Saturday Pickup Verification");
+  currentRow += 1;
+
+  const pickupHeaderRow = currentRow;
+  const pickupHeaderValues = [[
+    "Name",
+    "Phone",
+    "Email",
+    "Order",
+    "Units"
+  ]];
+  sheet
+    .getRange(pickupHeaderRow, 1, 1, pickupHeaderValues[0].length)
+    .setValues(pickupHeaderValues);
+  currentRow += 1;
+
+  if (pickupOrders.length === 0) {
     sheet
-      .getRange(CONFIG.PREP.START_ROW, 1)
-      .setValue("No paid orders collected for this week yet.");
+      .getRange(currentRow, 1)
+      .setValue("No Saturday pickup orders ready yet.");
+    currentRow += 1;
   } else {
-    const rows = prepRows.map((row) => ([
-      String(row?.name || ""),
-      Number(row?.shipping_qty || 0),
-      Number(row?.market_qty || 0),
-      Number(row?.total_qty || 0),
-      Number(row?.preorder_qty || 0)
+    const pickupRows = pickupOrders.map((order) => ([
+      String(order?.customer_name || ""),
+      String(order?.customer_phone || ""),
+      String(order?.customer_email || ""),
+      formatPickupOrderItems_(order),
+      Number(order?.item_count || 0)
     ]));
 
     sheet
-      .getRange(CONFIG.PREP.START_ROW, 1, rows.length, rows[0].length)
+      .getRange(currentRow, 1, pickupRows.length, pickupRows[0].length)
+      .setValues(pickupRows);
+    sheet
+      .getRange(currentRow, 5, pickupRows.length, 1)
+      .setNumberFormat("0");
+    currentRow += pickupRows.length;
+  }
+
+  currentRow += 1;
+
+  const prepSectionRow = currentRow;
+  sheet.getRange(prepSectionRow, 1).setValue("Jars To Make This Week");
+  currentRow += 1;
+
+  const prepHeaderRow = currentRow;
+  const prepHeaderValues = [[
+    "Product",
+    "Ship This Week",
+    "Market Pickup This Saturday",
+    "Total Jars To Make"
+  ]];
+  sheet
+    .getRange(prepHeaderRow, 1, 1, prepHeaderValues[0].length)
+    .setValues(prepHeaderValues);
+  currentRow += 1;
+
+  if (productionRows.length === 0) {
+    sheet
+      .getRange(currentRow, 1)
+      .setValue("No non-preorder jars to make for this week yet.");
+    currentRow += 1;
+  } else {
+    const rows = productionRows.map((row) => ([
+      String(row?.name || ""),
+      Number(row?.shipping_qty || 0),
+      Number(row?.market_qty || 0),
+      Number(row?.total_qty || 0)
+    ]));
+
+    sheet
+      .getRange(currentRow, 1, rows.length, rows[0].length)
       .setValues(rows);
 
     const shipTotal = rows.reduce((sum, row) => sum + row[1], 0);
     const marketTotal = rows.reduce((sum, row) => sum + row[2], 0);
     const totalToPrepare = rows.reduce((sum, row) => sum + row[3], 0);
-    const preorderTotal = rows.reduce((sum, row) => sum + row[4], 0);
-    const totalsRow = CONFIG.PREP.START_ROW + rows.length;
+    const totalsRow = currentRow + rows.length;
 
     sheet
-      .getRange(totalsRow, 1, 1, 5)
-      .setValues([["TOTAL", shipTotal, marketTotal, totalToPrepare, preorderTotal]]);
+      .getRange(totalsRow, 1, 1, 4)
+      .setValues([[
+        "TOTAL",
+        shipTotal,
+        marketTotal,
+        totalToPrepare
+      ]]);
     sheet
-      .getRange(CONFIG.PREP.START_ROW, 2, rows.length + 1, 4)
+      .getRange(currentRow, 2, rows.length + 1, 3)
       .setNumberFormat("0");
     sheet
-      .getRange(totalsRow, 1, 1, 5)
+      .getRange(totalsRow, 1, 1, 4)
       .setFontWeight("bold");
+    currentRow = totalsRow + 1;
+  }
+
+  currentRow += 1;
+
+  const preorderSectionRow = currentRow;
+  sheet.getRange(preorderSectionRow, 1).setValue("Pre-orders To Handle Separately");
+  currentRow += 1;
+
+  const preorderHeaderRow = currentRow;
+  const preorderHeaderValues = [[
+    "Product",
+    "Total Pre-orders"
+  ]];
+  sheet
+    .getRange(preorderHeaderRow, 1, 1, preorderHeaderValues[0].length)
+    .setValues(preorderHeaderValues);
+  currentRow += 1;
+
+  if (preorderRows.length === 0) {
+    sheet
+      .getRange(currentRow, 1)
+      .setValue("No pre-orders pending.");
+    currentRow += 1;
+  } else {
+    const rows = preorderRows.map((row) => ([
+      String(row?.name || ""),
+      Number(row?.preorder_qty || 0)
+    ]));
+
+    sheet
+      .getRange(currentRow, 1, rows.length, rows[0].length)
+      .setValues(rows);
+
+    const preorderTotal = rows.reduce((sum, row) => sum + row[1], 0);
+    const totalsRow = currentRow + rows.length;
+
+    sheet
+      .getRange(totalsRow, 1, 1, 2)
+      .setValues([["TOTAL", preorderTotal]]);
+    sheet
+      .getRange(currentRow, 2, rows.length + 1, 1)
+      .setNumberFormat("0");
+    sheet
+      .getRange(totalsRow, 1, 1, 2)
+      .setFontWeight("bold");
+    currentRow = totalsRow + 1;
   }
 
   sheet
-    .getRange(CONFIG.PREP.META_ROW, 1, 1, metaValues[0].length)
+    .getRange(pickupSectionRow, 1, 1, 5)
     .setFontWeight("bold");
   sheet
-    .getRange(CONFIG.PREP.HEADER_ROW, 1, 1, 5)
+    .getRange(prepSectionRow, 1, 1, 4)
     .setFontWeight("bold");
-  sheet.setFrozenRows(2);
-  sheet.autoResizeColumns(1, Math.max(5, metaValues[0].length));
+  sheet
+    .getRange(preorderSectionRow, 1, 1, 2)
+    .setFontWeight("bold");
+  sheet
+    .getRange(pickupHeaderRow, 1, 1, 5)
+    .setFontWeight("bold");
+  sheet
+    .getRange(prepHeaderRow, 1, 1, 4)
+    .setFontWeight("bold");
+  sheet
+    .getRange(preorderHeaderRow, 1, 1, 2)
+    .setFontWeight("bold");
+  sheet
+    .getRange(1, 1, Math.max(currentRow - 1, 1), 5)
+    .setVerticalAlignment("top");
+  sheet
+    .getRange(pickupHeaderRow, 1, 1, 5)
+    .setBackground("#d9ead3");
+  sheet
+    .getRange(prepHeaderRow, 1, 1, 4)
+    .setBackground("#fce5cd");
+  sheet
+    .getRange(preorderHeaderRow, 1, 1, 2)
+    .setBackground("#d9d2e9");
+  sheet
+    .getRange(pickupSectionRow, 1)
+    .setFontSize(12);
+  sheet
+    .getRange(prepSectionRow, 1)
+    .setFontSize(12);
+  sheet
+    .getRange(preorderSectionRow, 1)
+    .setFontSize(12);
+  sheet
+    .getRange(1, 1, Math.max(currentRow - 1, 1), 5)
+    .setWrap(true);
+
+  sheet.setFrozenRows(1);
+  sheet.setColumnWidth(1, 220);
+  sheet.setColumnWidth(2, 130);
+  sheet.setColumnWidth(3, 220);
+  sheet.setColumnWidth(4, 420);
+  sheet.setColumnWidth(5, 110);
+  sheet.autoResizeRows(1, Math.max(currentRow - 1, 1));
 }
 
 function syncOrders() {
@@ -560,6 +716,27 @@ function handleRestockEdit_(sheet, row) {
     } else {
       syncInventoryRow_(sheet, row, sku, settings);
     }
+
+    const preorderReadyEmailCount = Number(
+      response?.preorder_ready_pickup_emails_sent || 0
+    );
+    if (Number.isFinite(preorderReadyEmailCount) && preorderReadyEmailCount > 0) {
+      SpreadsheetApp.getActive().toast(
+        `${preorderReadyEmailCount} preorder ready email(s) sent for ${sku}.`,
+        "Vida Verde",
+        5
+      );
+    }
+
+    try {
+      syncWeeklyPrep();
+    } catch (error) {
+      Logger.log(
+        "Weekly prep sync after restock failed for %s: %s",
+        sku,
+        error && error.message ? error.message : String(error)
+      );
+    }
   } finally {
     lock.releaseLock();
   }
@@ -659,6 +836,16 @@ function handlePreordersEdit_(sheet, row) {
     writeRow_(sheet, row, response.inventory);
   } else {
     syncInventoryRow_(sheet, row, sku, settings);
+  }
+
+  try {
+    syncWeeklyPrep();
+  } catch (error) {
+    Logger.log(
+      "Weekly prep sync after preorder update failed for %s: %s",
+      sku,
+      error && error.message ? error.message : String(error)
+    );
   }
 }
 
@@ -852,6 +1039,24 @@ function formatOrderItems_(order) {
     .join(", ");
 }
 
+function formatPickupOrderItems_(order) {
+  const summary = String(order?.items_summary || "").trim();
+  if (summary) return summary;
+
+  const items = Array.isArray(order?.items) ? order.items : [];
+  return items
+    .map((item) => {
+      const name = String(item?.name || "").trim();
+      const sku = normalizeSku_(item?.sku);
+      const label = name || sku;
+      const quantity = Number(item?.quantity || 0);
+      if (!label || quantity <= 0) return "";
+      return `${label} x${quantity}`;
+    })
+    .filter(Boolean)
+    .join(", ");
+}
+
 function formatOrderFulfillment_(value) {
   return value === "market"
     ? "Pickup at Fulshear Farmers Market"
@@ -906,6 +1111,103 @@ function normalizeBoolean_(value, fallback) {
 
 function normalizeSku_(value) {
   return String(value || "").trim().toUpperCase();
+}
+
+function normalizePrepRow_(row) {
+  const shippingQty = Math.max(Number(row?.shipping_qty || 0), 0);
+  const marketQty = Math.max(Number(row?.market_qty || 0), 0);
+  const totalQty = Math.max(Number(row?.total_qty || shippingQty + marketQty), 0);
+  const preorderQty = Math.max(Number(row?.preorder_qty || 0), 0);
+  const hasSplitPreorders =
+    row &&
+    (row.shipping_preorder_qty !== undefined || row.market_preorder_qty !== undefined);
+
+  if (hasSplitPreorders) {
+    return {
+      ...row,
+      shipping_qty: shippingQty,
+      market_qty: marketQty,
+      total_qty: shippingQty + marketQty,
+      preorder_qty: preorderQty,
+      shipping_preorder_qty: Math.max(Number(row?.shipping_preorder_qty || 0), 0),
+      market_preorder_qty: Math.max(Number(row?.market_preorder_qty || 0), 0)
+    };
+  }
+
+  const readyTotal = Math.max(totalQty - preorderQty, 0);
+
+  // Legacy prep payloads only expose a combined preorder count.
+  // Remove those units from Saturday pickup first so the market tally stays conservative.
+  const inferredMarketPreorders = Math.min(preorderQty, marketQty);
+  const inferredShippingPreorders = Math.max(preorderQty - inferredMarketPreorders, 0);
+  const readyMarketQty = Math.max(marketQty - inferredMarketPreorders, 0);
+  const readyShippingQty = Math.max(readyTotal - readyMarketQty, 0);
+
+  return {
+    ...row,
+    shipping_qty: readyShippingQty,
+    market_qty: readyMarketQty,
+    total_qty: readyTotal,
+    preorder_qty: preorderQty,
+    shipping_preorder_qty: inferredShippingPreorders,
+    market_preorder_qty: inferredMarketPreorders
+  };
+}
+
+function buildPrepNameMap_(rows) {
+  return (Array.isArray(rows) ? rows : []).reduce((acc, row) => {
+    const sku = normalizeSku_(row?.sku);
+    const name = String(row?.name || "").trim();
+
+    if (sku && name) {
+      acc[sku] = name;
+    }
+
+    return acc;
+  }, {});
+}
+
+function getInventoryPreorderRows_(fallbackNamesBySku) {
+  const sheet = SpreadsheetApp.getActive().getSheetByName(CONFIG.SHEET_NAME);
+  if (!sheet) return null;
+
+  const lastRow = sheet.getLastRow();
+  if (lastRow < CONFIG.START_ROW) {
+    return [];
+  }
+
+  const rows = sheet
+    .getRange(
+      CONFIG.START_ROW,
+      CONFIG.COLS.SKU,
+      lastRow - CONFIG.START_ROW + 1,
+      CONFIG.COLS.PREORDERS
+    )
+    .getValues();
+  const preorderColIndex = CONFIG.COLS.PREORDERS - CONFIG.COLS.SKU;
+
+  return rows.reduce((acc, row) => {
+    const sku = normalizeSku_(row[0]);
+    if (!sku) return acc;
+
+    const preorderQty = Number(row[preorderColIndex]);
+    if (!Number.isFinite(preorderQty) || preorderQty <= 0) {
+      return acc;
+    }
+
+    const productName =
+      String(row[1] || "").trim() ||
+      String((fallbackNamesBySku || {})[sku] || "").trim() ||
+      sku;
+
+    acc.push({
+      sku,
+      name: productName,
+      preorder_qty: Math.trunc(preorderQty)
+    });
+
+    return acc;
+  }, []);
 }
 
 function getSettings_() {

@@ -5,20 +5,17 @@ import MarketPickupPolicy from "./components/MarketPickupPolicy";
 import RevealOnScroll from "./components/RevealOnScroll";
 import JumpNav from "./components/JumpNav";
 import TestimonialGrid from "./components/TestimonialGrid";
+import FaqAccordion from "./components/FaqAccordion";
 import SiteFooter from "./components/SiteFooter";
 import Image from "next/image";
 import { getProducts } from "@/lib/products";
 import {
-  FOLLOWING_WEEK_PICKUP_NOTICE,
   MARKET_ADDRESS,
   MARKET_DAY_LABEL,
   MARKET_NAME,
   MARKET_PICKUP_POLICY_ITEMS,
   MARKET_PICKUP_SUMMARY,
   MARKET_PICKUP_WINDOW,
-  MARKET_UPDATES_NOTICE,
-  SAME_DAY_PICKUP_NOTICE,
-  WEATHER_CLOSURE_NOTICE,
   getPickupDetails
 } from "@/lib/pickupDetails";
 import { getInventoryMap } from "@/lib/stock";
@@ -191,15 +188,7 @@ export default async function Home() {
     },
     {
       q: "Do you offer shipping?",
-      intro: "Not yet. We currently offer pickup only. Shipping is coming soon.",
-      bullets: [
-        `Pickup: ${MARKET_NAME}`,
-        `Location: ${MARKET_ADDRESS}`,
-        `When: ${MARKET_DAY_LABEL}, ${MARKET_PICKUP_WINDOW}`,
-        SAME_DAY_PICKUP_NOTICE,
-        FOLLOWING_WEEK_PICKUP_NOTICE
-      ],
-      notes: [WEATHER_CLOSURE_NOTICE, MARKET_UPDATES_NOTICE]
+      a: "Not yet. We currently offer pickup only. Shipping is coming soon."
     }
   ];
 
@@ -604,38 +593,7 @@ export default async function Home() {
               <p className="eyebrow">FAQ</p>
               <h2>Quick answers before you place your first order.</h2>
             </div>
-            <div className="faq__list">
-              {faqs.map((item, index) => (
-                <details
-                  key={item.q}
-                  data-analytics-id={`faq_${index + 1}`}
-                  data-analytics-type="faq"
-                >
-                  <summary>{item.q}</summary>
-                  {item.a ? <p>{item.a}</p> : null}
-                  {item.intro || item.bullets || item.notes ? (
-                    <div className="faq__answer">
-                      {item.intro ? <p>{item.intro}</p> : null}
-                      {item.bullets?.length ? (
-                        <ul>
-                          {item.bullets.map((line) => (
-                            <li key={line}>{line}</li>
-                          ))}
-                        </ul>
-                      ) : null}
-                      {item.notes?.map((line) => (
-                        <p key={line}>{line}</p>
-                      ))}
-                    </div>
-                  ) : null}
-                  {item.disclaimer ? (
-                    <p className="faq__disclaimer">
-                      <span>{item.disclaimer}</span>
-                    </p>
-                  ) : null}
-                </details>
-              ))}
-            </div>
+            <FaqAccordion items={faqs} />
           </RevealOnScroll>
         </section>
       </main>

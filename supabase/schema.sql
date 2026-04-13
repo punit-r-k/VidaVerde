@@ -189,10 +189,55 @@ create table if not exists preorder_queue (
   quantity integer not null check (quantity > 0),
   remaining integer not null check (remaining >= 0 and remaining <= quantity),
   created_at timestamptz not null default now(),
-  fulfilled_at timestamptz
+  fulfilled_at timestamptz,
+  ready_pickup_email_sent_at timestamptz
 );
 
 create index if not exists preorder_queue_sku_idx on preorder_queue (sku, created_at, id);
+
+create table if not exists preorder_release_events (
+  id uuid primary key default gen_random_uuid(),
+  preorder_queue_id uuid not null references preorder_queue(id) on delete cascade,
+  order_id uuid not null references orders(id) on delete cascade,
+  sku text not null references products(sku) on update cascade,
+  quantity integer not null check (quantity > 0),
+  ready_pickup_email_sent_at timestamptz,
+  created_at timestamptz not null default now()
+);
+
+create index if not exists preorder_release_events_sku_created_at_idx
+  on preorder_release_events (sku, created_at desc, id);
+create index if not exists preorder_release_events_order_created_at_idx
+  on preorder_release_events (order_id, created_at desc, id);
+
+do $$
+begin
+  if not exists (
+    select 1
+    from information_schema.columns
+    where table_name = 'preorder_queue'
+      and column_name = 'ready_pickup_email_sent_at'
+  ) then
+    alter table preorder_queue add column ready_pickup_email_sent_at timestamptz;
+  end if;
+end $$;
+
+do $$
+begin
+  if exists (
+    select 1
+    from information_schema.tables
+    where table_schema = 'public'
+      and table_name = 'preorder_release_events'
+  ) and not exists (
+    select 1
+    from information_schema.columns
+    where table_name = 'preorder_release_events'
+      and column_name = 'ready_pickup_email_sent_at'
+  ) then
+    alter table preorder_release_events add column ready_pickup_email_sent_at timestamptz;
+  end if;
+end $$;
 
 create table if not exists restock_events (
   id uuid primary key default gen_random_uuid(),
@@ -608,6 +653,7 @@ declare
   v_existing_preorders integer := 0;
   v_applied_to_preorders integer := 0;
   v_queue_to_fulfill integer := 0;
+  v_release_qty integer := 0;
   v_queue record;
 begin
   select coalesce(i.preorders_remaining, 0)
@@ -653,7 +699,7 @@ begin
   v_fulfilled := v_applied_to_preorders;
 
   for v_queue in
-    select pq.id, pq.remaining
+    select pq.id, pq.order_id, pq.remaining
     from preorder_queue pq
     where pq.sku = p_sku and pq.remaining > 0
     order by pq.created_at, pq.id
@@ -662,16 +708,32 @@ begin
     exit when v_queue_to_fulfill <= 0;
 
     if v_queue.remaining <= v_queue_to_fulfill then
+      v_release_qty := v_queue.remaining;
       update preorder_queue pq
         set remaining = 0,
             fulfilled_at = now()
         where pq.id = v_queue.id;
-      v_queue_to_fulfill := v_queue_to_fulfill - v_queue.remaining;
+      v_queue_to_fulfill := v_queue_to_fulfill - v_release_qty;
     else
+      v_release_qty := v_queue_to_fulfill;
       update preorder_queue pq
-        set remaining = pq.remaining - v_queue_to_fulfill
+        set remaining = pq.remaining - v_release_qty
         where pq.id = v_queue.id;
       v_queue_to_fulfill := 0;
+    end if;
+
+    if v_release_qty > 0 then
+      insert into preorder_release_events (
+        preorder_queue_id,
+        order_id,
+        sku,
+        quantity
+      ) values (
+        v_queue.id,
+        v_queue.order_id,
+        p_sku,
+        v_release_qty
+      );
     end if;
   end loop;
 
@@ -764,6 +826,7 @@ begin
     'analytics_events',
     'order_items',
     'preorder_queue',
+    'preorder_release_events',
     'restock_events',
     'api_rate_limits'
   ]
