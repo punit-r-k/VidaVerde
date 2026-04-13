@@ -30,12 +30,18 @@ const formatCurrency = (amountInCents) => {
 };
 
 const INVENTORY_POLL_MS = 30000;
+const ORDER_FINALIZE_POLL_MS = 1500;
+const ORDER_FINALIZE_MAX_ATTEMPTS = 8;
 const PREORDER_TIMING_NOTICE =
   `Pre-orders are estimates only. Fermentation timelines vary, and preorder items may take up to 15 days before pickup is available. The next ${MARKET_NAME} date is not guaranteed for preorder items.`;
 const PRODUCT_PREORDER_NOTICE =
   "Next unit is a pre-order. Not guaranteed for next farmers market; kraut can take up to 15 days.";
 const PREORDER_ACKNOWLEDGEMENT_LABEL =
   "I understand preorder timing is estimated and not guaranteed for the next market.";
+const ORDER_FINALIZE_MESSAGE =
+  "Payment received. Finalizing your order...";
+const ORDER_FINALIZE_PENDING_NOTICE =
+  "Payment received. We are still finalizing your order. Please do not submit again. We will email confirmation as soon as it is recorded.";
 const PREORDER_NOTICE_MESSAGES = new Set([
   "Please acknowledge the pre-order notice before proceeding to payment.",
   "Please acknowledge the pre-order notice before payment."
@@ -46,6 +52,16 @@ const SPICE_PROFILE_PATTERN =
   /(spice|hot|heat|mild|turmeric|cumin|pepper|jalapeno|habanero)/i;
 const STRIPE_PUBLISHABLE_KEY = process.env.NEXT_PUBLIC_STRIPE_PUBLISHABLE_KEY || "";
 const stripePromise = STRIPE_PUBLISHABLE_KEY ? loadStripe(STRIPE_PUBLISHABLE_KEY) : null;
+const wait = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
+const isInventorySnapshot = (value) => {
+  if (!value || typeof value !== "object" || Array.isArray(value)) {
+    return false;
+  }
+
+  return Object.values(value).every(
+    (record) => record && typeof record === "object" && !Array.isArray(record)
+  );
+};
 
 const sanitizeFieldName = (value) => String(value || "").trim().toLowerCase().replace(/[^a-z0-9]+/g, "_");
 
@@ -81,7 +97,13 @@ const splitDescription = (description) => {
   };
 };
 
-function StripePaymentForm({ onPaymentState, grossTotalCents, billingDetails, createPaymentIntent }) {
+function StripePaymentForm({
+  onPaymentState,
+  grossTotalCents,
+  billingDetails,
+  createPaymentIntent,
+  isLocked = false
+}) {
   const stripe = useStripe();
   const elements = useElements();
   const [isSubmitting, setIsSubmitting] = useState(false);
@@ -178,19 +200,25 @@ function StripePaymentForm({ onPaymentState, grossTotalCents, billingDetails, cr
     }
 
     const intentStatus = paymentIntent?.status;
-    if (intentStatus === "succeeded") {
+    if (intentStatus === "succeeded" && paymentIntent?.id) {
       onPaymentState({
-        status: "success",
-        message: "Payment received. We will email fulfillment details shortly."
+        status: "finalizing",
+        paymentIntentId: paymentIntent.id,
+        message: ORDER_FINALIZE_MESSAGE
       });
       setIsSubmitting(false);
       return;
     }
 
-    if (intentStatus === "processing" || intentStatus === "requires_capture") {
+    if (
+      (intentStatus === "processing" || intentStatus === "requires_capture") &&
+      paymentIntent?.id
+    ) {
       onPaymentState({
-        status: "success",
-        message: "Payment is processing. We will email fulfillment details shortly."
+        status: "finalizing",
+        paymentIntentId: paymentIntent.id,
+        message:
+          "Payment is processing. We are finalizing your order as soon as Stripe confirms it. Do not submit again."
       });
       setIsSubmitting(false);
       return;
@@ -232,7 +260,7 @@ function StripePaymentForm({ onPaymentState, grossTotalCents, billingDetails, cr
         className="button button--dark"
         type="button"
         onClick={handleStripeSubmit}
-        disabled={isSubmitting || !stripe || !elements}
+        disabled={isSubmitting || isLocked || !stripe || !elements}
         aria-busy={isSubmitting}
         data-analytics-id="payment_submit"
         data-analytics-hover="true"
@@ -243,14 +271,16 @@ function StripePaymentForm({ onPaymentState, grossTotalCents, billingDetails, cr
   );
 }
 
-export default function Storefront({ products, inventory = {} }) {
+export default function Storefront({ products, inventory = null }) {
   const searchParams = useSearchParams();
   const [cart, setCart] = useState({});
   const [status, setStatus] = useState("idle");
   const [notice, setNotice] = useState("");
   const [checkoutStep, setCheckoutStep] = useState("details");
   const [fulfillment, setFulfillment] = useState("market");
-  const [liveInventory, setLiveInventory] = useState(inventory);
+  const [liveInventory, setLiveInventory] = useState(() =>
+    isInventorySnapshot(inventory) ? inventory : null
+  );
   const [formValues, setFormValues] = useState(INITIAL_FORM_VALUES);
   const [fieldErrors, setFieldErrors] = useState({});
   const [touchedFields, setTouchedFields] = useState({});
@@ -269,7 +299,10 @@ export default function Storefront({ products, inventory = {} }) {
   const checkoutStartedRef = useRef(false);
   const previousCheckoutStepRef = useRef("details");
   const cartSummarySeenRef = useRef(false);
+  const finalizingPaymentIntentRef = useRef("");
   const isPaymentStep = checkoutStep === "payment";
+  const isOrderFinalizing =
+    status === "finalizing" || status === "pending_confirmation";
 
   const resetPaymentState = useCallback((options = {}) => {
     const keepPaymentStep = options.keepPaymentStep === true;
@@ -291,6 +324,7 @@ export default function Storefront({ products, inventory = {} }) {
     setPreorderTouched(false);
     setCheckoutStep("details");
     checkoutStartedRef.current = false;
+    finalizingPaymentIntentRef.current = "";
   }, []);
 
   const triggerOrderSuccessPopup = useCallback(() => {
@@ -306,6 +340,99 @@ export default function Storefront({ products, inventory = {} }) {
       orderSuccessPopupTimeoutRef.current = null;
     }, 6500);
   }, []);
+
+  const finalizePaidOrder = useCallback(
+    async (paymentIntentId) => {
+      const normalizedPaymentIntentId = String(paymentIntentId || "").trim();
+
+      if (!normalizedPaymentIntentId) {
+        trackAnalyticsEvent({
+          name: "payment_result",
+          sectionId: "shop",
+          elementId: "payment_submit",
+          checkoutStep: "payment",
+          metadata: {
+            result: "pending",
+            errorCode: "missing_payment_intent"
+          }
+        });
+        setStatus("pending_confirmation");
+        setNotice(ORDER_FINALIZE_PENDING_NOTICE);
+        finalizingPaymentIntentRef.current = "";
+        return;
+      }
+
+      finalizingPaymentIntentRef.current = normalizedPaymentIntentId;
+
+      for (let attempt = 0; attempt < ORDER_FINALIZE_MAX_ATTEMPTS; attempt += 1) {
+        let response = null;
+        let payload = {};
+
+        try {
+          response = await fetch("/api/order/finalize", {
+            method: "POST",
+            headers: {
+              "Content-Type": "application/json"
+            },
+            body: JSON.stringify({
+              paymentIntentId: normalizedPaymentIntentId
+            })
+          });
+          payload = await response.json().catch(() => ({}));
+        } catch {
+          payload = {};
+        }
+
+        if (response?.ok && payload?.recorded) {
+          trackAnalyticsEvent({
+            name: "payment_result",
+            sectionId: "shop",
+            elementId: "payment_submit",
+            checkoutStep: "payment",
+            metadata: {
+              result: "success"
+            }
+          });
+          setStatus("success");
+          setNotice(
+            "Payment received. Your order is confirmed and fulfillment details are on the way."
+          );
+          triggerOrderSuccessPopup();
+          resetCheckoutAfterSuccess();
+          return;
+        }
+
+        const paymentStatus = String(payload?.paymentStatus || "").trim().toLowerCase();
+        const shouldRetry =
+          response?.status === 202 ||
+          !response ||
+          paymentStatus === "processing" ||
+          paymentStatus === "requires_capture";
+
+        if (shouldRetry && attempt < ORDER_FINALIZE_MAX_ATTEMPTS - 1) {
+          await wait(ORDER_FINALIZE_POLL_MS);
+          continue;
+        }
+
+        break;
+      }
+
+      trackAnalyticsEvent({
+        name: "payment_result",
+        sectionId: "shop",
+        elementId: "payment_submit",
+        checkoutStep: "payment",
+        metadata: {
+          result: "pending",
+          errorCode: "order_record_pending"
+        }
+      });
+      setStatus("pending_confirmation");
+      setNotice(ORDER_FINALIZE_PENDING_NOTICE);
+      finalizingPaymentIntentRef.current = "";
+    },
+    [resetCheckoutAfterSuccess, triggerOrderSuccessPopup]
+  );
 
   const setFieldRef = useCallback((name) => {
     return (node) => {
@@ -359,7 +486,7 @@ export default function Storefront({ products, inventory = {} }) {
   const hasFieldError = useCallback((name) => Boolean(getFieldError(name)), [getFieldError]);
 
   const applyInventory = (nextInventory) => {
-    if (nextInventory && typeof nextInventory === "object") {
+    if (isInventorySnapshot(nextInventory)) {
       setLiveInventory(nextInventory);
     }
   };
@@ -422,23 +549,19 @@ export default function Storefront({ products, inventory = {} }) {
 
   useEffect(() => {
     const checkoutStatus = searchParams?.get("checkout");
+    const paymentIntentId = searchParams?.get("payment_intent");
 
     if (!checkoutStatus) return;
 
     if (checkoutStatus === "success") {
-      setStatus("success");
-      setNotice("Payment received. We will email fulfillment details shortly.");
-      trackAnalyticsEvent({
-        name: "payment_result",
-        sectionId: "shop",
-        elementId: "payment_submit",
-        checkoutStep: "payment",
-        metadata: {
-          result: "success"
-        }
-      });
-      triggerOrderSuccessPopup();
-      resetCheckoutAfterSuccess();
+      if (paymentIntentId) {
+        setStatus("finalizing");
+        setNotice(ORDER_FINALIZE_MESSAGE);
+        void finalizePaidOrder(paymentIntentId);
+      } else {
+        setStatus("pending_confirmation");
+        setNotice(ORDER_FINALIZE_PENDING_NOTICE);
+      }
     } else if (checkoutStatus === "cancel") {
       setStatus("error");
       setNotice("Payment canceled. Your cart is still saved below.");
@@ -463,14 +586,17 @@ export default function Storefront({ products, inventory = {} }) {
       window.history.replaceState({}, "", url.toString());
     }
   }, [
-    resetCheckoutAfterSuccess,
+    finalizePaidOrder,
     resetPaymentState,
-    searchParams,
-    triggerOrderSuccessPopup
+    searchParams
   ]);
 
   const shouldDisplayStock = useMemo(() => {
-    const records = Object.values(liveInventory || {});
+    if (!isInventorySnapshot(liveInventory)) {
+      return false;
+    }
+
+    const records = Object.values(liveInventory);
     if (records.length === 0) return false;
     return records.some((record) => record?.show_stock !== false);
   }, [liveInventory]);
@@ -484,25 +610,27 @@ export default function Storefront({ products, inventory = {} }) {
       .filter((product) => cart[product.sku])
       .map((product) => {
         const quantity = cart[product.sku];
-        const record = liveInventory[product.sku] || {
-          on_hand: 0,
-          preorders_remaining: 0,
-          units_sold: 0,
-          show_stock: true
-        };
-
-        const available = Math.max(0, Number(record.on_hand || 0));
-        const inStockUnits = Math.min(quantity, available);
-        const preorderUnits = Math.max(0, quantity - available);
+        const record = liveInventory?.[product.sku] || null;
+        const hasInventoryRecord = Boolean(record && typeof record === "object");
+        const available = hasInventoryRecord
+          ? Math.max(0, Number(record.on_hand || 0))
+          : Number.POSITIVE_INFINITY;
+        const inStockUnits = hasInventoryRecord ? Math.min(quantity, available) : quantity;
+        const preorderUnits = hasInventoryRecord ? Math.max(0, quantity - available) : 0;
 
         return {
           ...product,
           quantity,
-          available,
+          available: Number.isFinite(available) ? available : null,
+          hasInventoryRecord,
           inStockUnits,
           preorderUnits,
-          preordersCount: Math.max(0, Number(record.preorders_remaining || 0)),
-          salesCount: Math.max(0, Number(record.units_sold || 0)),
+          preordersCount: hasInventoryRecord
+            ? Math.max(0, Number(record.preorders_remaining || 0))
+            : 0,
+          salesCount: hasInventoryRecord
+            ? Math.max(0, Number(record.units_sold || 0))
+            : 0,
           lineTotal: quantity * (product.priceCents || 0)
         };
       });
@@ -666,6 +794,8 @@ export default function Storefront({ products, inventory = {} }) {
   }, [cartItems, formValues, fulfillment, pickupAcknowledged]);
 
   const handleAdd = (product) => {
+    if (isOrderFinalizing) return;
+
     const currentQty = cart[product.sku] || 0;
     const nextQuantity = currentQty + 1;
 
@@ -731,6 +861,8 @@ export default function Storefront({ products, inventory = {} }) {
   };
 
   const handleClearCart = () => {
+    if (isOrderFinalizing) return;
+
     trackAnalyticsEvent({
       name: "cart_cleared",
       sectionId: "shop",
@@ -756,6 +888,8 @@ export default function Storefront({ products, inventory = {} }) {
   };
 
   const handleQuantityChange = (sku, nextQty) => {
+    if (isOrderFinalizing) return;
+
     const previousQuantity = cart[sku] || 0;
     const normalizedNextQty = Math.max(0, nextQty);
     const nextItemCount = Math.max(itemCount + normalizedNextQty - previousQuantity, 0);
@@ -886,10 +1020,12 @@ export default function Storefront({ products, inventory = {} }) {
   };
 
   const handleBackToEdit = useCallback(() => {
+    if (isOrderFinalizing) return;
+
     resetPaymentState();
     setStatus("idle");
     setNotice("Review your details, then proceed to payment again.");
-  }, [resetPaymentState]);
+  }, [isOrderFinalizing, resetPaymentState]);
 
   const handlePickupAcknowledgementChange = (event) => {
     const isChecked = Boolean(event.currentTarget.checked);
@@ -1004,27 +1140,28 @@ export default function Storefront({ products, inventory = {} }) {
   ]);
 
   const handlePaymentState = useCallback(
-    ({ status: nextStatus, message }) => {
+    ({ status: nextStatus, message, paymentIntentId }) => {
       if (nextStatus === "processing") {
         setStatus("submitting");
         setNotice(message || "Processing payment securely...");
         return;
       }
 
-      if (nextStatus === "success") {
-        trackAnalyticsEvent({
-          name: "payment_result",
-          sectionId: "shop",
-          elementId: "payment_submit",
-          checkoutStep: "payment",
-          metadata: {
-            result: "success"
-          }
-        });
-        setStatus("success");
-        setNotice(message || "Payment received. We will email fulfillment details shortly.");
-        triggerOrderSuccessPopup();
-        resetCheckoutAfterSuccess();
+      if (nextStatus === "finalizing") {
+        const normalizedPaymentIntentId = String(paymentIntentId || "").trim();
+        if (!normalizedPaymentIntentId) {
+          setStatus("pending_confirmation");
+          setNotice(ORDER_FINALIZE_PENDING_NOTICE);
+          return;
+        }
+
+        if (finalizingPaymentIntentRef.current === normalizedPaymentIntentId) {
+          return;
+        }
+
+        setStatus("finalizing");
+        setNotice(message || ORDER_FINALIZE_MESSAGE);
+        void finalizePaidOrder(normalizedPaymentIntentId);
         return;
       }
 
@@ -1041,11 +1178,13 @@ export default function Storefront({ products, inventory = {} }) {
       setStatus("error");
       setNotice(message || "Payment could not be completed.");
     },
-    [resetCheckoutAfterSuccess, triggerOrderSuccessPopup]
+    [finalizePaidOrder]
   );
 
   const handleSubmit = (event) => {
     event.preventDefault();
+
+    if (isOrderFinalizing) return;
 
     if (status === "submitting") return;
 
@@ -1194,7 +1333,7 @@ export default function Storefront({ products, inventory = {} }) {
                     Qty: {item.quantity}
                     {spiceProfile ? ` | ${spiceProfile}` : ""}
                   </span>
-                  {shouldDisplayStock ? (
+                  {shouldDisplayStock && item.hasInventoryRecord ? (
                     <span className="cart__split">
                       {item.inStockUnits} in stock | {item.preorderUnits} preorder
                     </span>
@@ -1357,17 +1496,16 @@ export default function Storefront({ products, inventory = {} }) {
       <div className="store">
         <div className="store__grid">
           {products.map((product) => {
-            const record = liveInventory[product.sku] || {
-              on_hand: 0,
-              preorders_remaining: 0,
-              units_sold: 0,
-              show_stock: true
-            };
-
-            const available = Math.max(0, Number(record.on_hand || 0));
-            const salesCount = Math.max(0, Number(record.units_sold || 0));
-            const isOut = available <= 0;
-            const isLowStock = !isOut && available <= 6;
+            const record = liveInventory?.[product.sku] || null;
+            const hasInventoryRecord = Boolean(record && typeof record === "object");
+            const available = hasInventoryRecord
+              ? Math.max(0, Number(record.on_hand || 0))
+              : Number.POSITIVE_INFINITY;
+            const salesCount = hasInventoryRecord
+              ? Math.max(0, Number(record.units_sold || 0))
+              : 0;
+            const isOut = hasInventoryRecord ? available <= 0 : false;
+            const isLowStock = hasInventoryRecord && !isOut && available <= 6;
             const isBestSeller = salesCount >= 120;
             const inventoryLabel = isOut
               ? "Sold Out"
@@ -1382,9 +1520,11 @@ export default function Storefront({ products, inventory = {} }) {
 
             const cartQty = cart[product.sku] || 0;
             const isAddPulseActive = Boolean(addPulse[product.sku]);
-            const cartPreorderUnits = Math.max(0, cartQty - available);
-            const nextPreorderUnits = Math.max(0, cartQty + 1 - available);
-            const wouldPreorder = nextPreorderUnits > 0;
+            const cartPreorderUnits = hasInventoryRecord ? Math.max(0, cartQty - available) : 0;
+            const nextPreorderUnits = hasInventoryRecord
+              ? Math.max(0, cartQty + 1 - available)
+              : 0;
+            const wouldPreorder = hasInventoryRecord && nextPreorderUnits > 0;
             const orderedSpecs = Array.isArray(product.specs)
               ? [...product.specs].sort((a, b) => {
                 const aIsIngredients = typeof a === "string"
@@ -1418,7 +1558,7 @@ export default function Storefront({ products, inventory = {} }) {
                     </div>
                     {shouldDisplayStock || isBestSeller ? (
                       <div className="product-card__badges">
-                        {shouldDisplayStock ? (
+                        {shouldDisplayStock && hasInventoryRecord ? (
                           <span className={inventoryClass}>{inventoryLabel}</span>
                         ) : null}
                         {isBestSeller ? (
@@ -1526,7 +1666,7 @@ export default function Storefront({ products, inventory = {} }) {
                 <h3>Your Cart</h3>
                 <span>{cartCountLabel}</span>
               </div>
-              {itemCount > 0 && !isPaymentStep ? (
+              {itemCount > 0 && !isPaymentStep && !isOrderFinalizing ? (
                 <button
                   type="button"
                   className="cart__clear"
@@ -1538,7 +1678,9 @@ export default function Storefront({ products, inventory = {} }) {
               ) : null}
             </div>
 
-            {renderCartDetails("desktop")}
+            {renderCartDetails("desktop", {
+              allowQuantityEdit: !isOrderFinalizing
+            })}
           </div>
 
           <form
@@ -1935,6 +2077,7 @@ export default function Storefront({ products, inventory = {} }) {
                   className="button button--light"
                   type="button"
                   onClick={handleBackToEdit}
+                  disabled={isOrderFinalizing}
                   data-analytics-id="checkout_back_to_edit"
                 >
                   Back to Edit Information
@@ -1943,9 +2086,9 @@ export default function Storefront({ products, inventory = {} }) {
                 <div className="payment-panel">
                   <h4>Secure Payment</h4>
                   <p>
-                    Card details are entered in Stripe secure fields and never stored on our
-                    servers. Your card will be charged {formatCurrency(subtotal)} today for this
-                    market pickup order.
+                    {isOrderFinalizing
+                      ? "Stripe has accepted your payment. We are now finalizing the order on the server before confirming completion."
+                      : `Card details are entered in Stripe secure fields and never stored on our servers. Your card will be charged ${formatCurrency(subtotal)} today for this market pickup order.`}
                   </p>
                   {stripePromise ? (
                     <Elements stripe={stripePromise}>
@@ -1953,6 +2096,7 @@ export default function Storefront({ products, inventory = {} }) {
                         onPaymentState={handlePaymentState}
                         grossTotalCents={subtotal}
                         createPaymentIntent={createPaymentIntent}
+                        isLocked={isOrderFinalizing}
                         billingDetails={{
                           name: formValues.name,
                           email: formValues.email,

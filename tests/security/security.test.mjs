@@ -143,7 +143,7 @@ const startServer = async (envOverrides = {}) => {
         }
       });
 
-      if (response.ok || response.status === 200 || response.status === 500) {
+      if (response.ok || response.status === 500 || response.status === 503) {
         return {
           child,
           output
@@ -353,6 +353,33 @@ test("security regression suite", { timeout: 300_000 }, async (t) => {
 
     assert.equal(response.status, 400);
     assert.match(JSON.stringify(json), /invalid/i);
+  });
+
+  await t.test("public order finalization rejects injection-shaped payment intent ids", async () => {
+    const { response, json } = await requestJson("/api/order/finalize", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        Origin: baseUrl
+      },
+      body: JSON.stringify({
+        paymentIntentId: "pi_123'; DROP TABLE orders;--"
+      })
+    });
+
+    assert.equal(response.status, 400);
+    assert.match(JSON.stringify(json), /invalid/i);
+  });
+
+  await t.test("public inventory route reports backend unavailability instead of empty stock", async () => {
+    const { response, json } = await requestJson("/api/inventory", {
+      headers: {
+        Origin: baseUrl
+      }
+    });
+
+    assert.equal(response.status, 503);
+    assert.match(String(json?.error || ""), /inventory/i);
   });
 
   await t.test("analytics ingest rejects unknown events and oversized batches before persistence", async () => {

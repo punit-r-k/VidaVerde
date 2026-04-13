@@ -1,7 +1,6 @@
 import { securePublicRoute } from "@/lib/apiSecurity";
 import { getRouteRateLimitConfig } from "@/lib/rateLimit";
-import { getShowStockSetting } from "@/lib/siteSettings";
-import { supabaseAdmin } from "@/lib/supabaseAdmin";
+import { getInventoryMap } from "@/lib/stock";
 
 const INVENTORY_RATE_LIMIT = getRouteRateLimitConfig("INVENTORY_GET", {
   windowMs: 60_000,
@@ -24,36 +23,19 @@ export async function GET(request) {
   }
 
   const { respond } = security;
+  const inventory = await getInventoryMap();
 
-  if (!supabaseAdmin) {
-    return respond.json({}, { headers: { "Cache-Control": "no-store" } });
+  if (!inventory) {
+    return respond.json(
+      { error: "Inventory is temporarily unavailable." },
+      {
+        status: 503,
+        headers: { "Cache-Control": "no-store" }
+      }
+    );
   }
 
-  const [{ data, error }, showStock] = await Promise.all([
-    supabaseAdmin
-      .from("inventory")
-      .select("sku, on_hand, preorders_remaining, units_sold, expected_restock_date"),
-    getShowStockSetting()
-  ]);
-
-  if (error) {
-    console.error("inventory read error:", error);
-    return respond.json({}, { headers: { "Cache-Control": "no-store" } });
-  }
-
-  const map = {};
-  for (const row of data || []) {
-    map[row.sku] = {
-      on_hand: row.on_hand ?? 0,
-      preorders_remaining: row.preorders_remaining ?? 0,
-      units_sold: row.units_sold ?? 0,
-      expected_restock_date: row.expected_restock_date || null,
-      status: row.on_hand > 0 ? "In Stock" : "Out of Stock",
-      show_stock: showStock
-    };
-  }
-
-  return respond.json(map, {
+  return respond.json(inventory, {
     headers: {
       "Cache-Control": "no-store"
     }
