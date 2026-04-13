@@ -1170,7 +1170,7 @@ export default function Storefront({ products, inventory = {} }) {
             className="form-field__error"
             role="alert"
           >
-            Please check this box to accept the pickup policy.
+            Please check this box to confirm payment is required to reserve pickup inventory and to accept the pickup policy.
           </span>
         ) : null}
       </div>
@@ -1244,15 +1244,15 @@ export default function Storefront({ products, inventory = {} }) {
         </div>
         <div>
           <span>Tax</span>
-          <strong>Calculated at checkout</strong>
+          <strong>$0.00</strong>
         </div>
         <div>
           <span>Shipping</span>
-          <strong>Calculated at checkout</strong>
+          <strong>$0.00</strong>
         </div>
         <div>
-          <span>Total</span>
-          <strong>Calculated at checkout</strong>
+          <span>Total due today</span>
+          <strong>{formatCurrency(subtotal)}</strong>
         </div>
       </div>
     </>
@@ -1944,7 +1944,8 @@ export default function Storefront({ products, inventory = {} }) {
                   <h4>Secure Payment</h4>
                   <p>
                     Card details are entered in Stripe secure fields and never stored on our
-                    servers.
+                    servers. Your card will be charged {formatCurrency(subtotal)} today for this
+                    market pickup order.
                   </p>
                   {stripePromise ? (
                     <Elements stripe={stripePromise}>
