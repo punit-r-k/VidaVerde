@@ -36,14 +36,14 @@ const scrollToSection = (sectionId) => {
     jumpNav instanceof HTMLElement
       ? Math.ceil(jumpNav.getBoundingClientRect().height)
       : 0;
-  const nextTop = Math.max(
-    window.scrollY + target.getBoundingClientRect().top - navOffset,
-    0
-  );
   const behavior = window.matchMedia("(prefers-reduced-motion: reduce)").matches
     ? "auto"
     : "smooth";
   const nextUrl = `${window.location.pathname}${window.location.search}#${sectionId}`;
+  const nextTop = Math.max(
+    window.scrollY + target.getBoundingClientRect().top - navOffset,
+    0
+  );
 
   if (window.location.hash !== `#${sectionId}`) {
     window.history.pushState(null, "", nextUrl);

@@ -467,6 +467,7 @@ export default async function Home() {
         </section>
 
         <div className="shop-market-divider" aria-hidden="true">
+          <span id="market" className="section-anchor section-anchor--market" />
           <RevealOnScroll
             className="shop-market-divider__reveal"
             preset="fade"
@@ -485,7 +486,6 @@ export default async function Home() {
         </div>
 
         <section
-          id="market"
           className="section section--compact section--line market"
           data-analytics-section="market"
         >

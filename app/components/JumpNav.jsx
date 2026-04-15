@@ -1,6 +1,6 @@
 "use client";
 
-import { useRef } from "react";
+import { useEffect, useRef } from "react";
 import SectionNavLink from "./SectionNavLink";
 
 const navItems = [
@@ -15,7 +15,44 @@ const navItems = [
 
 export default function JumpNav() {
   const navToggleId = "jump-nav-toggle";
+  const navRef = useRef(null);
   const navCheckboxRef = useRef(null);
+
+  useEffect(() => {
+    const nav = navRef.current;
+    if (!(nav instanceof HTMLElement)) {
+      return undefined;
+    }
+
+    const root = document.documentElement;
+    const syncOffset = () => {
+      root.style.setProperty(
+        "--section-nav-offset",
+        `${Math.ceil(nav.getBoundingClientRect().height)}px`
+      );
+    };
+
+    syncOffset();
+    window.addEventListener("resize", syncOffset);
+
+    if (typeof ResizeObserver !== "function") {
+      return () => {
+        window.removeEventListener("resize", syncOffset);
+        root.style.removeProperty("--section-nav-offset");
+      };
+    }
+
+    const resizeObserver = new ResizeObserver(() => {
+      syncOffset();
+    });
+    resizeObserver.observe(nav);
+
+    return () => {
+      resizeObserver.disconnect();
+      window.removeEventListener("resize", syncOffset);
+      root.style.removeProperty("--section-nav-offset");
+    };
+  }, []);
 
   const collapseMenu = () => {
     if (navCheckboxRef.current) {
@@ -24,7 +61,7 @@ export default function JumpNav() {
   };
 
   return (
-    <nav className="jump-nav" aria-label="Page section navigation">
+    <nav className="jump-nav" aria-label="Page section navigation" ref={navRef}>
       <input
         type="checkbox"
         id={navToggleId}

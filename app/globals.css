@@ -54,7 +54,6 @@
 
 html {
   overflow-x: hidden;
-  scroll-padding-top: var(--section-nav-offset);
 }
 
 body {
@@ -627,12 +626,25 @@ img {
 }
 
 .shop-market-divider {
+  position: relative;
   display: flex;
   justify-content: center;
   align-items: center;
   padding: 0;
   background: linear-gradient(to bottom, var(--surface) 0 44%, var(--brand-dark) 44% 100%);
   overflow: hidden;
+}
+
+.section-anchor {
+  position: absolute;
+  left: 0;
+  width: 1px;
+  height: 1px;
+  pointer-events: none;
+}
+
+.section-anchor--market {
+  top: 44%;
 }
 
 .shop-market-divider__reveal {
