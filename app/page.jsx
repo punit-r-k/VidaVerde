@@ -466,6 +466,24 @@ export default async function Home() {
           <Storefront products={products} inventory={inventory} />
         </section>
 
+        <div className="shop-market-divider" aria-hidden="true">
+          <RevealOnScroll
+            className="shop-market-divider__reveal"
+            preset="fade"
+            duration={0.42}
+            amount={0.08}
+          >
+            <Image
+              src="/storefront-vines.svg"
+              alt=""
+              width={2647}
+              height={305}
+              sizes="100vw"
+              className="shop-market-divider__img"
+            />
+          </RevealOnScroll>
+        </div>
+
         <section
           id="market"
           className="section section--compact section--line market"
