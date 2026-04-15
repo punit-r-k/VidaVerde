@@ -69,6 +69,9 @@ export default function SiteFooter({ showMarketSchedule = true }) {
         <Link className="footer__link" href="/privacy-policy">
           Privacy Policy
         </Link>
+        <Link className="footer__link" href="/accessibility-statement">
+          Accessibility Statement
+        </Link>
       </div>
     </footer>
   );

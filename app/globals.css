@@ -2501,6 +2501,15 @@ select:focus {
   font-weight: 600;
 }
 
+.accessibility-statement__disclaimer {
+  white-space: normal;
+  text-wrap: pretty;
+}
+
+.accessibility-statement__disclaimer > span {
+  white-space: normal;
+}
+
 .policy-contact {
   background: var(--brand-dark);
   color: var(--white);
