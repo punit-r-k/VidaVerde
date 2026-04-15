@@ -285,7 +285,7 @@ export default async function Home() {
 
       <JumpNav />
 
-      <main>
+      <main id="main-content">
         {showProofSection ? (
           <section id="proof" className="section section--tight section--line signals">
             <RevealOnScroll className="signals__shell" preset="softScale">

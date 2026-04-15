@@ -1614,7 +1614,13 @@ export default function Storefront({ products, inventory = null }) {
                           className={`button button--dark${isAddPulseActive ? " button--add-pulse" : ""}`}
                           type="button"
                           onClick={() => handleAdd(product)}
-                          aria-label={`Add ${product.name} to cart`}
+                          aria-label={
+                            isOut
+                              ? `Preorder ${product.name}`
+                              : wouldPreorder
+                                ? `Add as Pre-order ${product.name}`
+                                : `Add To Cart ${product.name}`
+                          }
                           data-analytics-id={`product_add_${product.sku.toLowerCase()}`}
                           data-analytics-hover="true"
                         >
@@ -1779,9 +1785,6 @@ export default function Storefront({ products, inventory = null }) {
                     <div
                       ref={setFieldRef("fulfillment")}
                       className="form-field__readonly"
-                      tabIndex={-1}
-                      role="textbox"
-                      aria-readonly="true"
                     >
                       {MARKET_PICKUP_LABEL}
                     </div>

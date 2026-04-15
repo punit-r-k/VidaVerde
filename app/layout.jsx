@@ -29,6 +29,9 @@ export default function RootLayout({ children }) {
   return (
     <html lang="en" className={`${fraunces.variable} ${sora.variable}`}>
       <body>
+        <a className="skip-link" href="#main-content">
+          Skip to main content
+        </a>
         <Suspense fallback={null}>
           <AnalyticsRuntime />
         </Suspense>

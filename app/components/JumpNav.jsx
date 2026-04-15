@@ -1,22 +1,23 @@
 "use client";
 
-import { useEffect, useRef } from "react";
+import { useEffect, useId, useRef, useState } from "react";
 import SectionNavLink from "./SectionNavLink";
 
 const navItems = [
   // Archived section:
   // { href: "#proof", label: "Proof" },
   { href: "#voices", label: "Reviews" },
-  { href: "#founder", label: "Our Story" },
-  { href: "#wellness", label: "Why Live Fermented Foods Matter" },
+  { href: "#wellness", label: "Why Ferments Matter" },
   { href: "#shop", label: "Shop" },
+  { href: "#market", label: "Pickup" },
+  { href: "#founder", label: "Our Story" },
   { href: "#faq", label: "FAQ" }
 ];
 
 export default function JumpNav() {
-  const navToggleId = "jump-nav-toggle";
+  const navLinksId = useId();
   const navRef = useRef(null);
-  const navCheckboxRef = useRef(null);
+  const [isOpen, setIsOpen] = useState(false);
 
   useEffect(() => {
     const nav = navRef.current;
@@ -54,23 +55,39 @@ export default function JumpNav() {
     };
   }, []);
 
-  const collapseMenu = () => {
-    if (navCheckboxRef.current) {
-      navCheckboxRef.current.checked = false;
+  useEffect(() => {
+    if (!isOpen) {
+      return undefined;
     }
+
+    const handleKeyDown = (event) => {
+      if (event.key === "Escape") {
+        setIsOpen(false);
+      }
+    };
+
+    window.addEventListener("keydown", handleKeyDown);
+    return () => {
+      window.removeEventListener("keydown", handleKeyDown);
+    };
+  }, [isOpen]);
+
+  const collapseMenu = () => {
+    setIsOpen(false);
   };
 
   return (
-    <nav className="jump-nav" aria-label="Page section navigation" ref={navRef}>
-      <input
-        type="checkbox"
-        id={navToggleId}
-        className="jump-nav__checkbox"
-        ref={navCheckboxRef}
-      />
-      <label
-        htmlFor={navToggleId}
+    <nav
+      className={`jump-nav${isOpen ? " is-open" : ""}`}
+      aria-label="Page section navigation"
+      ref={navRef}
+    >
+      <button
+        type="button"
         className="jump-nav__toggle"
+        aria-expanded={isOpen}
+        aria-controls={navLinksId}
+        onClick={() => setIsOpen((open) => !open)}
       >
         Menu
         <span className="jump-nav__toggle-icon" aria-hidden="true">
@@ -78,13 +95,14 @@ export default function JumpNav() {
           <span></span>
           <span></span>
         </span>
-      </label>
-      <label
-        htmlFor={navToggleId}
+      </button>
+      <button
+        type="button"
         className="jump-nav__backdrop"
-        aria-hidden="true"
+        aria-label="Close section navigation"
+        onClick={collapseMenu}
       />
-      <div className="jump-nav__links">
+      <div className="jump-nav__links" id={navLinksId}>
         {navItems.map((item) => (
           <SectionNavLink
             key={item.href}

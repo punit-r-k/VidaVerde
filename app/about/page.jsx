@@ -69,7 +69,7 @@ export default function AboutPage() {
         </div>
       </header>
 
-      <main>
+      <main id="main-content">
       </main>
 
       <SiteFooter showMarketSchedule={false} />

@@ -149,7 +149,7 @@ export default function PrivacyPolicyPage() {
         </div>
       </header>
 
-      <main data-analytics-section="privacy_policy">
+      <main id="main-content" data-analytics-section="privacy_policy">
         <section className="section section--compact policy-overview">
           <RevealOnScroll className="section__intro">
             <p className="eyebrow">Overview</p>

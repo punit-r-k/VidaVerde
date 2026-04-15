@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import Image from "next/image";
 import { trackAnalyticsEvent } from "@/lib/analytics";
 
@@ -16,6 +16,9 @@ export default function EmailListPopup() {
   const [submitted, setSubmitted] = useState(false);
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [errorMessage, setErrorMessage] = useState("");
+  const dialogRef = useRef(null);
+  const emailInputRef = useRef(null);
+  const lastFocusedElementRef = useRef(null);
 
   useEffect(() => {
     const wasDismissed = window.localStorage.getItem(DISMISS_KEY);
@@ -30,6 +33,7 @@ export default function EmailListPopup() {
 
   const closePopup = useCallback((reason = "dismiss") => {
     window.localStorage.setItem(DISMISS_KEY, "1");
+    const lastFocusedElement = lastFocusedElementRef.current;
     if (reason !== "success") {
       trackAnalyticsEvent({
         name: "email_popup_dismiss",
@@ -42,10 +46,15 @@ export default function EmailListPopup() {
       });
     }
     setOpen(false);
+    window.requestAnimationFrame(() => {
+      if (lastFocusedElement instanceof HTMLElement && lastFocusedElement.isConnected) {
+        lastFocusedElement.focus();
+      }
+    });
   }, []);
 
   useEffect(() => {
-    if (!open) return;
+    if (!open) return undefined;
 
     trackAnalyticsEvent({
       name: "email_popup_open",
@@ -56,15 +65,68 @@ export default function EmailListPopup() {
       }
     });
 
+    lastFocusedElementRef.current =
+      document.activeElement instanceof HTMLElement ? document.activeElement : null;
+
     const previousOverflow = document.body.style.overflow;
+    const dialog = dialogRef.current;
+
+    const getFocusableElements = () => {
+      if (!(dialog instanceof HTMLElement)) {
+        return [];
+      }
+
+      return Array.from(
+        dialog.querySelectorAll(
+          'button:not([disabled]), [href], input:not([disabled]), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex="-1"])'
+        )
+      ).filter(
+        (element) =>
+          element instanceof HTMLElement &&
+          !element.hasAttribute("hidden") &&
+          element.getAttribute("aria-hidden") !== "true" &&
+          element.getClientRects().length > 0
+      );
+    };
+
     const onEscape = (event) => {
       if (event.key === "Escape") {
         closePopup("escape");
+        return;
+      }
+
+      if (event.key !== "Tab") {
+        return;
+      }
+
+      const focusableElements = getFocusableElements();
+      if (!focusableElements.length) {
+        event.preventDefault();
+        if (dialog instanceof HTMLElement) {
+          dialog.focus();
+        }
+        return;
+      }
+
+      const firstFocusable = focusableElements[0];
+      const lastFocusable = focusableElements[focusableElements.length - 1];
+
+      if (event.shiftKey && document.activeElement === firstFocusable) {
+        event.preventDefault();
+        lastFocusable.focus();
+      } else if (!event.shiftKey && document.activeElement === lastFocusable) {
+        event.preventDefault();
+        firstFocusable.focus();
       }
     };
 
     document.body.style.overflow = "hidden";
     window.addEventListener("keydown", onEscape);
+    window.requestAnimationFrame(() => {
+      if (emailInputRef.current instanceof HTMLElement) {
+        emailInputRef.current.focus();
+      }
+    });
 
     return () => {
       document.body.style.overflow = previousOverflow;
@@ -157,6 +219,8 @@ export default function EmailListPopup() {
         role="dialog"
         aria-modal="true"
         aria-labelledby="email-popup-title"
+        ref={dialogRef}
+        tabIndex={-1}
         onClick={(event) => event.stopPropagation()}
         data-analytics-id="email_popup_dialog"
         data-analytics-hover="true"
@@ -186,6 +250,7 @@ export default function EmailListPopup() {
             <input
               id="popup-email"
               type="email"
+              ref={emailInputRef}
               value={email}
               onChange={(event) => {
                 setEmail(event.target.value);

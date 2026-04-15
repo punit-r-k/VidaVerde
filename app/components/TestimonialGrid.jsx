@@ -86,9 +86,12 @@ export default function TestimonialGrid({ testimonials = [] }) {
     canScrollPrev: false,
     canScrollNext: false
   });
+  const modalPanelRef = useRef(null);
+  const modalCloseButtonRef = useRef(null);
   const modalReviewRef = useRef(null);
   const modalTouchStateRef = useRef(null);
   const trackTouchStateRef = useRef(null);
+  const lastFocusedElementRef = useRef(null);
   const activeReview =
     activeIndex === null ? null : testimonials[activeIndex] || null;
 
@@ -213,7 +216,13 @@ export default function TestimonialGrid({ testimonials = [] }) {
     syncPaginationState(track.scrollLeft);
   }, [getNearestTrackIndex, syncPaginationState]);
 
-  const openReview = useCallback((index) => {
+  const openReview = useCallback((index, triggerElement) => {
+    lastFocusedElementRef.current =
+      triggerElement instanceof HTMLElement
+        ? triggerElement
+        : document.activeElement instanceof HTMLElement
+          ? document.activeElement
+          : null;
     setActiveIndex(index);
     trackAnalyticsEvent({
       name: "testimonial_open",
@@ -227,6 +236,12 @@ export default function TestimonialGrid({ testimonials = [] }) {
 
   const closeReview = useCallback(() => {
     setActiveIndex(null);
+    const lastFocusedElement = lastFocusedElementRef.current;
+    window.requestAnimationFrame(() => {
+      if (lastFocusedElement instanceof HTMLElement && lastFocusedElement.isConnected) {
+        lastFocusedElement.focus();
+      }
+    });
   }, []);
 
   const showPrevious = useCallback(() => {
@@ -274,6 +289,28 @@ export default function TestimonialGrid({ testimonials = [] }) {
   useEffect(() => {
     if (activeIndex === null) return undefined;
 
+    const previousOverflow = document.body.style.overflow;
+    document.body.style.overflow = "hidden";
+
+    const panel = modalPanelRef.current;
+    const getFocusableElements = () => {
+      if (!(panel instanceof HTMLElement)) {
+        return [];
+      }
+
+      return Array.from(
+        panel.querySelectorAll(
+          'button:not([disabled]), [href], input:not([disabled]), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex="-1"])'
+        )
+      ).filter(
+        (element) =>
+          element instanceof HTMLElement &&
+          !element.hasAttribute("hidden") &&
+          element.getAttribute("aria-hidden") !== "true" &&
+          element.getClientRects().length > 0
+      );
+    };
+
     const handleKeyDown = (event) => {
       if (event.key === "Escape") {
         closeReview();
@@ -281,12 +318,38 @@ export default function TestimonialGrid({ testimonials = [] }) {
         showPrevious();
       } else if (event.key === "ArrowRight") {
         showNext();
+      } else if (event.key === "Tab") {
+        const focusableElements = getFocusableElements();
+        if (!focusableElements.length) {
+          event.preventDefault();
+          if (panel instanceof HTMLElement) {
+            panel.focus();
+          }
+          return;
+        }
+
+        const firstFocusable = focusableElements[0];
+        const lastFocusable = focusableElements[focusableElements.length - 1];
+
+        if (event.shiftKey && document.activeElement === firstFocusable) {
+          event.preventDefault();
+          lastFocusable.focus();
+        } else if (!event.shiftKey && document.activeElement === lastFocusable) {
+          event.preventDefault();
+          firstFocusable.focus();
+        }
       }
     };
 
     window.addEventListener("keydown", handleKeyDown);
+    window.requestAnimationFrame(() => {
+      if (modalCloseButtonRef.current instanceof HTMLElement) {
+        modalCloseButtonRef.current.focus();
+      }
+    });
 
     return () => {
+      document.body.style.overflow = previousOverflow;
       window.removeEventListener("keydown", handleKeyDown);
     };
   }, [activeIndex, closeReview, showPrevious, showNext]);
@@ -629,7 +692,7 @@ export default function TestimonialGrid({ testimonials = [] }) {
                     type="button"
                     aria-haspopup="dialog"
                     aria-label={`Read full review from ${item.name}`}
-                    onClick={() => openReview(index)}
+                    onClick={(event) => openReview(index, event.currentTarget)}
                     data-analytics-id={`testimonial_open_${index + 1}`}
                   >
                     Read more
@@ -679,9 +742,14 @@ export default function TestimonialGrid({ testimonials = [] }) {
         <div
           className="voices-modal"
           role="dialog"
+          aria-modal="true"
           aria-labelledby={`testimonial-title-${activeIndex}`}
         >
-          <div className="voices-modal__panel">
+          <div
+            className="voices-modal__panel"
+            ref={modalPanelRef}
+            tabIndex={-1}
+          >
             <div className="voices-modal__topbar">
               <div className="voices-modal__topbar-actions">
                 <button
@@ -705,6 +773,7 @@ export default function TestimonialGrid({ testimonials = [] }) {
                 <button
                   className="voices-modal__close"
                   type="button"
+                  ref={modalCloseButtonRef}
                   onClick={closeReview}
                   aria-label={`Close review from ${activeReview.name}`}
                 >
