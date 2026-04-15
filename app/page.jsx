@@ -471,7 +471,8 @@ export default async function Home() {
           <RevealOnScroll
             className="shop-market-divider__reveal"
             preset="fade"
-            duration={0.42}
+            delay={0.22}
+            duration={0.68}
             amount={0.08}
           >
             <Image
@@ -479,6 +480,7 @@ export default async function Home() {
               alt=""
               width={2647}
               height={305}
+              loading="eager"
               sizes="100vw"
               className="shop-market-divider__img"
             />
