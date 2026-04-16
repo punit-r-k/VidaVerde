@@ -5,6 +5,7 @@ import { useSearchParams } from "next/navigation";
 import { CardElement, Elements, useElements, useStripe } from "@stripe/react-stripe-js";
 import { loadStripe } from "@stripe/stripe-js";
 import { trackAnalyticsEvent } from "@/lib/analytics";
+import { lockPageScroll, unlockPageScroll } from "@/lib/scrollLock";
 import {
   FORM_FIELD_ORDER,
   INITIAL_FORM_VALUES,
@@ -20,7 +21,8 @@ import {
   MARKET_PICKUP_ACKNOWLEDGEMENT_LABEL,
   MARKET_PICKUP_ACKNOWLEDGEMENT_NOTICE,
   MARKET_PICKUP_LABEL,
-  MARKET_PICKUP_NOTE_LINES
+  MARKET_PICKUP_NOTE_LINES,
+  MARKET_PICKUP_POLICY_ITEMS
 } from "@/lib/pickupDetails";
 
 const formatCurrency = (amountInCents) => {
@@ -292,6 +294,7 @@ export default function Storefront({ products, inventory = null }) {
   const [pickupTouched, setPickupTouched] = useState(false);
   const [preorderAcknowledged, setPreorderAcknowledged] = useState(false);
   const [preorderTouched, setPreorderTouched] = useState(false);
+  const [showPickupPolicyModal, setShowPickupPolicyModal] = useState(false);
   const fieldRefs = useRef({});
   const addPulseTimeoutsRef = useRef({});
   const orderSuccessPopupTimeoutRef = useRef(null);
@@ -300,6 +303,8 @@ export default function Storefront({ products, inventory = null }) {
   const previousCheckoutStepRef = useRef("details");
   const cartSummarySeenRef = useRef(false);
   const finalizingPaymentIntentRef = useRef("");
+  const pickupPolicyDialogRef = useRef(null);
+  const pickupPolicyLastFocusedRef = useRef(null);
   const isPaymentStep = checkoutStep === "payment";
   const isOrderFinalizing =
     status === "finalizing" || status === "pending_confirmation";
@@ -477,6 +482,38 @@ export default function Storefront({ products, inventory = null }) {
     node.scrollIntoView({ behavior: "smooth", block: "center" });
   }, []);
 
+  const openPickupPolicyModal = useCallback(() => {
+    trackAnalyticsEvent({
+      name: "checkout_pickup_policy_open",
+      sectionId: "shop",
+      elementId: "checkout_pickup_policy_dialog",
+      checkoutStep,
+      metadata: {
+        source: "pickup_acknowledgement"
+      }
+    });
+    setShowPickupPolicyModal(true);
+  }, [checkoutStep]);
+
+  const closePickupPolicyModal = useCallback((reason = "dismiss") => {
+    trackAnalyticsEvent({
+      name: "checkout_pickup_policy_close",
+      sectionId: "shop",
+      elementId: "checkout_pickup_policy_dialog",
+      checkoutStep,
+      metadata: {
+        reason
+      }
+    });
+    setShowPickupPolicyModal(false);
+    window.requestAnimationFrame(() => {
+      const lastFocusedElement = pickupPolicyLastFocusedRef.current;
+      if (lastFocusedElement instanceof HTMLElement && lastFocusedElement.isConnected) {
+        lastFocusedElement.focus();
+      }
+    });
+  }, [checkoutStep]);
+
   const getFieldError = useCallback((name) => {
     const hasError = Boolean(fieldErrors[name]);
     const shouldShow = submitAttempted || touchedFields[name];
@@ -532,6 +569,80 @@ export default function Storefront({ products, inventory = null }) {
   useEffect(() => {
     applyInventory(inventory);
   }, [inventory]);
+
+  useEffect(() => {
+    if (!showPickupPolicyModal) return undefined;
+
+    pickupPolicyLastFocusedRef.current =
+      document.activeElement instanceof HTMLElement ? document.activeElement : null;
+
+    const dialog = pickupPolicyDialogRef.current;
+
+    const getFocusableElements = () => {
+      if (!(dialog instanceof HTMLElement)) {
+        return [];
+      }
+
+      return Array.from(
+        dialog.querySelectorAll(
+          'button:not([disabled]), [href], input:not([disabled]), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex="-1"])'
+        )
+      ).filter(
+        (element) =>
+          element instanceof HTMLElement &&
+          !element.hasAttribute("hidden") &&
+          element.getAttribute("aria-hidden") !== "true" &&
+          element.getClientRects().length > 0
+      );
+    };
+
+    const handleKeyDown = (event) => {
+      if (event.key === "Escape") {
+        closePickupPolicyModal("escape");
+        return;
+      }
+
+      if (event.key !== "Tab") {
+        return;
+      }
+
+      const focusableElements = getFocusableElements();
+      if (!focusableElements.length) {
+        event.preventDefault();
+        if (dialog instanceof HTMLElement) {
+          dialog.focus();
+        }
+        return;
+      }
+
+      const firstFocusable = focusableElements[0];
+      const lastFocusable = focusableElements[focusableElements.length - 1];
+
+      if (event.shiftKey && document.activeElement === firstFocusable) {
+        event.preventDefault();
+        lastFocusable.focus();
+      } else if (!event.shiftKey && document.activeElement === lastFocusable) {
+        event.preventDefault();
+        firstFocusable.focus();
+      }
+    };
+
+    lockPageScroll();
+    window.addEventListener("keydown", handleKeyDown);
+    window.requestAnimationFrame(() => {
+      const focusableElements = getFocusableElements();
+      if (focusableElements[0] instanceof HTMLElement) {
+        focusableElements[0].focus();
+      } else if (dialog instanceof HTMLElement) {
+        dialog.focus();
+      }
+    });
+
+    return () => {
+      unlockPageScroll();
+      window.removeEventListener("keydown", handleKeyDown);
+    };
+  }, [closePickupPolicyModal, showPickupPolicyModal]);
 
   useEffect(() => {
     return () => {
@@ -1303,6 +1414,18 @@ export default function Storefront({ products, inventory = null }) {
           <span>{MARKET_PICKUP_ACKNOWLEDGEMENT_LABEL}</span>
         </label>
         <p className="preorder-acknowledgement__notice">{MARKET_PICKUP_ACKNOWLEDGEMENT_NOTICE}</p>
+        <div className="preorder-acknowledgement__actions">
+          <button
+            type="button"
+            className="button preorder-acknowledgement__policy-button"
+            onClick={openPickupPolicyModal}
+            aria-haspopup="dialog"
+            data-analytics-id="checkout_pickup_policy_open"
+            data-analytics-type="checkout-policy"
+          >
+            View Pickup Policy
+          </button>
+        </div>
         {pickupAcknowledgementError ? (
           <span
             id="pickup-acknowledgement-error"
@@ -2137,6 +2260,53 @@ export default function Storefront({ products, inventory = null }) {
           </form>
         </aside>
       </div>
+
+      {showPickupPolicyModal ? (
+        <div
+          className="pickup-policy-modal"
+          onClick={() => closePickupPolicyModal("overlay")}
+        >
+          <div
+            className="pickup-policy-modal__panel"
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="pickup-policy-modal-title"
+            aria-describedby="pickup-policy-modal-intro"
+            ref={pickupPolicyDialogRef}
+            tabIndex={-1}
+            onClick={(event) => event.stopPropagation()}
+            data-analytics-id="checkout_pickup_policy_dialog"
+            data-analytics-hover="true"
+          >
+            <div className="pickup-policy-modal__topbar">
+              <div className="pickup-policy-modal__heading">
+                <p className="pickup-policy-modal__eyebrow">Pickup Policy</p>
+                <h3 id="pickup-policy-modal-title">Review before payment</h3>
+                <p id="pickup-policy-modal-intro" className="pickup-policy-modal__intro">
+                  {MARKET_PICKUP_ACKNOWLEDGEMENT_NOTICE}
+                </p>
+              </div>
+              <button
+                type="button"
+                className="pickup-policy-modal__close"
+                onClick={() => closePickupPolicyModal("close_button")}
+                aria-label="Close pickup policy"
+              >
+                Close
+              </button>
+            </div>
+
+            <div className="pickup-policy-modal__grid">
+              {MARKET_PICKUP_POLICY_ITEMS.map((item) => (
+                <article key={item.label} className="pickup-policy-modal__item">
+                  <strong>{item.label}</strong>
+                  <p>{item.body}</p>
+                </article>
+              ))}
+            </div>
+          </div>
+        </div>
+      ) : null}
     </>
   );
 }

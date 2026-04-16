@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useRef, useState } from "react";
 import { trackAnalyticsEvent } from "@/lib/analytics";
+import { lockPageScroll, unlockPageScroll } from "@/lib/scrollLock";
 
 const AUTO_SCROLL_INTERVAL_MS = 7000;
 const MOBILE_BREAKPOINT_QUERY = "(max-width: 900px)";
@@ -289,8 +290,7 @@ export default function TestimonialGrid({ testimonials = [] }) {
   useEffect(() => {
     if (activeIndex === null) return undefined;
 
-    const previousOverflow = document.body.style.overflow;
-    document.body.style.overflow = "hidden";
+    lockPageScroll();
 
     const panel = modalPanelRef.current;
     const getFocusableElements = () => {
@@ -349,7 +349,7 @@ export default function TestimonialGrid({ testimonials = [] }) {
     });
 
     return () => {
-      document.body.style.overflow = previousOverflow;
+      unlockPageScroll();
       window.removeEventListener("keydown", handleKeyDown);
     };
   }, [activeIndex, closeReview, showPrevious, showNext]);

@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import Image from "next/image";
 import { trackAnalyticsEvent } from "@/lib/analytics";
+import { lockPageScroll, unlockPageScroll } from "@/lib/scrollLock";
 
 const DISMISS_KEY = "vidaverde-email-popup-dismissed-v1";
 const OPEN_DELAY_MS = 1200;
@@ -68,7 +69,6 @@ export default function EmailListPopup() {
     lastFocusedElementRef.current =
       document.activeElement instanceof HTMLElement ? document.activeElement : null;
 
-    const previousOverflow = document.body.style.overflow;
     const dialog = dialogRef.current;
 
     const getFocusableElements = () => {
@@ -120,7 +120,7 @@ export default function EmailListPopup() {
       }
     };
 
-    document.body.style.overflow = "hidden";
+    lockPageScroll();
     window.addEventListener("keydown", onEscape);
     window.requestAnimationFrame(() => {
       if (emailInputRef.current instanceof HTMLElement) {
@@ -129,7 +129,7 @@ export default function EmailListPopup() {
     });
 
     return () => {
-      document.body.style.overflow = previousOverflow;
+      unlockPageScroll();
       window.removeEventListener("keydown", onEscape);
     };
   }, [closePopup, open]);
