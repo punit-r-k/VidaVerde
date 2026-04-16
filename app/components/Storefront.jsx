@@ -76,12 +76,12 @@ const getSpiceProfile = (profile) => {
 
 const splitDescription = (description) => {
   if (typeof description !== "string") {
-    return { lead: "", benefit: "", details: [] };
+    return { lead: "", benefit: "", pairings: [] };
   }
 
   const trimmed = description.trim();
   if (!trimmed) {
-    return { lead: "", benefit: "", details: [] };
+    return { lead: "", benefit: "", pairings: [] };
   }
 
   const sentences = trimmed.match(/[^.!?]+[.!?]/g) || [trimmed];
@@ -96,7 +96,7 @@ const splitDescription = (description) => {
   return {
     lead: normalized[0] || "",
     benefit,
-    details: nextDetails
+    pairings: nextDetails
   };
 };
 
@@ -296,6 +296,7 @@ export default function Storefront({ products, inventory = null }) {
   const [preorderAcknowledged, setPreorderAcknowledged] = useState(false);
   const [preorderTouched, setPreorderTouched] = useState(false);
   const [showPickupPolicyModal, setShowPickupPolicyModal] = useState(false);
+  const [openPairings, setOpenPairings] = useState({});
   const fieldRefs = useRef({});
   const addPulseTimeoutsRef = useRef({});
   const orderSuccessPopupTimeoutRef = useRef(null);
@@ -880,6 +881,13 @@ export default function Storefront({ products, inventory = null }) {
     cartSummary.scrollIntoView({ behavior: "smooth", block: "start" });
   }, [itemCount, subtotal]);
 
+  const handlePairingsToggle = useCallback((sku) => {
+    setOpenPairings((prev) => ({
+      ...prev,
+      [sku]: !prev[sku]
+    }));
+  }, []);
+
   const buildOrderPayload = useCallback(() => {
     return {
       fulfillment: normalizeFulfillment(fulfillment),
@@ -1440,6 +1448,63 @@ export default function Storefront({ products, inventory = null }) {
     );
   };
 
+  const renderPreorderAcknowledgement = () => {
+    if (!hasPreorderItems) return null;
+
+    return (
+      <div className={`preorder-acknowledgement-wrap${
+        preorderAcknowledgementError ? " preorder-acknowledgement-wrap--error" : ""
+      }`}>
+        <label className="preorder-acknowledgement">
+          <input
+            ref={setFieldRef("preorderAcknowledgement")}
+            type="checkbox"
+            name="preorderAcknowledgement"
+            checked={preorderAcknowledged}
+            onChange={handlePreorderAcknowledgementChange}
+            onBlur={() => setPreorderTouched(true)}
+            aria-invalid={preorderAcknowledgementError}
+            aria-describedby={
+              preorderAcknowledgementError
+                ? "preorder-acknowledgement-error"
+                : undefined
+            }
+            required
+          />
+          <span>{PREORDER_ACKNOWLEDGEMENT_LABEL}</span>
+        </label>
+        <p className="preorder-acknowledgement__notice">{PREORDER_TIMING_NOTICE}</p>
+        {preorderAcknowledgementError ? (
+          <span
+            id="preorder-acknowledgement-error"
+            className="form-field__error"
+            role="alert"
+          >
+            Please check this box to acknowledge preorder timing.
+          </span>
+        ) : null}
+      </div>
+    );
+  };
+
+  const renderCheckoutAcknowledgements = () => {
+    const pickupAcknowledgement = renderPickupAcknowledgement();
+    const preorderAcknowledgement = renderPreorderAcknowledgement();
+
+    if (!pickupAcknowledgement && !preorderAcknowledgement) return null;
+
+    return (
+      <div className={`checkout-acknowledgements${
+        pickupAcknowledgement && preorderAcknowledgement
+          ? " checkout-acknowledgements--double"
+          : ""
+      }`}>
+        {pickupAcknowledgement}
+        {preorderAcknowledgement}
+      </div>
+    );
+  };
+
   const renderCartDetails = (keyPrefix, { allowQuantityEdit = true } = {}) => (
     <>
       {cartItems.length === 0 ? (
@@ -1662,6 +1727,9 @@ export default function Storefront({ products, inventory = null }) {
               : [];
             const descriptionParts = splitDescription(product.description);
             const spiceProfile = getSpiceProfile(product.profile);
+            const isPairingsOpen = Boolean(openPairings[product.sku]);
+            const pairingsId = `product-pairings-${sanitizeFieldName(product.sku)}`;
+            const pairingsButtonId = `${pairingsId}-toggle`;
 
             return (
               <article
@@ -1713,12 +1781,34 @@ export default function Storefront({ products, inventory = null }) {
                     {descriptionParts.benefit ? (
                       <p className="product-card__benefit">{descriptionParts.benefit}</p>
                     ) : null}
-                    {descriptionParts.details.length > 0 ? (
-                      <ul className="product-card__description-list">
-                        {descriptionParts.details.map((detail, index) => (
-                          <li key={`${product.sku}-desc-${index}`}>{detail}</li>
-                        ))}
-                      </ul>
+                    {descriptionParts.pairings.length > 0 ? (
+                      <div className={`product-card__pairings${
+                        isPairingsOpen ? " product-card__pairings--open" : ""
+                      }`}>
+                        <button
+                          type="button"
+                          id={pairingsButtonId}
+                          className="product-card__pairings-toggle"
+                          aria-expanded={isPairingsOpen}
+                          aria-controls={pairingsId}
+                          onClick={() => handlePairingsToggle(product.sku)}
+                        >
+                          View Pairings
+                        </button>
+                        <div
+                          id={pairingsId}
+                          className="product-card__pairings-panel"
+                          role="region"
+                          aria-labelledby={pairingsButtonId}
+                          aria-hidden={!isPairingsOpen}
+                        >
+                          <ul className="product-card__pairings-list">
+                            {descriptionParts.pairings.map((detail, index) => (
+                              <li key={`${product.sku}-desc-${index}`}>{detail}</li>
+                            ))}
+                          </ul>
+                        </div>
+                      </div>
                     ) : null}
                   </div>
 
@@ -1815,7 +1905,7 @@ export default function Storefront({ products, inventory = null }) {
 
           <form
             id="checkout-form"
-            className="order-form"
+            className="order-form store__checkout"
             onSubmit={handleSubmit}
             onFocusCapture={handleAnalyticsFieldFocus}
             noValidate
@@ -2054,64 +2144,47 @@ export default function Storefront({ products, inventory = null }) {
                     </label>
                   </>
                 ) : (
-                  <div className="market-note">
-                    <strong>{MARKET_PICKUP_LABEL}</strong>
-                    <ul>
-                      {MARKET_PICKUP_NOTE_LINES.map((line) => (
-                        <li key={line}>{line}</li>
-                      ))}
-                    </ul>
+                  <div className="form__row form__row--note-market">
+                    <label className="form__row-label form__row-label--note-market" htmlFor="order-note">
+                      Order note
+                    </label>
+                    <textarea
+                      id="order-note"
+                      ref={setFieldRef("note")}
+                      name="note"
+                      value={formValues.note}
+                      rows={3}
+                      className="form__note-market-textarea"
+                      placeholder="Dietary notes or pickup timing."
+                      onChange={handleFieldChange}
+                    ></textarea>
+
+                    <div className="market-note">
+                      <strong>{MARKET_PICKUP_LABEL}</strong>
+                      <ul>
+                        {MARKET_PICKUP_NOTE_LINES.map((line) => (
+                          <li key={line}>{line}</li>
+                        ))}
+                      </ul>
+                    </div>
                   </div>
                 )}
 
-                <label className="form-field">
-                  Order note
-                  <textarea
-                    ref={setFieldRef("note")}
-                    name="note"
-                    value={formValues.note}
-                    rows={3}
-                    placeholder="Dietary notes or pickup timing."
-                    onChange={handleFieldChange}
-                  ></textarea>
-                </label>
-
-                {renderPickupAcknowledgement()}
-
-                {hasPreorderItems ? (
-                  <div className={`preorder-acknowledgement-wrap${
-                    preorderAcknowledgementError ? " preorder-acknowledgement-wrap--error" : ""
-                  }`}>
-                    <label className="preorder-acknowledgement">
-                      <input
-                        ref={setFieldRef("preorderAcknowledgement")}
-                        type="checkbox"
-                        name="preorderAcknowledgement"
-                        checked={preorderAcknowledged}
-                        onChange={handlePreorderAcknowledgementChange}
-                        onBlur={() => setPreorderTouched(true)}
-                        aria-invalid={preorderAcknowledgementError}
-                        aria-describedby={
-                          preorderAcknowledgementError
-                            ? "preorder-acknowledgement-error"
-                            : undefined
-                        }
-                        required
-                      />
-                      <span>{PREORDER_ACKNOWLEDGEMENT_LABEL}</span>
-                    </label>
-                    <p className="preorder-acknowledgement__notice">{PREORDER_TIMING_NOTICE}</p>
-                    {preorderAcknowledgementError ? (
-                      <span
-                        id="preorder-acknowledgement-error"
-                        className="form-field__error"
-                        role="alert"
-                      >
-                        Please check this box to acknowledge preorder timing.
-                      </span>
-                    ) : null}
-                  </div>
+                {requiresAddress ? (
+                  <label className="form-field">
+                    Order note
+                    <textarea
+                      ref={setFieldRef("note")}
+                      name="note"
+                      value={formValues.note}
+                      rows={3}
+                      placeholder="Dietary notes or pickup timing."
+                      onChange={handleFieldChange}
+                    ></textarea>
+                  </label>
                 ) : null}
+
+                {renderCheckoutAcknowledgements()}
 
                 <button
                   className="button button--dark"
@@ -2158,47 +2231,7 @@ export default function Storefront({ products, inventory = null }) {
                   </details>
                 </div>
 
-                {hasPreorderItems ? (
-                  <div className="preorder-disclaimer preorder-disclaimer--checkout">
-                    {PREORDER_TIMING_NOTICE}
-                  </div>
-                ) : null}
-
-                {renderPickupAcknowledgement()}
-
-                {hasPreorderItems ? (
-                  <div className={`preorder-acknowledgement-wrap${
-                    preorderAcknowledgementError ? " preorder-acknowledgement-wrap--error" : ""
-                  }`}>
-                    <label className="preorder-acknowledgement">
-                      <input
-                        ref={setFieldRef("preorderAcknowledgement")}
-                        type="checkbox"
-                        name="preorderAcknowledgement"
-                        checked={preorderAcknowledged}
-                        onChange={handlePreorderAcknowledgementChange}
-                        onBlur={() => setPreorderTouched(true)}
-                        aria-invalid={preorderAcknowledgementError}
-                        aria-describedby={
-                          preorderAcknowledgementError
-                            ? "preorder-acknowledgement-error"
-                            : undefined
-                        }
-                        required
-                      />
-                      <span>{PREORDER_ACKNOWLEDGEMENT_LABEL}</span>
-                    </label>
-                    {preorderAcknowledgementError ? (
-                      <span
-                        id="preorder-acknowledgement-error"
-                        className="form-field__error"
-                        role="alert"
-                      >
-                        Please check this box to acknowledge preorder timing.
-                      </span>
-                    ) : null}
-                  </div>
-                ) : null}
+                {renderCheckoutAcknowledgements()}
 
                 <button
                   className="button button--light"
