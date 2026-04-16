@@ -1206,6 +1206,10 @@ img {
   color: rgba(41, 54, 47, 0.72);
 }
 
+.cart__split .cart__preorder-count--accent {
+  color: var(--accent);
+}
+
 .cart__line-total {
   display: block;
   margin-top: 8px;

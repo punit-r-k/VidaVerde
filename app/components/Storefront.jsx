@@ -1524,7 +1524,11 @@ export default function Storefront({ products, inventory = null }) {
                   </span>
                   {shouldDisplayStock && item.hasInventoryRecord ? (
                     <span className="cart__split">
-                      {item.inStockUnits} in stock | {item.preorderUnits} preorder
+                      <span>{item.inStockUnits} in stock</span>
+                      {" | "}
+                      <span className={item.preorderUnits > 0 ? "cart__preorder-count cart__preorder-count--accent" : "cart__preorder-count"}>
+                        {item.preorderUnits} preorder
+                      </span>
                     </span>
                   ) : null}
                   <small className="cart__line-total">{formatCurrency(item.lineTotal)}</small>
@@ -2155,7 +2159,7 @@ export default function Storefront({ products, inventory = null }) {
                       value={formValues.note}
                       rows={3}
                       className="form__note-market-textarea"
-                      placeholder="Dietary notes or pickup timing."
+                      placeholder="Anything we should know about your order or situation."
                       onChange={handleFieldChange}
                     ></textarea>
 
@@ -2178,7 +2182,7 @@ export default function Storefront({ products, inventory = null }) {
                       name="note"
                       value={formValues.note}
                       rows={3}
-                      placeholder="Dietary notes or pickup timing."
+                      placeholder="Anything we should know about your order or situation."
                       onChange={handleFieldChange}
                     ></textarea>
                   </label>
