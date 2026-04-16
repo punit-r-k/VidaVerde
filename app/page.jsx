@@ -165,11 +165,11 @@ export default async function Home() {
     },
     {
       q: "Do I need to refrigerate it right away?",
-      a: "Yes. These are live, unpasteurized ferments, so keep them cold after pickup and return them to the refrigerator after serving. Leaving them out too long can affect flavor, texture, and overall quality."
+      a: "No. Our sealed sauerkraut jars are shelf stable before opening. Store them in a cool spot out of direct heat and sunlight, then refrigerate after opening."
     },
     {
       q: "What should I expect when I open a live ferment jar?",
-      a: "A tangy aroma, a little pressure release, or slight brine movement can be normal in a live fermented product. Open the jar cold and slowly, especially the first time, and use a clean utensil each time you serve from it."
+      a: "A tangy aroma, some fizz, pressure release, or a little brine movement can be normal in a live ferment. Open the jar slowly, and if gas builds up during storage, loosen the lid briefly to burp the jar, then reseal it."
     },
     {
       q: "How spicy are the hot options?",
@@ -185,7 +185,7 @@ export default async function Home() {
     },
     {
       q: "How do I keep the jar tasting its best after opening?",
-      a: "Keep it refrigerated, close the lid well, and use a clean fork or spoon each time. For krauts, it also helps to keep the vegetables tucked down in the brine when possible so the texture and flavor stay fresher."
+      a: "After opening, keep it refrigerated, use a clean fork or spoon, and keep the vegetables tucked under the brine when possible. If pressure builds in the refrigerator, burp the jar briefly and close it again so the flavor and texture stay at their best."
     },
     {
       q: "Do you offer shipping?",
