@@ -5,7 +5,7 @@ import RevealOnScroll from "../components/RevealOnScroll";
 const LAST_UPDATED = "April 12, 2026";
 const CONTACT_EMAIL = "vidaverdemicrogreens@gmail.com";
 const CONTACT_PHONE = "(713) 478-1878";
-const CONTACT_PHONE_LINK = "7134781878";
+const CONTACT_TEXT_LINK = "7134781878";
 
 const policyHighlights = [
   {
@@ -115,7 +115,7 @@ const policySections = [
     title: "Changes and Contact",
     paragraphs: [
       "We may update this Privacy Policy from time to time. If we make changes, we will post the revised version on this page and update the last-updated date.",
-      `Questions, requests, or privacy-related concerns may be directed to ${CONTACT_EMAIL} or ${CONTACT_PHONE}.`
+      `Questions, requests, or privacy-related concerns may be directed to ${CONTACT_EMAIL}. You may also text ${CONTACT_PHONE}.`
     ]
   }
 ];
@@ -232,7 +232,7 @@ export default function PrivacyPolicyPage() {
               <p className="eyebrow">Questions</p>
               <h2>Need a privacy request reviewed?</h2>
               <p>
-                Reach out by email or phone if you want to ask about your data,
+                Reach out by email or text if you want to ask about your data,
                 request a correction, unsubscribe from marketing messages, or
                 raise a privacy concern.
               </p>
@@ -241,8 +241,8 @@ export default function PrivacyPolicyPage() {
               <a className="button button--light" href={`mailto:${CONTACT_EMAIL}`}>
                 Email Us
               </a>
-              <a className="button button--ghost" href={`tel:${CONTACT_PHONE_LINK}`}>
-                Call Or Text
+              <a className="button button--ghost" href={`sms:${CONTACT_TEXT_LINK}`}>
+                Text Us
               </a>
               <p className="policy-contact__meta">
                 {CONTACT_EMAIL}

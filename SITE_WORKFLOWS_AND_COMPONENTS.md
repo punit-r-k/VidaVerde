@@ -54,7 +54,7 @@ This file is a practical map of the most important customer flows, operations fl
   - Every quantity released by that restock is recorded in `preorder_release_events`.
   - Paid market-pickup orders with newly released preorder units can receive a ready-for-pickup email during the same restock flow.
   - The readiness email highlights the newly released items, reminds the customer of other already-ready items from the same order, and gives them one combined Vida Verde pickup list for market day.
-  - The readiness email includes the active pickup details and tells the customer to call or text `(713) 478-1878` if they need another arrangement.
+  - The readiness email includes the active pickup details and tells the customer to text `(713) 478-1878` if they need another arrangement.
 
 ### 6. Market Pickup Scheduling And Policy
 - Shared policy/time logic: `lib/pickupDetails.js`

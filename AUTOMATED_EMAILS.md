@@ -44,7 +44,7 @@ Vida Verde does **not** currently send:
 - The subtotal, tax, shipping, and total
 - The shipping address, if it is a shipping order
 - The pickup details, if it is a market pickup order
-- A support phone number in case the customer has questions
+- A support text number in case the customer has questions
 
 ### Special note for pre-orders
 
@@ -82,7 +82,7 @@ This can happen on **any day of the week**. It is **not** limited to Fridays.
 - The pickup day
 - The market address
 - The pickup window
-- A reminder to call or text if they cannot make pickup
+- A reminder to text if they cannot make pickup
 
 ### Design
 
@@ -115,7 +115,7 @@ This reminder can also be sent manually by the team if needed.
 - The market address
 - The pickup window
 - Simple reminder notes about pickup
-- A reminder to call or text if they cannot make pickup
+- A reminder to text if they cannot make pickup
 
 ### Design
 

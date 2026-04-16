@@ -227,7 +227,7 @@ Current behavior:
 - positive restocks can trigger a ready-email check for the affected SKU
 - unsent `preorder_release_events` for paid market orders are grouped by order
 - the email uses the current pickup date details at send time
-- the message tells customers to call or text `(713) 478-1878` if they cannot make
+- the message tells customers to text `(713) 478-1878` if they cannot make
   the market and need another arrangement
 
 Source:

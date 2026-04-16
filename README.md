@@ -124,7 +124,7 @@ The default banner image is bundled at `public/email/order-confirmation-banner.p
 Preorder-ready pickup emails are sent separately from `lib/preorderReadyEmail.js`
 when a restock releases market-pickup preorder units. Those emails use the same
 banner image as the order confirmation email, include the current pickup date
-details, and tell customers to call or text `(713) 478-1878` if they cannot make
+details, and tell customers to text `(713) 478-1878` if they cannot make
 the market and need another arrangement.
 
 Friday pickup reminder emails are sent from `lib/pickupReminderEmail.js` through

@@ -5,7 +5,7 @@ import RevealOnScroll from "../components/RevealOnScroll";
 const LAST_UPDATED = "April 15, 2026";
 const CONTACT_EMAIL = "vidaverdemicrogreens@gmail.com";
 const CONTACT_PHONE = "(713) 478-1878";
-const CONTACT_PHONE_LINK = "7134781878";
+const CONTACT_TEXT_LINK = "7134781878";
 
 const accessibilityHighlights = [
   {
@@ -190,7 +190,7 @@ export default function AccessibilityStatementPage() {
               <p className="eyebrow">Contact</p>
               <h2>Need help accessing something on the site?</h2>
               <p>
-                Reach out by email or phone if you encounter an accessibility
+                Reach out by email or text if you encounter an accessibility
                 issue, need assistance completing an order, or want us to
                 review a specific barrier.
               </p>
@@ -199,8 +199,8 @@ export default function AccessibilityStatementPage() {
               <a className="button button--light" href={`mailto:${CONTACT_EMAIL}`}>
                 Email Us
               </a>
-              <a className="button button--ghost" href={`tel:${CONTACT_PHONE_LINK}`}>
-                Call Or Text
+              <a className="button button--ghost" href={`sms:${CONTACT_TEXT_LINK}`}>
+                Text Us
               </a>
               <p className="policy-contact__meta">
                 {CONTACT_EMAIL}
