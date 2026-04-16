@@ -1,6 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useRef, useState } from "react";
+import { createPortal } from "react-dom";
 import { trackAnalyticsEvent } from "@/lib/analytics";
 import { lockPageScroll, unlockPageScroll } from "@/lib/scrollLock";
 
@@ -738,7 +739,8 @@ export default function TestimonialGrid({ testimonials = [] }) {
           })}
         </div>
       ) : null}
-      {activeReview ? (
+      {activeReview && typeof document !== "undefined"
+        ? createPortal(
         <div
           className="voices-modal"
           role="dialog"
@@ -809,7 +811,8 @@ export default function TestimonialGrid({ testimonials = [] }) {
               </div>
             </div>
           </div>
-        </div>
+        </div>,
+        document.body
       ) : null}
     </>
   );

@@ -4,6 +4,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useSearchParams } from "next/navigation";
 import { CardElement, Elements, useElements, useStripe } from "@stripe/react-stripe-js";
 import { loadStripe } from "@stripe/stripe-js";
+import { createPortal } from "react-dom";
 import { trackAnalyticsEvent } from "@/lib/analytics";
 import { lockPageScroll, unlockPageScroll } from "@/lib/scrollLock";
 import {
@@ -2261,7 +2262,8 @@ export default function Storefront({ products, inventory = null }) {
         </aside>
       </div>
 
-      {showPickupPolicyModal ? (
+      {showPickupPolicyModal && typeof document !== "undefined"
+        ? createPortal(
         <div
           className="pickup-policy-modal"
           onClick={() => closePickupPolicyModal("overlay")}
@@ -2305,7 +2307,8 @@ export default function Storefront({ products, inventory = null }) {
               ))}
             </div>
           </div>
-        </div>
+        </div>,
+        document.body
       ) : null}
     </>
   );

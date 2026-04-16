@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useRef, useState } from "react";
 import Image from "next/image";
+import { createPortal } from "react-dom";
 import { trackAnalyticsEvent } from "@/lib/analytics";
 import { lockPageScroll, unlockPageScroll } from "@/lib/scrollLock";
 
@@ -211,8 +212,9 @@ export default function EmailListPopup() {
   };
 
   if (!open) return null;
+  if (typeof document === "undefined") return null;
 
-  return (
+  return createPortal(
     <div className="email-popup" onClick={() => closePopup("overlay")}>
       <div
         className="email-popup__dialog"
@@ -304,6 +306,7 @@ export default function EmailListPopup() {
           />
         </div>
       </div>
-    </div>
+    </div>,
+    document.body
   );
 }
