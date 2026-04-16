@@ -297,7 +297,9 @@ export default function Storefront({ products, inventory = null }) {
   const [preorderTouched, setPreorderTouched] = useState(false);
   const [showPickupPolicyModal, setShowPickupPolicyModal] = useState(false);
   const [openPairings, setOpenPairings] = useState({});
+  const [pairingsHeights, setPairingsHeights] = useState({});
   const fieldRefs = useRef({});
+  const pairingsPanelRefs = useRef({});
   const addPulseTimeoutsRef = useRef({});
   const orderSuccessPopupTimeoutRef = useRef(null);
   const cartSummaryRef = useRef(null);
@@ -887,6 +889,41 @@ export default function Storefront({ products, inventory = null }) {
       [sku]: !prev[sku]
     }));
   }, []);
+
+  const measurePairingsPanels = useCallback(() => {
+    setPairingsHeights((prev) => {
+      let changed = false;
+      const next = { ...prev };
+
+      Object.entries(pairingsPanelRefs.current).forEach(([sku, node]) => {
+        if (!(node instanceof HTMLElement)) return;
+        const height = Math.ceil(node.scrollHeight);
+        if (next[sku] !== height) {
+          next[sku] = height;
+          changed = true;
+        }
+      });
+
+      return changed ? next : prev;
+    });
+  }, []);
+
+  useEffect(() => {
+    const frameId = window.requestAnimationFrame(() => {
+      measurePairingsPanels();
+    });
+
+    const handleResize = () => {
+      measurePairingsPanels();
+    };
+
+    window.addEventListener("resize", handleResize);
+
+    return () => {
+      window.cancelAnimationFrame(frameId);
+      window.removeEventListener("resize", handleResize);
+    };
+  }, [measurePairingsPanels, products, openPairings]);
 
   const buildOrderPayload = useCallback(() => {
     return {
@@ -1805,6 +1842,19 @@ export default function Storefront({ products, inventory = null }) {
                           role="region"
                           aria-labelledby={pairingsButtonId}
                           aria-hidden={!isPairingsOpen}
+                          ref={(node) => {
+                            if (node instanceof HTMLElement) {
+                              pairingsPanelRefs.current[product.sku] = node;
+                              return;
+                            }
+
+                            delete pairingsPanelRefs.current[product.sku];
+                          }}
+                          style={{
+                            maxHeight: isPairingsOpen
+                              ? `${pairingsHeights[product.sku] ?? 0}px`
+                              : "0px"
+                          }}
                         >
                           <ul className="product-card__pairings-list">
                             {descriptionParts.pairings.map((detail, index) => (

@@ -959,7 +959,6 @@ img {
 }
 
 .product-card__pairings--open .product-card__pairings-panel {
-  max-height: 240px;
   opacity: 1;
   transform: translateY(0);
   border-top-color: rgba(35, 101, 72, 0.12);
