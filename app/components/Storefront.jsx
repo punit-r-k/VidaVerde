@@ -42,8 +42,8 @@ const PRODUCT_PREORDER_NOTICE =
   "Next unit is a pre-order. Not guaranteed for next farmers market; kraut can take up to 15 days.";
 const CART_CHANGE_NOTICE_SUMMARY =
   "Stock changed while you were shopping. Review the updated cart before continuing.";
-const CART_CHANGE_ACKNOWLEDGEMENT_LABEL =
-  "I reviewed the updated cart and understand the current in-stock and preorder quantities.";
+const CART_CHANGE_ACKNOWLEDGEMENT_BUTTON_LABEL =
+  "Acknowledge And Review Updated Cart";
 const PREORDER_ACKNOWLEDGEMENT_LABEL =
   "I understand preorder timing is estimated and not guaranteed for the next market.";
 const ORDER_FINALIZE_MESSAGE =
@@ -57,10 +57,6 @@ const ORDER_SUCCESS_POPUP_MESSAGE =
 const PREORDER_NOTICE_MESSAGES = new Set([
   "Please acknowledge the pre-order notice before proceeding to payment.",
   "Please acknowledge the pre-order notice before payment."
-]);
-const CART_CHANGE_NOTICE_MESSAGES = new Set([
-  "Please review and acknowledge the updated cart before proceeding to payment.",
-  "Please review and acknowledge the updated cart before payment."
 ]);
 const HEALTH_BENEFIT_PATTERN =
   /(live[-\s]?cultures?|active[-\s]?cultures?|fiber(?:-rich)?|digestion|digestive|gut|probiotic|vitamin|antioxidant|health|wellness|immune|nutrient|plant variety)/i;
@@ -156,27 +152,29 @@ const getCartInventoryChanges = (previousState, nextState) => {
 
 const formatUnitsLabel = (count) => `${count} ${count === 1 ? "unit" : "units"}`;
 
-const buildCartChangeNotice = (changes) => {
-  const details = changes.slice(0, 3).map((change) => {
-    if (change.preorderUnits <= 0) {
-      return `${change.name} is now fully in stock for pickup.`;
-    }
-
-    if (change.inStockUnits <= 0) {
-      return `${change.name} is now entirely preorder for ${formatUnitsLabel(change.quantity)}.`;
-    }
-
-    return `${change.name} now has ${formatUnitsLabel(change.inStockUnits)} in stock and ${formatUnitsLabel(change.preorderUnits)} on preorder.`;
-  });
-
-  if (changes.length > 3) {
-    const remainingCount = changes.length - 3;
-    details.push(`${remainingCount} more cart item${remainingCount === 1 ? "" : "s"} also changed.`);
+const formatCartChangeDetail = (change) => {
+  if (change.preorderUnits <= 0) {
+    return `${change.name} is now fully in stock for pickup.`;
   }
 
+  if (change.inStockUnits <= 0) {
+    return `${change.name} is out of stock and is now being set to a pre-order for ${formatUnitsLabel(change.quantity)}.`;
+  }
+
+  return `${change.name} now has ${formatUnitsLabel(change.inStockUnits)} in stock and ${formatUnitsLabel(change.preorderUnits)} on preorder.`;
+};
+
+const buildCartChangeNotice = (changes, id) => {
+  const items = changes.map((change) => ({
+    sku: change.sku,
+    detail: formatCartChangeDetail(change)
+  }));
+
   return {
+    id,
     summary: CART_CHANGE_NOTICE_SUMMARY,
-    details
+    items,
+    details: items.map((item) => item.detail)
   };
 };
 
@@ -414,8 +412,7 @@ export default function Storefront({ products, inventory = null }) {
   const [preorderAcknowledged, setPreorderAcknowledged] = useState(false);
   const [preorderTouched, setPreorderTouched] = useState(false);
   const [cartChangeNotice, setCartChangeNotice] = useState(null);
-  const [cartChangeAcknowledged, setCartChangeAcknowledged] = useState(true);
-  const [cartChangeTouched, setCartChangeTouched] = useState(false);
+  const [cartChangeHistory, setCartChangeHistory] = useState([]);
   const [showCartChangeModal, setShowCartChangeModal] = useState(false);
   const [showPickupPolicyModal, setShowPickupPolicyModal] = useState(false);
   const [openPairings, setOpenPairings] = useState({});
@@ -428,6 +425,7 @@ export default function Storefront({ products, inventory = null }) {
   const checkoutStartedRef = useRef(false);
   const previousCheckoutStepRef = useRef("details");
   const cartSummarySeenRef = useRef(false);
+  const cartChangeSequenceRef = useRef(0);
   const finalizingPaymentIntentRef = useRef("");
   const cartChangeDialogRef = useRef(null);
   const cartChangeLastFocusedRef = useRef(null);
@@ -453,28 +451,32 @@ export default function Storefront({ products, inventory = null }) {
     }
   }, []);
 
-  const clearCartChangeReview = useCallback(() => {
+  const clearCartChangeNotice = useCallback(() => {
     setCartChangeNotice(null);
-    setCartChangeAcknowledged(true);
-    setCartChangeTouched(false);
     setShowCartChangeModal(false);
   }, []);
 
+  const resetCartChangeTracking = useCallback(() => {
+    clearCartChangeNotice();
+    setCartChangeHistory([]);
+    cartChangeSequenceRef.current = 0;
+  }, [clearCartChangeNotice]);
+
   const refreshPendingCartChangeReview = useCallback((nextItemCount) => {
     if (nextItemCount <= 0) {
-      clearCartChangeReview();
+      resetCartChangeTracking();
       return;
     }
 
     setCartChangeNotice((previousNotice) => {
       if (!previousNotice) return previousNotice;
       return {
-        summary: CART_CHANGE_NOTICE_SUMMARY,
+        ...previousNotice,
+        items: [],
         details: []
       };
     });
-    setCartChangeTouched(false);
-  }, [clearCartChangeReview]);
+  }, [resetCartChangeTracking]);
 
   const resetCheckoutAfterSuccess = useCallback(() => {
     setCart({});
@@ -487,11 +489,11 @@ export default function Storefront({ products, inventory = null }) {
     setPickupTouched(false);
     setPreorderAcknowledged(false);
     setPreorderTouched(false);
-    clearCartChangeReview();
+    resetCartChangeTracking();
     setCheckoutStep("details");
     checkoutStartedRef.current = false;
     finalizingPaymentIntentRef.current = "";
-  }, [clearCartChangeReview]);
+  }, [resetCartChangeTracking]);
 
   const triggerOrderSuccessPopup = useCallback((message = ORDER_SUCCESS_POPUP_MESSAGE) => {
     setOrderSuccessPopupMessage(message);
@@ -655,13 +657,6 @@ export default function Storefront({ products, inventory = null }) {
     node.scrollIntoView({ behavior: "smooth", block: "center" });
   }, []);
 
-  const focusCartChangeAcknowledgement = useCallback(() => {
-    const node = fieldRefs.current.cartChangeAcknowledgement;
-    if (!node) return;
-    node.focus();
-    node.scrollIntoView({ behavior: "smooth", block: "center" });
-  }, []);
-
   const closeCartChangeModal = useCallback((reason = "dismiss") => {
     trackAnalyticsEvent({
       name: "checkout_cart_change_modal_close",
@@ -681,15 +676,16 @@ export default function Storefront({ products, inventory = null }) {
     });
   }, [checkoutStep]);
 
-  const handleReviewUpdatedCart = useCallback(() => {
-    closeCartChangeModal("review_button");
+  const handleAcknowledgeCartChange = useCallback(() => {
+    clearCartChangeNotice();
+    closeCartChangeModal("acknowledge_button");
     window.requestAnimationFrame(() => {
       const node = cartSummaryRef.current;
       if (!(node instanceof HTMLElement)) return;
       node.focus();
       node.scrollIntoView({ behavior: "smooth", block: "start" });
     });
-  }, [closeCartChangeModal]);
+  }, [clearCartChangeNotice, closeCartChangeModal]);
 
   const openPickupPolicyModal = useCallback(() => {
     trackAnalyticsEvent({
@@ -755,7 +751,11 @@ export default function Storefront({ products, inventory = null }) {
       const inventoryChanges = getCartInventoryChanges(previousCartState, nextCartState);
 
       if (inventoryChanges.length > 0) {
-        const nextCartChangeNotice = buildCartChangeNotice(inventoryChanges);
+        cartChangeSequenceRef.current += 1;
+        const nextCartChangeNotice = buildCartChangeNotice(
+          inventoryChanges,
+          `cart-change-${cartChangeSequenceRef.current}`
+        );
 
         trackAnalyticsEvent({
           name: "cart_inventory_updated",
@@ -768,8 +768,10 @@ export default function Storefront({ products, inventory = null }) {
           }
         });
         setCartChangeNotice(nextCartChangeNotice);
-        setCartChangeAcknowledged(false);
-        setCartChangeTouched(false);
+        setCartChangeHistory((previousHistory) => [
+          ...previousHistory,
+          nextCartChangeNotice
+        ]);
         setPreorderAcknowledged(false);
         setPreorderTouched(false);
         setShowCartChangeModal(true);
@@ -940,15 +942,19 @@ export default function Storefront({ products, inventory = null }) {
   useEffect(() => {
     if (!showCartChangeModal || !cartChangeNotice) return;
 
+    const affectedItems = Array.isArray(cartChangeNotice.items)
+      ? cartChangeNotice.items.length
+      : Array.isArray(cartChangeNotice.details)
+        ? cartChangeNotice.details.length
+      : 0;
+
     trackAnalyticsEvent({
       name: "checkout_cart_change_modal_view",
       sectionId: "shop",
       elementId: "cart_change_modal",
       checkoutStep,
       metadata: {
-        affectedItems: Array.isArray(cartChangeNotice.details)
-          ? cartChangeNotice.details.length
-          : 0
+        affectedItems
       }
     });
   }, [cartChangeNotice, checkoutStep, showCartChangeModal]);
@@ -1140,16 +1146,46 @@ export default function Storefront({ products, inventory = null }) {
   const preorderAcknowledgementError = hasPreorderItems &&
     !preorderAcknowledged &&
     (submitAttempted || preorderTouched);
-  const cartChangeAcknowledgementError = Boolean(cartChangeNotice) &&
-    !cartChangeAcknowledged &&
-    (submitAttempted || cartChangeTouched);
+  const cartChangeSummaryText = cartChangeNotice?.summary || CART_CHANGE_NOTICE_SUMMARY;
+  const cartChangeAffectedItems = Array.isArray(cartChangeNotice?.items)
+    ? cartChangeNotice.items.length
+    : Array.isArray(cartChangeNotice?.details)
+      ? cartChangeNotice.details.length
+    : 0;
+  const cartChangeHistoryItems = useMemo(() => {
+    const latestBySku = new Map();
+
+    cartChangeHistory.forEach((entry) => {
+      const items = Array.isArray(entry.items)
+        ? entry.items
+        : Array.isArray(entry.details)
+          ? entry.details.map((detail, index) => ({
+            sku: `${entry.id}-detail-${index}`,
+            detail
+          }))
+          : [];
+
+      items.forEach((item) => {
+        if (!item?.sku || !item?.detail) return;
+        if (latestBySku.has(item.sku)) {
+          latestBySku.delete(item.sku);
+        }
+        latestBySku.set(item.sku, {
+          id: `${entry.id}-${item.sku}`,
+          detail: item.detail
+        });
+      });
+    });
+
+    return Array.from(latestBySku.values());
+  }, [cartChangeHistory]);
+  const hasCartChangeHistory = cartChangeHistoryItems.length > 0;
   const showGlobalNotice = Boolean(notice) && !(
     status === "error" &&
     (
       isPaymentStep ||
       pickupAcknowledgementError ||
-      preorderAcknowledgementError ||
-      cartChangeAcknowledgementError
+      preorderAcknowledgementError
     )
   );
   const requiresAddress = fulfillment === "ship";
@@ -1180,9 +1216,9 @@ export default function Storefront({ products, inventory = null }) {
   useEffect(() => {
     if (itemCount === 0) {
       checkoutStartedRef.current = false;
-      clearCartChangeReview();
+      resetCartChangeTracking();
     }
-  }, [clearCartChangeReview, itemCount]);
+  }, [itemCount, resetCartChangeTracking]);
 
   useEffect(() => {
     const previousStep = previousCheckoutStepRef.current;
@@ -1440,7 +1476,7 @@ export default function Storefront({ products, inventory = null }) {
     setPickupTouched(false);
     setPreorderAcknowledged(false);
     setPreorderTouched(false);
-    clearCartChangeReview();
+    resetCartChangeTracking();
     checkoutStartedRef.current = false;
 
     if (status !== "idle") {
@@ -1481,7 +1517,7 @@ export default function Storefront({ products, inventory = null }) {
       setPickupTouched(false);
       setPreorderAcknowledged(false);
       setPreorderTouched(false);
-      clearCartChangeReview();
+      resetCartChangeTracking();
       checkoutStartedRef.current = false;
     }
 
@@ -1632,53 +1668,7 @@ export default function Storefront({ products, inventory = null }) {
     }
   };
 
-  const handleCartChangeAcknowledgementChange = (event) => {
-    const isChecked = Boolean(event.currentTarget.checked);
-    setCartChangeAcknowledged(isChecked);
-    setCartChangeTouched(true);
-    trackAnalyticsEvent({
-      name: "checkout_cart_change_ack_toggled",
-      sectionId: "shop",
-      elementId: "cart_change_acknowledgement",
-      checkoutStep,
-      metadata: {
-        result: isChecked ? "checked" : "unchecked",
-        affectedItems: Array.isArray(cartChangeNotice?.details)
-          ? cartChangeNotice.details.length
-          : 0
-      }
-    });
-
-    if (isChecked) {
-      clearCartChangeReview();
-
-      if (status === "error" && CART_CHANGE_NOTICE_MESSAGES.has(notice)) {
-        setStatus("idle");
-        setNotice("");
-      }
-    }
-  };
-
   const createPaymentIntent = useCallback(async () => {
-    if (cartChangeNotice && !cartChangeAcknowledged) {
-      const message = "Please review and acknowledge the updated cart before payment.";
-      trackAnalyticsEvent({
-        name: "checkout_validation_blocked",
-        sectionId: "shop",
-        elementId: "cart_change_acknowledgement",
-        checkoutStep: "payment",
-        metadata: {
-          reason: "missing_cart_change_ack",
-          validationCount: 1
-        }
-      });
-      setCartChangeTouched(true);
-      setStatus("error");
-      setNotice(message);
-      focusCartChangeAcknowledgement();
-      throw new Error(message);
-    }
-
     if (fulfillment === "market" && !pickupAcknowledged) {
       const message = "Please accept the pickup policy before proceeding to payment.";
       trackAnalyticsEvent({
@@ -1752,9 +1742,6 @@ export default function Storefront({ products, inventory = null }) {
   }, [
     applyInventory,
     buildOrderPayload,
-    cartChangeAcknowledged,
-    cartChangeNotice,
-    focusCartChangeAcknowledgement,
     focusFirstInvalidField,
     focusPickupAcknowledgement,
     focusPreorderAcknowledgement,
@@ -1850,24 +1837,6 @@ export default function Storefront({ products, inventory = null }) {
       return;
     }
 
-    if (cartChangeNotice && !cartChangeAcknowledged) {
-      trackAnalyticsEvent({
-        name: "checkout_validation_blocked",
-        sectionId: "shop",
-        elementId: "cart_change_acknowledgement",
-        checkoutStep: "details",
-        metadata: {
-          reason: "missing_cart_change_ack",
-          validationCount: 1
-        }
-      });
-      setCartChangeTouched(true);
-      setStatus("error");
-      setNotice("Please review and acknowledge the updated cart before proceeding to payment.");
-      focusCartChangeAcknowledgement();
-      return;
-    }
-
     if (fulfillment === "market" && !pickupAcknowledged) {
       trackAnalyticsEvent({
         name: "checkout_validation_blocked",
@@ -1924,9 +1893,12 @@ export default function Storefront({ products, inventory = null }) {
     if (fulfillment !== "market") return null;
 
     return (
-      <div className={`preorder-acknowledgement-wrap${
-        pickupAcknowledgementError ? " preorder-acknowledgement-wrap--error" : ""
-      }`}>
+      <div
+        key="pickup-acknowledgement"
+        className={`preorder-acknowledgement-wrap${
+          pickupAcknowledgementError ? " preorder-acknowledgement-wrap--error" : ""
+        }`}
+      >
         <label className="preorder-acknowledgement">
           <input
             ref={setFieldRef("pickupAcknowledgement")}
@@ -1975,9 +1947,12 @@ export default function Storefront({ products, inventory = null }) {
     if (!hasPreorderItems) return null;
 
     return (
-      <div className={`preorder-acknowledgement-wrap${
-        preorderAcknowledgementError ? " preorder-acknowledgement-wrap--error" : ""
-      }`}>
+      <div
+        key="preorder-acknowledgement"
+        className={`preorder-acknowledgement-wrap${
+          preorderAcknowledgementError ? " preorder-acknowledgement-wrap--error" : ""
+        }`}
+      >
         <label className="preorder-acknowledgement">
           <input
             ref={setFieldRef("preorderAcknowledgement")}
@@ -2014,45 +1989,16 @@ export default function Storefront({ products, inventory = null }) {
     if (!cartChangeNotice) return null;
 
     return (
-      <div
-        key="cart-change-acknowledgement"
-        className={`preorder-acknowledgement-wrap${
-          cartChangeAcknowledgementError ? " preorder-acknowledgement-wrap--error" : ""
-        }`}
-      >
-        <label className="preorder-acknowledgement">
-          <input
-            ref={setFieldRef("cartChangeAcknowledgement")}
-            type="checkbox"
-            name="cartChangeAcknowledgement"
-            checked={cartChangeAcknowledged}
-            onChange={handleCartChangeAcknowledgementChange}
-            onBlur={() => setCartChangeTouched(true)}
-            aria-invalid={cartChangeAcknowledgementError}
-            aria-describedby={
-              cartChangeAcknowledgementError
-                ? "cart-change-acknowledgement-error"
-                : undefined
-            }
-            required
-          />
-          <span>{CART_CHANGE_ACKNOWLEDGEMENT_LABEL}</span>
-        </label>
-        <p className="preorder-acknowledgement__notice">{cartChangeNotice.summary}</p>
-        {cartChangeNotice.details.map((detail) => (
-          <p key={detail} className="preorder-acknowledgement__notice">
+      <div key="cart-change-acknowledgement" className="preorder-acknowledgement-wrap">
+        <p className="preorder-acknowledgement__notice">
+          <strong>Cart updated.</strong>{" "}
+          {cartChangeSummaryText}
+        </p>
+        {cartChangeHistoryItems.map(({ id, detail }) => (
+          <p key={id} className="preorder-acknowledgement__notice">
             {detail}
           </p>
         ))}
-        {cartChangeAcknowledgementError ? (
-          <span
-            id="cart-change-acknowledgement-error"
-            className="form-field__error"
-            role="alert"
-          >
-            Please check this box to confirm you reviewed the updated cart.
-          </span>
-        ) : null}
       </div>
     );
   };
@@ -2141,15 +2087,15 @@ export default function Storefront({ products, inventory = null }) {
         </div>
       ) : null}
 
-      {cartChangeNotice ? (
+      {hasCartChangeHistory ? (
         <div className="preorder-acknowledgement-wrap" role="status" aria-live="polite">
           <p className="preorder-acknowledgement__notice">
             <strong>Cart updated.</strong>
             {" "}
-            {cartChangeNotice.summary}
+            {cartChangeSummaryText}
           </p>
-          {cartChangeNotice.details.map((detail) => (
-            <p key={`cart-change-${detail}`} className="preorder-acknowledgement__notice">
+          {cartChangeHistoryItems.map(({ id, detail }) => (
+            <p key={id} className="preorder-acknowledgement__notice">
               {detail}
             </p>
           ))}
@@ -2920,32 +2866,25 @@ export default function Storefront({ products, inventory = null }) {
             <div className="cart-change-modal__eyebrow">Cart Updated</div>
             <h3 id="cart-change-modal-title">Your cart changed during checkout</h3>
             <p id="cart-change-modal-intro" className="cart-change-modal__intro">
-              {cartChangeNotice.summary}
+              {cartChangeSummaryText}
             </p>
-            {cartChangeNotice.details.length > 0 ? (
+            {cartChangeHistoryItems.length > 0 ? (
               <ul className="cart-change-modal__list">
-                {cartChangeNotice.details.map((detail) => (
-                  <li key={detail}>{detail}</li>
+                {cartChangeHistoryItems.map(({ id, detail }) => (
+                  <li key={id}>{detail}</li>
                 ))}
               </ul>
             ) : null}
             <p className="cart-change-modal__note">
-              Review the updated cart, then acknowledge the change before continuing to payment.
+              Use the button below to acknowledge the change and jump back to your updated cart.
             </p>
             <div className="cart-change-modal__actions">
               <button
                 type="button"
                 className="button button--dark"
-                onClick={handleReviewUpdatedCart}
+                onClick={handleAcknowledgeCartChange}
               >
-                Review Updated Cart
-              </button>
-              <button
-                type="button"
-                className="button button--light"
-                onClick={() => closeCartChangeModal("close_button")}
-              >
-                Close
+                {CART_CHANGE_ACKNOWLEDGEMENT_BUTTON_LABEL}
               </button>
             </div>
           </div>
