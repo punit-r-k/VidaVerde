@@ -1,10 +1,15 @@
 import SiteHeader from "../components/SiteHeader";
 import SiteFooter from "../components/SiteFooter";
 import RevealOnScroll from "../components/RevealOnScroll";
+import {
+  SUPPORT_EMAIL,
+  SUPPORT_PHONE_DISPLAY,
+  createPageMetadata
+} from "@/lib/siteMetadata";
 
 const LAST_UPDATED = "April 12, 2026";
-const CONTACT_EMAIL = "vidaverdemicrogreens@gmail.com";
-const CONTACT_PHONE = "(713) 478-1878";
+const CONTACT_EMAIL = SUPPORT_EMAIL;
+const CONTACT_PHONE = SUPPORT_PHONE_DISPLAY;
 const CONTACT_TEXT_LINK = "7134781878";
 
 const policyHighlights = [
@@ -120,11 +125,13 @@ const policySections = [
   }
 ];
 
-export const metadata = {
-  title: "Privacy Policy | Vida Verde",
+export const metadata = createPageMetadata({
+  title: "Privacy Policy",
   description:
-    "Read how Vida Verde collects, uses, stores, and safeguards customer information on its website and during checkout."
-};
+    "Read how Vida Verde collects, uses, stores, and safeguards customer information on its website, email forms, and checkout flow.",
+  path: "/privacy-policy",
+  type: "article"
+});
 
 export default function PrivacyPolicyPage() {
   return (

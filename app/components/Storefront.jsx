@@ -35,19 +35,32 @@ const formatCurrency = (amountInCents) => {
 const INVENTORY_POLL_MS = 30000;
 const ORDER_FINALIZE_POLL_MS = 1500;
 const ORDER_FINALIZE_MAX_ATTEMPTS = 8;
+const CART_STORAGE_KEY = "vidaverde-cart-v1";
 const PREORDER_TIMING_NOTICE =
   `Pre-orders are estimates only. Fermentation timelines vary, and preorder items may take up to 15 days before pickup is available. The next ${MARKET_NAME} date is not guaranteed for preorder items.`;
 const PRODUCT_PREORDER_NOTICE =
   "Next unit is a pre-order. Not guaranteed for next farmers market; kraut can take up to 15 days.";
+const CART_CHANGE_NOTICE_SUMMARY =
+  "Stock changed while you were shopping. Review the updated cart before continuing.";
+const CART_CHANGE_ACKNOWLEDGEMENT_LABEL =
+  "I reviewed the updated cart and understand the current in-stock and preorder quantities.";
 const PREORDER_ACKNOWLEDGEMENT_LABEL =
   "I understand preorder timing is estimated and not guaranteed for the next market.";
 const ORDER_FINALIZE_MESSAGE =
   "Payment received. Finalizing your order...";
 const ORDER_FINALIZE_PENDING_NOTICE =
   "Payment received. We are still finalizing your order. Please do not submit again. We will email confirmation as soon as it is recorded.";
+const ORDER_SUCCESS_NOTICE =
+  "Payment received. Your order is confirmed and fulfillment details are on the way.";
+const ORDER_SUCCESS_POPUP_MESSAGE =
+  "Your payment was received. Confirmation details are on the way.";
 const PREORDER_NOTICE_MESSAGES = new Set([
   "Please acknowledge the pre-order notice before proceeding to payment.",
   "Please acknowledge the pre-order notice before payment."
+]);
+const CART_CHANGE_NOTICE_MESSAGES = new Set([
+  "Please review and acknowledge the updated cart before proceeding to payment.",
+  "Please review and acknowledge the updated cart before payment."
 ]);
 const HEALTH_BENEFIT_PATTERN =
   /(live[-\s]?cultures?|active[-\s]?cultures?|fiber(?:-rich)?|digestion|digestive|gut|probiotic|vitamin|antioxidant|health|wellness|immune|nutrient|plant variety)/i;
@@ -64,6 +77,107 @@ const isInventorySnapshot = (value) => {
   return Object.values(value).every(
     (record) => record && typeof record === "object" && !Array.isArray(record)
   );
+};
+
+const toPositiveInteger = (value) => {
+  const parsed = Number.parseInt(String(value ?? ""), 10);
+  return Number.isFinite(parsed) && parsed > 0 ? parsed : 0;
+};
+
+const sanitizeStoredCart = (value, validSkus) => {
+  if (!value || typeof value !== "object" || Array.isArray(value)) {
+    return {};
+  }
+
+  return Object.entries(value).reduce((next, [sku, quantity]) => {
+    if (!(validSkus instanceof Set) || !validSkus.has(sku)) {
+      return next;
+    }
+
+    const normalizedQuantity = toPositiveInteger(quantity);
+    if (normalizedQuantity <= 0) {
+      return next;
+    }
+
+    next[sku] = normalizedQuantity;
+    return next;
+  }, {});
+};
+
+const buildCartInventoryState = (cart, products, inventory) => {
+  if (!cart || typeof cart !== "object" || !Array.isArray(products)) {
+    return [];
+  }
+
+  return products
+    .filter((product) => toPositiveInteger(cart[product.sku]) > 0)
+    .map((product) => {
+      const quantity = toPositiveInteger(cart[product.sku]);
+      const record = inventory?.[product.sku] || null;
+      const hasInventoryRecord = Boolean(record && typeof record === "object");
+      const available = hasInventoryRecord
+        ? Math.max(0, Number(record.on_hand || 0))
+        : Number.POSITIVE_INFINITY;
+      const inStockUnits = hasInventoryRecord ? Math.min(quantity, available) : quantity;
+      const preorderUnits = hasInventoryRecord ? Math.max(0, quantity - available) : 0;
+
+      return {
+        sku: product.sku,
+        name: product.name,
+        quantity,
+        hasInventoryRecord,
+        inStockUnits,
+        preorderUnits
+      };
+    });
+};
+
+const getCartInventoryChanges = (previousState, nextState) => {
+  const previousBySku = new Map(previousState.map((item) => [item.sku, item]));
+
+  return nextState.reduce((changes, item) => {
+    const previousItem = previousBySku.get(item.sku);
+
+    if (!previousItem || !previousItem.hasInventoryRecord || !item.hasInventoryRecord) {
+      return changes;
+    }
+
+    if (
+      previousItem.inStockUnits === item.inStockUnits &&
+      previousItem.preorderUnits === item.preorderUnits
+    ) {
+      return changes;
+    }
+
+    changes.push(item);
+    return changes;
+  }, []);
+};
+
+const formatUnitsLabel = (count) => `${count} ${count === 1 ? "unit" : "units"}`;
+
+const buildCartChangeNotice = (changes) => {
+  const details = changes.slice(0, 3).map((change) => {
+    if (change.preorderUnits <= 0) {
+      return `${change.name} is now fully in stock for pickup.`;
+    }
+
+    if (change.inStockUnits <= 0) {
+      return `${change.name} is now entirely preorder for ${formatUnitsLabel(change.quantity)}.`;
+    }
+
+    return `${change.name} now has ${formatUnitsLabel(change.inStockUnits)} in stock and ${formatUnitsLabel(change.preorderUnits)} on preorder.`;
+  });
+
+  if (changes.length > 3) {
+    const remainingCount = changes.length - 3;
+    details.push(`${remainingCount} more cart item${remainingCount === 1 ? "" : "s"} also changed.`);
+  }
+
+  return {
+    summary: CART_CHANGE_NOTICE_SUMMARY,
+    details
+  };
 };
 
 const sanitizeFieldName = (value) => String(value || "").trim().toLowerCase().replace(/[^a-z0-9]+/g, "_");
@@ -277,6 +391,7 @@ function StripePaymentForm({
 export default function Storefront({ products, inventory = null }) {
   const searchParams = useSearchParams();
   const [cart, setCart] = useState({});
+  const [cartHydrated, setCartHydrated] = useState(false);
   const [status, setStatus] = useState("idle");
   const [notice, setNotice] = useState("");
   const [checkoutStep, setCheckoutStep] = useState("details");
@@ -291,10 +406,17 @@ export default function Storefront({ products, inventory = null }) {
   const [addPulse, setAddPulse] = useState({});
   const [showOrderSuccessPopup, setShowOrderSuccessPopup] = useState(false);
   const [orderSuccessPopupKey, setOrderSuccessPopupKey] = useState(0);
+  const [orderSuccessPopupMessage, setOrderSuccessPopupMessage] = useState(
+    ORDER_SUCCESS_POPUP_MESSAGE
+  );
   const [pickupAcknowledged, setPickupAcknowledged] = useState(false);
   const [pickupTouched, setPickupTouched] = useState(false);
   const [preorderAcknowledged, setPreorderAcknowledged] = useState(false);
   const [preorderTouched, setPreorderTouched] = useState(false);
+  const [cartChangeNotice, setCartChangeNotice] = useState(null);
+  const [cartChangeAcknowledged, setCartChangeAcknowledged] = useState(true);
+  const [cartChangeTouched, setCartChangeTouched] = useState(false);
+  const [showCartChangeModal, setShowCartChangeModal] = useState(false);
   const [showPickupPolicyModal, setShowPickupPolicyModal] = useState(false);
   const [openPairings, setOpenPairings] = useState({});
   const [pairingsHeights, setPairingsHeights] = useState({});
@@ -307,11 +429,22 @@ export default function Storefront({ products, inventory = null }) {
   const previousCheckoutStepRef = useRef("details");
   const cartSummarySeenRef = useRef(false);
   const finalizingPaymentIntentRef = useRef("");
+  const cartChangeDialogRef = useRef(null);
+  const cartChangeLastFocusedRef = useRef(null);
   const pickupPolicyDialogRef = useRef(null);
   const pickupPolicyLastFocusedRef = useRef(null);
   const isPaymentStep = checkoutStep === "payment";
   const isOrderFinalizing =
     status === "finalizing" || status === "pending_confirmation";
+  const cartRef = useRef(cart);
+  const liveInventoryRef = useRef(liveInventory);
+  const checkoutStepRef = useRef(checkoutStep);
+  const isOrderFinalizingRef = useRef(isOrderFinalizing);
+
+  cartRef.current = cart;
+  liveInventoryRef.current = liveInventory;
+  checkoutStepRef.current = checkoutStep;
+  isOrderFinalizingRef.current = isOrderFinalizing;
 
   const resetPaymentState = useCallback((options = {}) => {
     const keepPaymentStep = options.keepPaymentStep === true;
@@ -319,6 +452,29 @@ export default function Storefront({ products, inventory = null }) {
       setCheckoutStep("details");
     }
   }, []);
+
+  const clearCartChangeReview = useCallback(() => {
+    setCartChangeNotice(null);
+    setCartChangeAcknowledged(true);
+    setCartChangeTouched(false);
+    setShowCartChangeModal(false);
+  }, []);
+
+  const refreshPendingCartChangeReview = useCallback((nextItemCount) => {
+    if (nextItemCount <= 0) {
+      clearCartChangeReview();
+      return;
+    }
+
+    setCartChangeNotice((previousNotice) => {
+      if (!previousNotice) return previousNotice;
+      return {
+        summary: CART_CHANGE_NOTICE_SUMMARY,
+        details: []
+      };
+    });
+    setCartChangeTouched(false);
+  }, [clearCartChangeReview]);
 
   const resetCheckoutAfterSuccess = useCallback(() => {
     setCart({});
@@ -331,12 +487,14 @@ export default function Storefront({ products, inventory = null }) {
     setPickupTouched(false);
     setPreorderAcknowledged(false);
     setPreorderTouched(false);
+    clearCartChangeReview();
     setCheckoutStep("details");
     checkoutStartedRef.current = false;
     finalizingPaymentIntentRef.current = "";
-  }, []);
+  }, [clearCartChangeReview]);
 
-  const triggerOrderSuccessPopup = useCallback(() => {
+  const triggerOrderSuccessPopup = useCallback((message = ORDER_SUCCESS_POPUP_MESSAGE) => {
+    setOrderSuccessPopupMessage(message);
     setOrderSuccessPopupKey((prev) => prev + 1);
     setShowOrderSuccessPopup(true);
 
@@ -393,20 +551,31 @@ export default function Storefront({ products, inventory = null }) {
         }
 
         if (response?.ok && payload?.recorded) {
+          const automationWarnings = Array.isArray(payload?.automationWarnings)
+            ? payload.automationWarnings
+            : [];
+          const firstAutomationWarning =
+            automationWarnings.find(
+              (warning) =>
+                typeof warning?.customerMessage === "string" &&
+                warning.customerMessage.trim()
+            ) || null;
+
           trackAnalyticsEvent({
             name: "payment_result",
             sectionId: "shop",
             elementId: "payment_submit",
             checkoutStep: "payment",
             metadata: {
-              result: "success"
+              result: firstAutomationWarning ? "success_with_warning" : "success",
+              automationWarningCode: String(firstAutomationWarning?.code || "")
             }
           });
           setStatus("success");
-          setNotice(
-            "Payment received. Your order is confirmed and fulfillment details are on the way."
+          setNotice(firstAutomationWarning?.customerMessage || ORDER_SUCCESS_NOTICE);
+          triggerOrderSuccessPopup(
+            firstAutomationWarning?.popupMessage || ORDER_SUCCESS_POPUP_MESSAGE
           );
-          triggerOrderSuccessPopup();
           resetCheckoutAfterSuccess();
           return;
         }
@@ -486,6 +655,42 @@ export default function Storefront({ products, inventory = null }) {
     node.scrollIntoView({ behavior: "smooth", block: "center" });
   }, []);
 
+  const focusCartChangeAcknowledgement = useCallback(() => {
+    const node = fieldRefs.current.cartChangeAcknowledgement;
+    if (!node) return;
+    node.focus();
+    node.scrollIntoView({ behavior: "smooth", block: "center" });
+  }, []);
+
+  const closeCartChangeModal = useCallback((reason = "dismiss") => {
+    trackAnalyticsEvent({
+      name: "checkout_cart_change_modal_close",
+      sectionId: "shop",
+      elementId: "cart_change_modal",
+      checkoutStep,
+      metadata: {
+        reason
+      }
+    });
+    setShowCartChangeModal(false);
+    window.requestAnimationFrame(() => {
+      const lastFocusedElement = cartChangeLastFocusedRef.current;
+      if (lastFocusedElement instanceof HTMLElement && lastFocusedElement.isConnected) {
+        lastFocusedElement.focus();
+      }
+    });
+  }, [checkoutStep]);
+
+  const handleReviewUpdatedCart = useCallback(() => {
+    closeCartChangeModal("review_button");
+    window.requestAnimationFrame(() => {
+      const node = cartSummaryRef.current;
+      if (!(node instanceof HTMLElement)) return;
+      node.focus();
+      node.scrollIntoView({ behavior: "smooth", block: "start" });
+    });
+  }, [closeCartChangeModal]);
+
   const openPickupPolicyModal = useCallback(() => {
     trackAnalyticsEvent({
       name: "checkout_pickup_policy_open",
@@ -526,11 +731,57 @@ export default function Storefront({ products, inventory = null }) {
 
   const hasFieldError = useCallback((name) => Boolean(getFieldError(name)), [getFieldError]);
 
-  const applyInventory = (nextInventory) => {
-    if (isInventorySnapshot(nextInventory)) {
-      setLiveInventory(nextInventory);
+  const applyInventory = useCallback((nextInventory) => {
+    if (!isInventorySnapshot(nextInventory)) {
+      return;
     }
-  };
+
+    const previousInventory = liveInventoryRef.current;
+
+    if (
+      isInventorySnapshot(previousInventory) &&
+      !isOrderFinalizingRef.current
+    ) {
+      const previousCartState = buildCartInventoryState(
+        cartRef.current,
+        products,
+        previousInventory
+      );
+      const nextCartState = buildCartInventoryState(
+        cartRef.current,
+        products,
+        nextInventory
+      );
+      const inventoryChanges = getCartInventoryChanges(previousCartState, nextCartState);
+
+      if (inventoryChanges.length > 0) {
+        const nextCartChangeNotice = buildCartChangeNotice(inventoryChanges);
+
+        trackAnalyticsEvent({
+          name: "cart_inventory_updated",
+          sectionId: "shop",
+          elementId: "cart_inventory_change",
+          checkoutStep: checkoutStepRef.current,
+          metadata: {
+            affectedItems: inventoryChanges.length,
+            movedFromPaymentStep: checkoutStepRef.current === "payment"
+          }
+        });
+        setCartChangeNotice(nextCartChangeNotice);
+        setCartChangeAcknowledged(false);
+        setCartChangeTouched(false);
+        setPreorderAcknowledged(false);
+        setPreorderTouched(false);
+        setShowCartChangeModal(true);
+
+        if (checkoutStepRef.current === "payment") {
+          setCheckoutStep("details");
+        }
+      }
+    }
+
+    setLiveInventory(nextInventory);
+  }, [products]);
 
   // Poll inventory after mount. Keep first render stable using `inventory` prop.
   useEffect(() => {
@@ -568,11 +819,139 @@ export default function Storefront({ products, inventory = null }) {
       window.removeEventListener("focus", fetchInventory);
       document.removeEventListener("visibilitychange", handleVisibility);
     };
-  }, []);
+  }, [applyInventory]);
 
   useEffect(() => {
     applyInventory(inventory);
-  }, [inventory]);
+  }, [applyInventory, inventory]);
+
+  useEffect(() => {
+    const validSkus = new Set(products.map((product) => product.sku));
+
+    try {
+      const storedCart = window.localStorage.getItem(CART_STORAGE_KEY);
+      if (!storedCart) {
+        setCartHydrated(true);
+        return;
+      }
+
+      const parsedCart = JSON.parse(storedCart);
+      setCart(sanitizeStoredCart(parsedCart, validSkus));
+    } catch {
+      try {
+        window.localStorage.removeItem(CART_STORAGE_KEY);
+      } catch {
+        // Ignore local persistence cleanup errors.
+      }
+    } finally {
+      setCartHydrated(true);
+    }
+  }, [products]);
+
+  useEffect(() => {
+    if (!cartHydrated) return;
+
+    try {
+      if (Object.keys(cart).length === 0) {
+        window.localStorage.removeItem(CART_STORAGE_KEY);
+        return;
+      }
+
+      window.localStorage.setItem(CART_STORAGE_KEY, JSON.stringify(cart));
+    } catch {
+      // Ignore local persistence errors; the storefront remains functional.
+    }
+  }, [cart, cartHydrated]);
+
+  useEffect(() => {
+    if (!showCartChangeModal) return undefined;
+
+    cartChangeLastFocusedRef.current =
+      document.activeElement instanceof HTMLElement ? document.activeElement : null;
+
+    const dialog = cartChangeDialogRef.current;
+
+    const getFocusableElements = () => {
+      if (!(dialog instanceof HTMLElement)) {
+        return [];
+      }
+
+      return Array.from(
+        dialog.querySelectorAll(
+          'button:not([disabled]), [href], input:not([disabled]), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex="-1"])'
+        )
+      ).filter(
+        (element) =>
+          element instanceof HTMLElement &&
+          !element.hasAttribute("hidden") &&
+          element.getAttribute("aria-hidden") !== "true" &&
+          element.getClientRects().length > 0
+      );
+    };
+
+    const handleKeyDown = (event) => {
+      if (event.key === "Escape") {
+        closeCartChangeModal("escape");
+        return;
+      }
+
+      if (event.key !== "Tab") {
+        return;
+      }
+
+      const focusableElements = getFocusableElements();
+      if (!focusableElements.length) {
+        event.preventDefault();
+        if (dialog instanceof HTMLElement) {
+          dialog.focus();
+        }
+        return;
+      }
+
+      const firstFocusable = focusableElements[0];
+      const lastFocusable = focusableElements[focusableElements.length - 1];
+
+      if (event.shiftKey && document.activeElement === firstFocusable) {
+        event.preventDefault();
+        lastFocusable.focus();
+      } else if (!event.shiftKey && document.activeElement === lastFocusable) {
+        event.preventDefault();
+        firstFocusable.focus();
+      }
+    };
+
+    lockPageScroll();
+    window.addEventListener("keydown", handleKeyDown);
+    window.requestAnimationFrame(() => {
+      const focusableElements = getFocusableElements();
+      if (focusableElements[0] instanceof HTMLElement) {
+        focusableElements[0].focus();
+      } else if (dialog instanceof HTMLElement) {
+        dialog.focus();
+      }
+    });
+
+    return () => {
+      unlockPageScroll();
+      window.removeEventListener("keydown", handleKeyDown);
+    };
+  }, [closeCartChangeModal, showCartChangeModal]);
+
+  useEffect(() => {
+    if (!showCartChangeModal || !cartChangeNotice) return;
+
+    trackAnalyticsEvent({
+      name: "checkout_cart_change_modal_view",
+      sectionId: "shop",
+      elementId: "cart_change_modal",
+      checkoutStep,
+      metadata: {
+        affectedItems: Array.isArray(cartChangeNotice.details)
+          ? cartChangeNotice.details.length
+          : 0
+      }
+    });
+  }, [cartChangeNotice, checkoutStep, showCartChangeModal]);
 
   useEffect(() => {
     if (!showPickupPolicyModal) return undefined;
@@ -761,9 +1140,17 @@ export default function Storefront({ products, inventory = null }) {
   const preorderAcknowledgementError = hasPreorderItems &&
     !preorderAcknowledged &&
     (submitAttempted || preorderTouched);
+  const cartChangeAcknowledgementError = Boolean(cartChangeNotice) &&
+    !cartChangeAcknowledged &&
+    (submitAttempted || cartChangeTouched);
   const showGlobalNotice = Boolean(notice) && !(
     status === "error" &&
-    (isPaymentStep || pickupAcknowledgementError || preorderAcknowledgementError)
+    (
+      isPaymentStep ||
+      pickupAcknowledgementError ||
+      preorderAcknowledgementError ||
+      cartChangeAcknowledgementError
+    )
   );
   const requiresAddress = fulfillment === "ship";
   const cartCountLabel = `${itemCount} item${itemCount === 1 ? "" : "s"}`;
@@ -793,8 +1180,9 @@ export default function Storefront({ products, inventory = null }) {
   useEffect(() => {
     if (itemCount === 0) {
       checkoutStartedRef.current = false;
+      clearCartChangeReview();
     }
-  }, [itemCount]);
+  }, [clearCartChangeReview, itemCount]);
 
   useEffect(() => {
     const previousStep = previousCheckoutStepRef.current;
@@ -926,6 +1314,9 @@ export default function Storefront({ products, inventory = null }) {
   }, [measurePairingsPanels, products, openPairings]);
 
   const buildOrderPayload = useCallback(() => {
+    const hasCompleteInventorySnapshot =
+      cartItems.length > 0 && cartItems.every((item) => item.hasInventoryRecord);
+
     return {
       fulfillment: normalizeFulfillment(fulfillment),
       customer: {
@@ -946,7 +1337,18 @@ export default function Storefront({ products, inventory = null }) {
       items: cartItems.map((item) => ({
         sku: item.sku,
         quantity: item.quantity
-      }))
+      })),
+      inventorySnapshot: hasCompleteInventorySnapshot
+        ? {
+            items: cartItems.map((item) => ({
+              sku: item.sku,
+              quantity: item.quantity,
+              available: Math.max(0, Number(item.available || 0)),
+              inStockUnits: Math.max(0, Number(item.inStockUnits || 0)),
+              preorderUnits: Math.max(0, Number(item.preorderUnits || 0))
+            }))
+          }
+        : undefined
     };
   }, [cartItems, formValues, fulfillment, pickupAcknowledged]);
 
@@ -1009,6 +1411,8 @@ export default function Storefront({ products, inventory = null }) {
       }
     });
 
+    refreshPendingCartChangeReview(itemCount + 1);
+
     setCart((prev) => {
       return {
         ...prev,
@@ -1036,6 +1440,7 @@ export default function Storefront({ products, inventory = null }) {
     setPickupTouched(false);
     setPreorderAcknowledged(false);
     setPreorderTouched(false);
+    clearCartChangeReview();
     checkoutStartedRef.current = false;
 
     if (status !== "idle") {
@@ -1069,12 +1474,14 @@ export default function Storefront({ products, inventory = null }) {
     });
 
     resetPaymentState({ keepPaymentStep: isPaymentStep && nextItemCount > 0 });
+    refreshPendingCartChangeReview(nextItemCount);
 
     if (nextItemCount === 0) {
       setPickupAcknowledged(false);
       setPickupTouched(false);
       setPreorderAcknowledged(false);
       setPreorderTouched(false);
+      clearCartChangeReview();
       checkoutStartedRef.current = false;
     }
 
@@ -1225,7 +1632,53 @@ export default function Storefront({ products, inventory = null }) {
     }
   };
 
+  const handleCartChangeAcknowledgementChange = (event) => {
+    const isChecked = Boolean(event.currentTarget.checked);
+    setCartChangeAcknowledged(isChecked);
+    setCartChangeTouched(true);
+    trackAnalyticsEvent({
+      name: "checkout_cart_change_ack_toggled",
+      sectionId: "shop",
+      elementId: "cart_change_acknowledgement",
+      checkoutStep,
+      metadata: {
+        result: isChecked ? "checked" : "unchecked",
+        affectedItems: Array.isArray(cartChangeNotice?.details)
+          ? cartChangeNotice.details.length
+          : 0
+      }
+    });
+
+    if (isChecked) {
+      clearCartChangeReview();
+
+      if (status === "error" && CART_CHANGE_NOTICE_MESSAGES.has(notice)) {
+        setStatus("idle");
+        setNotice("");
+      }
+    }
+  };
+
   const createPaymentIntent = useCallback(async () => {
+    if (cartChangeNotice && !cartChangeAcknowledged) {
+      const message = "Please review and acknowledge the updated cart before payment.";
+      trackAnalyticsEvent({
+        name: "checkout_validation_blocked",
+        sectionId: "shop",
+        elementId: "cart_change_acknowledgement",
+        checkoutStep: "payment",
+        metadata: {
+          reason: "missing_cart_change_ack",
+          validationCount: 1
+        }
+      });
+      setCartChangeTouched(true);
+      setStatus("error");
+      setNotice(message);
+      focusCartChangeAcknowledgement();
+      throw new Error(message);
+    }
+
     if (fulfillment === "market" && !pickupAcknowledged) {
       const message = "Please accept the pickup policy before proceeding to payment.";
       trackAnalyticsEvent({
@@ -1273,6 +1726,17 @@ export default function Storefront({ products, inventory = null }) {
     const result = await response.json();
 
     if (!response.ok) {
+      if (
+        response.status === 409 &&
+        result?.code === "inventory_changed" &&
+        isInventorySnapshot(result?.inventory)
+      ) {
+        applyInventory(result.inventory);
+        setCheckoutStep("details");
+        setPreorderAcknowledged(false);
+        setPreorderTouched(false);
+      }
+
       if (result?.fieldErrors && typeof result.fieldErrors === "object") {
         setFieldErrors((prev) => ({ ...prev, ...result.fieldErrors }));
         focusFirstInvalidField(result.fieldErrors, fulfillment);
@@ -1286,7 +1750,11 @@ export default function Storefront({ products, inventory = null }) {
 
     return result.clientSecret;
   }, [
+    applyInventory,
     buildOrderPayload,
+    cartChangeAcknowledged,
+    cartChangeNotice,
+    focusCartChangeAcknowledgement,
     focusFirstInvalidField,
     focusPickupAcknowledgement,
     focusPreorderAcknowledgement,
@@ -1379,6 +1847,24 @@ export default function Storefront({ products, inventory = null }) {
       setStatus("error");
       setNotice("Please fix the highlighted fields before checkout.");
       focusFirstInvalidField(nextErrors, fulfillment);
+      return;
+    }
+
+    if (cartChangeNotice && !cartChangeAcknowledged) {
+      trackAnalyticsEvent({
+        name: "checkout_validation_blocked",
+        sectionId: "shop",
+        elementId: "cart_change_acknowledgement",
+        checkoutStep: "details",
+        metadata: {
+          reason: "missing_cart_change_ack",
+          validationCount: 1
+        }
+      });
+      setCartChangeTouched(true);
+      setStatus("error");
+      setNotice("Please review and acknowledge the updated cart before proceeding to payment.");
+      focusCartChangeAcknowledgement();
       return;
     }
 
@@ -1524,20 +2010,69 @@ export default function Storefront({ products, inventory = null }) {
     );
   };
 
-  const renderCheckoutAcknowledgements = () => {
-    const pickupAcknowledgement = renderPickupAcknowledgement();
-    const preorderAcknowledgement = renderPreorderAcknowledgement();
+  const renderCartChangeAcknowledgement = () => {
+    if (!cartChangeNotice) return null;
 
-    if (!pickupAcknowledgement && !preorderAcknowledgement) return null;
+    return (
+      <div
+        key="cart-change-acknowledgement"
+        className={`preorder-acknowledgement-wrap${
+          cartChangeAcknowledgementError ? " preorder-acknowledgement-wrap--error" : ""
+        }`}
+      >
+        <label className="preorder-acknowledgement">
+          <input
+            ref={setFieldRef("cartChangeAcknowledgement")}
+            type="checkbox"
+            name="cartChangeAcknowledgement"
+            checked={cartChangeAcknowledged}
+            onChange={handleCartChangeAcknowledgementChange}
+            onBlur={() => setCartChangeTouched(true)}
+            aria-invalid={cartChangeAcknowledgementError}
+            aria-describedby={
+              cartChangeAcknowledgementError
+                ? "cart-change-acknowledgement-error"
+                : undefined
+            }
+            required
+          />
+          <span>{CART_CHANGE_ACKNOWLEDGEMENT_LABEL}</span>
+        </label>
+        <p className="preorder-acknowledgement__notice">{cartChangeNotice.summary}</p>
+        {cartChangeNotice.details.map((detail) => (
+          <p key={detail} className="preorder-acknowledgement__notice">
+            {detail}
+          </p>
+        ))}
+        {cartChangeAcknowledgementError ? (
+          <span
+            id="cart-change-acknowledgement-error"
+            className="form-field__error"
+            role="alert"
+          >
+            Please check this box to confirm you reviewed the updated cart.
+          </span>
+        ) : null}
+      </div>
+    );
+  };
+
+  const renderCheckoutAcknowledgements = () => {
+    const acknowledgements = [
+      renderCartChangeAcknowledgement(),
+      renderPickupAcknowledgement(),
+      renderPreorderAcknowledgement()
+    ].filter(Boolean);
+
+    if (acknowledgements.length === 0) return null;
 
     return (
       <div className={`checkout-acknowledgements${
-        pickupAcknowledgement && preorderAcknowledgement
+        acknowledgements.length > 1
           ? " checkout-acknowledgements--double"
           : ""
       }`}>
-        {pickupAcknowledgement}
-        {preorderAcknowledgement}
+        {acknowledgements}
       </div>
     );
   };
@@ -1603,6 +2138,21 @@ export default function Storefront({ products, inventory = null }) {
           <strong>Pre-order notice:</strong>
           {" "}
           {PREORDER_TIMING_NOTICE}
+        </div>
+      ) : null}
+
+      {cartChangeNotice ? (
+        <div className="preorder-acknowledgement-wrap" role="status" aria-live="polite">
+          <p className="preorder-acknowledgement__notice">
+            <strong>Cart updated.</strong>
+            {" "}
+            {cartChangeNotice.summary}
+          </p>
+          {cartChangeNotice.details.map((detail) => (
+            <p key={`cart-change-${detail}`} className="preorder-acknowledgement__notice">
+              {detail}
+            </p>
+          ))}
         </div>
       ) : null}
 
@@ -1686,7 +2236,7 @@ export default function Storefront({ products, inventory = null }) {
               </svg>
             </div>
             <h4>Thank you for your order!</h4>
-            <p>Your payment was received. Confirmation details are on the way.</p>
+            <p>{orderSuccessPopupMessage}</p>
           </div>
         </div>
       ) : null}
@@ -2348,6 +2898,60 @@ export default function Storefront({ products, inventory = null }) {
           </form>
         </aside>
       </div>
+
+      {showCartChangeModal && cartChangeNotice && typeof document !== "undefined"
+        ? createPortal(
+        <div
+          className="cart-change-modal"
+          onClick={() => closeCartChangeModal("overlay")}
+        >
+          <div
+            className="cart-change-modal__panel"
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="cart-change-modal-title"
+            aria-describedby="cart-change-modal-intro"
+            ref={cartChangeDialogRef}
+            tabIndex={-1}
+            onClick={(event) => event.stopPropagation()}
+            data-analytics-id="cart_change_modal"
+            data-analytics-hover="true"
+          >
+            <div className="cart-change-modal__eyebrow">Cart Updated</div>
+            <h3 id="cart-change-modal-title">Your cart changed during checkout</h3>
+            <p id="cart-change-modal-intro" className="cart-change-modal__intro">
+              {cartChangeNotice.summary}
+            </p>
+            {cartChangeNotice.details.length > 0 ? (
+              <ul className="cart-change-modal__list">
+                {cartChangeNotice.details.map((detail) => (
+                  <li key={detail}>{detail}</li>
+                ))}
+              </ul>
+            ) : null}
+            <p className="cart-change-modal__note">
+              Review the updated cart, then acknowledge the change before continuing to payment.
+            </p>
+            <div className="cart-change-modal__actions">
+              <button
+                type="button"
+                className="button button--dark"
+                onClick={handleReviewUpdatedCart}
+              >
+                Review Updated Cart
+              </button>
+              <button
+                type="button"
+                className="button button--light"
+                onClick={() => closeCartChangeModal("close_button")}
+              >
+                Close
+              </button>
+            </div>
+          </div>
+        </div>,
+        document.body
+      ) : null}
 
       {showPickupPolicyModal && typeof document !== "undefined"
         ? createPortal(

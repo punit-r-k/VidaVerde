@@ -1,10 +1,15 @@
 import SiteHeader from "../components/SiteHeader";
 import SiteFooter from "../components/SiteFooter";
 import RevealOnScroll from "../components/RevealOnScroll";
+import {
+  SUPPORT_EMAIL,
+  SUPPORT_PHONE_DISPLAY,
+  createPageMetadata
+} from "@/lib/siteMetadata";
 
 const LAST_UPDATED = "April 15, 2026";
-const CONTACT_EMAIL = "vidaverdemicrogreens@gmail.com";
-const CONTACT_PHONE = "(713) 478-1878";
+const CONTACT_EMAIL = SUPPORT_EMAIL;
+const CONTACT_PHONE = SUPPORT_PHONE_DISPLAY;
 const CONTACT_TEXT_LINK = "7134781878";
 
 const accessibilityHighlights = [
@@ -82,11 +87,13 @@ const accessibilitySections = [
   }
 ];
 
-export const metadata = {
-  title: "Accessibility Statement | Vida Verde",
+export const metadata = createPageMetadata({
+  title: "Accessibility Statement",
   description:
-    "Read how Vida Verde approaches website accessibility, ongoing improvements, and how to report an accessibility issue."
-};
+    "Read how Vida Verde approaches website accessibility, ongoing improvements, and how to report an accessibility issue.",
+  path: "/accessibility-statement",
+  type: "article"
+});
 
 export default function AccessibilityStatementPage() {
   return (

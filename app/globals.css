@@ -1273,6 +1273,74 @@ img {
   line-height: 1.5;
 }
 
+.cart-change-modal {
+  position: fixed;
+  inset: 0;
+  z-index: 1400;
+  display: grid;
+  place-items: center;
+  padding: clamp(18px, 4vw, 30px);
+  background: rgba(8, 29, 21, 0.58);
+  -webkit-backdrop-filter: blur(6px);
+  backdrop-filter: blur(6px);
+}
+
+.cart-change-modal__panel {
+  width: min(560px, 100%);
+  display: grid;
+  gap: 16px;
+  padding: clamp(22px, 3vw, 30px);
+  border-radius: 24px;
+  border: 1px solid rgba(35, 101, 72, 0.22);
+  background:
+    radial-gradient(circle at top left, rgba(236, 248, 241, 0.96), rgba(255, 255, 255, 0.98) 58%),
+    var(--surface-elevated);
+  box-shadow: 0 28px 72px rgba(8, 29, 21, 0.28);
+  color: var(--green-950);
+}
+
+.cart-change-modal__eyebrow {
+  margin: 0;
+  font-size: 0.72rem;
+  font-weight: 700;
+  letter-spacing: 0.18em;
+  text-transform: uppercase;
+  color: var(--brand);
+}
+
+.cart-change-modal__panel h3 {
+  margin: 0;
+  font-family: var(--font-fraunces), serif;
+  font-size: clamp(1.5rem, 1.28rem + 0.7vw, 2rem);
+  line-height: 1.08;
+}
+
+.cart-change-modal__intro,
+.cart-change-modal__note {
+  margin: 0;
+  color: rgba(41, 54, 47, 0.88);
+  line-height: 1.55;
+}
+
+.cart-change-modal__list {
+  margin: 0;
+  padding-left: 1.15rem;
+  display: grid;
+  gap: 8px;
+  color: rgba(41, 54, 47, 0.92);
+  line-height: 1.48;
+}
+
+.cart-change-modal__actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px;
+}
+
+.cart-change-modal__actions .button {
+  min-width: 180px;
+}
+
 @keyframes order-success-pop {
   0% {
     opacity: 0;
@@ -1965,6 +2033,16 @@ select:focus {
 }
 
 @media (max-width: 680px) {
+  .cart-change-modal__panel {
+    padding: 22px 18px;
+    border-radius: 20px;
+  }
+
+  .cart-change-modal__actions .button {
+    width: 100%;
+    min-width: 0;
+  }
+
   .pickup-policy-modal {
     padding: 12px;
   }
@@ -2212,10 +2290,44 @@ select:focus {
   position: relative;
   min-height: 320px;
   border-left: 1px solid var(--line);
+  overflow: hidden;
+  background:
+    radial-gradient(circle at top left, rgba(217, 138, 98, 0.2), transparent 30%),
+    linear-gradient(180deg, rgba(22, 77, 54, 0.92), rgba(35, 101, 72, 0.76));
+}
+
+.email-popup__media::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  z-index: 1;
+  background:
+    linear-gradient(180deg, rgba(255, 253, 248, 0.04) 0%, rgba(21, 89, 63, 0.12) 30%, rgba(21, 89, 63, 0.62) 100%);
+  pointer-events: none;
+}
+
+.email-popup__media::after {
+  content: "Vida Verde";
+  position: absolute;
+  left: 20px;
+  bottom: 18px;
+  z-index: 2;
+  padding: 8px 12px;
+  border: 1px solid rgba(255, 255, 255, 0.28);
+  border-radius: 999px;
+  background: rgba(22, 77, 54, 0.54);
+  color: var(--white);
+  font-family: var(--font-fraunces), serif;
+  font-size: 0.9rem;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  pointer-events: none;
 }
 
 .email-popup__media img {
   object-fit: cover;
+  object-position: center;
+  filter: saturate(0.92) contrast(1.01);
 }
 
 @media (max-width: 900px) {

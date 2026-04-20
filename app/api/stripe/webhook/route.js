@@ -167,7 +167,8 @@ const runOrderSideEffects = async ({
   receiptNumber,
   paymentMethodLabel,
   customer,
-  items
+  items,
+  strictConfirmationEmailAutomation = true
 }) => {
   if (!orderId) {
     return {
@@ -200,6 +201,8 @@ const runOrderSideEffects = async ({
     paymentMethodLabel,
     customer,
     items
+  }, {
+    failOnAutomationError: strictConfirmationEmailAutomation
   });
 };
 
@@ -301,7 +304,8 @@ const handleCheckoutSessionEvent = async (session, eventType, eventPlacedAt = ""
     receiptNumber,
     paymentMethodLabel,
     customer,
-    items
+    items,
+    strictConfirmationEmailAutomation: true
   });
 };
 
@@ -392,7 +396,8 @@ const handlePaymentIntentSucceeded = async (intent, eventPlacedAt = "") => {
     receiptNumber,
     paymentMethodLabel,
     customer,
-    items
+    items,
+    strictConfirmationEmailAutomation: true
   });
 };
 

@@ -93,6 +93,101 @@ const getChargePaymentMethodLabel = (charge) => {
 const getChargeReceiptNumber = (charge) =>
   toText(charge?.receipt_number || charge?.id, 255);
 
+const toCount = (value) => {
+  const count = Number(value);
+  return Number.isFinite(count) && count > 0 ? Math.floor(count) : 0;
+};
+
+const parseExpectedPreorderMap = (source) => {
+  const raw = toText(source?.metadata?.expected_preorder, 500);
+  if (!raw) {
+    return new Map();
+  }
+
+  return raw
+    .split(",")
+    .map((entry) => entry.trim())
+    .filter(Boolean)
+    .reduce((map, entry) => {
+      const [rawSku, rawPreorderQty] = entry.split(":");
+      const sku = String(rawSku || "").trim().toUpperCase();
+      if (!sku) {
+        return map;
+      }
+
+      map.set(sku, toCount(rawPreorderQty));
+      return map;
+    }, new Map());
+};
+
+const getRecordedOrderItems = async (orderId) => {
+  if (!orderId) {
+    return [];
+  }
+
+  const { data, error } = await supabaseAdmin
+    .from("order_items")
+    .select("sku, quantity, preorder_qty, products(name)")
+    .eq("order_id", orderId);
+
+  if (error) {
+    console.error("order allocation read error:", error);
+    return [];
+  }
+
+  return Array.isArray(data) ? data : [];
+};
+
+const buildInventoryShiftWarning = (orderItems, expectedPreorderMap) => {
+  if (!(expectedPreorderMap instanceof Map) || expectedPreorderMap.size === 0) {
+    return null;
+  }
+
+  const shiftedItems = (Array.isArray(orderItems) ? orderItems : [])
+    .map((item) => {
+      const sku = toText(item?.sku, 64).toUpperCase();
+      if (!sku) {
+        return null;
+      }
+
+      const expectedPreorderQty = expectedPreorderMap.get(sku) ?? 0;
+      const actualPreorderQty = Math.min(
+        toCount(item?.quantity),
+        toCount(item?.preorder_qty)
+      );
+
+      if (actualPreorderQty <= expectedPreorderQty) {
+        return null;
+      }
+
+      return {
+        name: toText(item?.products?.name || sku, 120),
+        shiftedQty: actualPreorderQty - expectedPreorderQty
+      };
+    })
+    .filter(Boolean);
+
+  if (shiftedItems.length === 0) {
+    return null;
+  }
+
+  const itemSummary = shiftedItems
+    .slice(0, 3)
+    .map(
+      (item) =>
+        `${item.name} (${item.shiftedQty} ${item.shiftedQty === 1 ? "unit" : "units"} now preorder)`
+    )
+    .join(", ");
+  const hasMoreItems = shiftedItems.length > 3;
+
+  return {
+    code: "inventory_shifted_to_preorder",
+    customerMessage: `Your payment was received and the order is confirmed. While payment was processing, live inventory changed and some items moved to preorder: ${itemSummary}${hasMoreItems ? ", plus additional items" : ""}. Your confirmation reflects the updated pickup and preorder split.`,
+    popupMessage:
+      "Order confirmed. Some items moved to preorder while payment was processing."
+  };
+};
+
 const recordPaidOrder = async ({
   paymentSessionId,
   paymentReference,
@@ -153,7 +248,8 @@ const runOrderSideEffects = async ({
   receiptNumber,
   paymentMethodLabel,
   customer,
-  items
+  items,
+  strictConfirmationEmailAutomation = false
 }) => {
   if (!orderId) {
     return {
@@ -186,6 +282,8 @@ const runOrderSideEffects = async ({
     paymentMethodLabel,
     customer,
     items
+  }, {
+    failOnAutomationError: strictConfirmationEmailAutomation
   });
 };
 
@@ -281,6 +379,13 @@ const finalizePaymentIntent = async (intent) => {
     };
   }
 
+  const expectedPreorderMap = parseExpectedPreorderMap(intent);
+  const recordedOrderItems = await getRecordedOrderItems(recordResult.orderId);
+  const inventoryShiftWarning = buildInventoryShiftWarning(
+    recordedOrderItems,
+    expectedPreorderMap
+  );
+
   const sideEffectsResult = await runOrderSideEffects({
     orderId: recordResult.orderId,
     fulfillment: toFulfillment(metadata.fulfillment),
@@ -293,7 +398,8 @@ const finalizePaymentIntent = async (intent) => {
     receiptNumber,
     paymentMethodLabel,
     customer,
-    items
+    items,
+    strictConfirmationEmailAutomation: false
   });
 
   if (!sideEffectsResult.ok) {
@@ -304,7 +410,13 @@ const finalizePaymentIntent = async (intent) => {
     ok: true,
     recorded: true,
     paymentStatus,
-    orderId: recordResult.orderId
+    orderId: recordResult.orderId,
+    automationWarnings: [
+      ...(inventoryShiftWarning ? [inventoryShiftWarning] : []),
+      ...(Array.isArray(sideEffectsResult?.automationWarnings)
+        ? sideEffectsResult.automationWarnings
+        : [])
+    ]
   };
 };
 
@@ -388,6 +500,10 @@ export async function POST(request) {
 
   return respond.json({
     ok: true,
-    recorded: true
+    recorded: true,
+    orderId: result.orderId || "",
+    automationWarnings: Array.isArray(result.automationWarnings)
+      ? result.automationWarnings
+      : []
   });
 }

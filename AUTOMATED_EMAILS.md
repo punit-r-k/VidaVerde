@@ -22,6 +22,7 @@ Vida Verde does **not** currently send:
 - If the email system is not set up, the website skips the email instead of crashing.
 - These are service emails, not marketing emails.
 - The goal is to give customers order and pickup information they need.
+- If an order-confirmation email automation fails after payment succeeds, checkout still confirms the order and shows a fallback notice telling the customer how to contact Vida Verde.
 
 ## 1. Order Confirmation
 
@@ -34,6 +35,7 @@ Vida Verde does **not** currently send:
 - It should only be sent once per order.
 - If the customer's email address is missing, it cannot be sent.
 - If the order details are incomplete, it cannot be sent.
+- If the confirmation email automation has a temporary problem, the paid order still completes and the customer sees a fallback message with support instructions.
 
 ### What the email says
 
@@ -44,6 +46,7 @@ Vida Verde does **not** currently send:
 - The subtotal, tax, shipping, and total
 - The shipping address, if it is a shipping order
 - The pickup details, if it is a market pickup order
+- A downloadable calendar file for market pickup orders with an assigned pickup date
 - A support text number in case the customer has questions
 
 ### Special note for pre-orders
@@ -51,7 +54,9 @@ Vida Verde does **not** currently send:
 If the order contains pre-order items, the email explains that clearly:
 
 - If everything is still a pre-order, it explains that a pickup date is not assigned yet.
+- If everything is still a pre-order, the calendar file waits until a pickup date is actually assigned.
 - If the order is mixed, it explains which items are ready now and which items will be ready later.
+- The calendar file for mixed pickup orders includes both the ready-now items and the items still not ready.
 
 ### Design
 
@@ -78,10 +83,12 @@ This can happen on **any day of the week**. It is **not** limited to Fridays.
 - Great news that pre-ordered items are now ready
 - Which items just became ready
 - Sometimes the customer's full pickup list for that order, if other items were already ready earlier
+- Any preorder items from the same order that are still not ready yet
 - The market name
 - The pickup day
 - The market address
 - The pickup window
+- A downloadable calendar file for the full Saturday pickup window that includes ready and not-ready item notes
 - A reminder to text if they cannot make pickup
 
 ### Design
@@ -110,10 +117,12 @@ This reminder can also be sent manually by the team if needed.
 
 - A reminder that pickup is tomorrow
 - The customer's pickup list
+- Any items from the same order that are still not ready for tomorrow's pickup
 - The market name
 - The pickup date
 - The market address
 - The pickup window
+- A downloadable calendar file for the full Saturday pickup window that includes ready and not-ready item notes
 - Simple reminder notes about pickup
 - A reminder to text if they cannot make pickup
 

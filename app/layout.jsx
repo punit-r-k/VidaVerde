@@ -2,6 +2,11 @@ import "./globals.css";
 import { Fraunces, Sora } from "next/font/google";
 import { Suspense } from "react";
 import AnalyticsRuntime from "./components/AnalyticsRuntime";
+import {
+  getBaseMetadata,
+  getOrganizationJsonLd,
+  getWebsiteJsonLd
+} from "@/lib/siteMetadata";
 
 const fraunces = Fraunces({
   subsets: ["latin"],
@@ -15,20 +20,27 @@ const sora = Sora({
   display: "swap"
 });
 
-export const metadata = {
-  title: "Vida Verde Sauerkraut",
-  description:
-    "Live fermented sauerkraut and hot sauce crafted in small batches for daily gut nourishment.",
-  icons: {
-    icon: "/logo.svg",
-    shortcut: "/logo.svg"
-  }
-};
+export const metadata = getBaseMetadata();
 
 export default function RootLayout({ children }) {
+  const organizationJsonLd = getOrganizationJsonLd();
+  const websiteJsonLd = getWebsiteJsonLd();
+
   return (
     <html lang="en" className={`${fraunces.variable} ${sora.variable}`}>
       <body>
+        <script
+          type="application/ld+json"
+          dangerouslySetInnerHTML={{
+            __html: JSON.stringify(organizationJsonLd)
+          }}
+        />
+        <script
+          type="application/ld+json"
+          dangerouslySetInnerHTML={{
+            __html: JSON.stringify(websiteJsonLd)
+          }}
+        />
         <a className="skip-link" href="#main-content">
           Skip to main content
         </a>

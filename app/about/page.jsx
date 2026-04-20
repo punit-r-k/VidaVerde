@@ -1,12 +1,15 @@
 import SiteHeader from "../components/SiteHeader";
 import SiteFooter from "../components/SiteFooter";
 import Image from "next/image";
+import { createPageMetadata } from "@/lib/siteMetadata";
 
-export const metadata = {
-  title: "Founder | Vida Verde",
+export const metadata = createPageMetadata({
+  title: "Founder Story",
   description:
-    "Meet the founder behind Vida Verde and the story of living fermentation, gut health, and real food."
-};
+    "Meet the founder behind Vida Verde and learn how a home fermentation practice grew into a weekly market business built around live fermented foods.",
+  path: "/about",
+  type: "profile"
+});
 
 export default function AboutPage() {
   return (

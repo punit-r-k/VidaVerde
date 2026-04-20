@@ -6,6 +6,7 @@ import {
 import { MARKET_PICKUP_POLICY_VERSION } from "@/lib/pickupDetails";
 import { getProductMap } from "@/lib/products";
 import { getRouteRateLimitConfig } from "@/lib/rateLimit";
+import { getInventoryMap } from "@/lib/stock";
 import { stripeConfig, stripeRequest } from "@/lib/stripe";
 
 const ORDER_RATE_LIMIT = getRouteRateLimitConfig("ORDER_CREATE", {
@@ -21,6 +22,112 @@ const buildOrderSummary = (lineItems) =>
 
 const buildSkuSummary = (lineItems) =>
   lineItems.map((item) => `${item.sku}x${item.quantity}`).join(", ");
+
+const toCount = (value) => {
+  const count = Number(value);
+  return Number.isFinite(count) && count > 0 ? Math.floor(count) : 0;
+};
+
+const getCurrentAllocation = (quantity, inventoryRecord) => {
+  const available = Math.max(0, Number(inventoryRecord?.on_hand || 0));
+  const safeQuantity = toCount(quantity);
+
+  return {
+    available,
+    inStockUnits: Math.min(safeQuantity, available),
+    preorderUnits: Math.max(0, safeQuantity - available)
+  };
+};
+
+const serializeExpectedPreorderMap = (items, inventoryMap) =>
+  (Array.isArray(items) ? items : [])
+    .map((item) => {
+      const sku = String(item?.sku || "").trim().toUpperCase();
+      const preorderUnits = getCurrentAllocation(item?.quantity, inventoryMap?.[sku]).preorderUnits;
+      return `${sku}:${preorderUnits}`;
+    })
+    .filter(Boolean)
+    .join(",");
+
+const getInventoryConflicts = ({ items, inventorySnapshot, inventoryMap, productMap }) => {
+  const snapshotItems = Array.isArray(inventorySnapshot?.items) ? inventorySnapshot.items : [];
+  if (snapshotItems.length === 0) {
+    return [];
+  }
+
+  const snapshotBySku = new Map(
+    snapshotItems.map((item) => [
+      String(item?.sku || "").trim().toUpperCase(),
+      {
+        quantity: toCount(item?.quantity),
+        inStockUnits: toCount(item?.inStockUnits),
+        preorderUnits: toCount(item?.preorderUnits)
+      }
+    ])
+  );
+
+  return (Array.isArray(items) ? items : [])
+    .map((item) => {
+      const sku = String(item?.sku || "").trim().toUpperCase();
+      const snapshot = snapshotBySku.get(sku);
+      if (!snapshot) {
+        return {
+          sku,
+          name: String(productMap.get(sku)?.name || sku).trim(),
+          missingSnapshot: true,
+          previousInStockUnits: 0,
+          previousPreorderUnits: 0,
+          currentInStockUnits: 0,
+          currentPreorderUnits: 0
+        };
+      }
+
+      const current = getCurrentAllocation(item?.quantity, inventoryMap?.[sku]);
+      const isConflict =
+        snapshot.quantity !== toCount(item?.quantity) ||
+        snapshot.inStockUnits !== current.inStockUnits ||
+        snapshot.preorderUnits !== current.preorderUnits;
+
+      if (!isConflict) {
+        return null;
+      }
+
+      return {
+        sku,
+        name: String(productMap.get(sku)?.name || sku).trim(),
+        missingSnapshot: false,
+        previousInStockUnits: snapshot.inStockUnits,
+        previousPreorderUnits: snapshot.preorderUnits,
+        currentInStockUnits: current.inStockUnits,
+        currentPreorderUnits: current.preorderUnits
+      };
+    })
+    .filter(Boolean);
+};
+
+const buildInventoryConflictMessage = (conflicts) => {
+  const normalizedConflicts = Array.isArray(conflicts) ? conflicts : [];
+  if (normalizedConflicts.length === 0) {
+    return "Inventory changed while you were checking out. Review the updated cart before continuing to payment.";
+  }
+
+  if (normalizedConflicts.some((conflict) => conflict?.missingSnapshot)) {
+    return "We refreshed your cart to match the latest stock. Review the updated cart before continuing to payment.";
+  }
+
+  const reducedPreorders = normalizedConflicts.some(
+    (conflict) => (conflict?.currentPreorderUnits || 0) < (conflict?.previousPreorderUnits || 0)
+  );
+  const increasedPreorders = normalizedConflicts.some(
+    (conflict) => (conflict?.currentPreorderUnits || 0) > (conflict?.previousPreorderUnits || 0)
+  );
+
+  if (reducedPreorders && !increasedPreorders) {
+    return "Inventory was refreshed while you were checking out. Some items that looked like preorder are now in stock. Review the updated cart before continuing to payment.";
+  }
+
+  return "Inventory changed while you were checking out. Review the updated in-stock and preorder quantities before continuing to payment.";
+};
 
 export const runtime = "nodejs";
 
@@ -69,7 +176,8 @@ export async function POST(request) {
     customer,
     consents,
     items: normalizedItems,
-    fulfillment: normalizedFulfillment
+    fulfillment: normalizedFulfillment,
+    inventorySnapshot
   } = parsedPayload.data;
   const { name, email } = customer;
   const isPickup = normalizedFulfillment === "market";
@@ -82,7 +190,17 @@ export async function POST(request) {
   }
 
   const skus = normalizedItems.map((item) => item.sku);
-  const productMap = await getProductMap(skus);
+  const [productMap, inventoryMap] = await Promise.all([
+    getProductMap(skus),
+    getInventoryMap()
+  ]);
+
+  if (!inventoryMap) {
+    return respond.json(
+      { error: "Inventory is refreshing. Please try again in a moment." },
+      { status: 503 }
+    );
+  }
 
   const lineItems = normalizedItems
     .map((item) => {
@@ -103,6 +221,25 @@ export async function POST(request) {
     return respond.json(
       { error: "Items are unavailable." },
       { status: 400 }
+    );
+  }
+
+  const inventoryConflicts = getInventoryConflicts({
+    items: normalizedItems,
+    inventorySnapshot,
+    inventoryMap,
+    productMap
+  });
+
+  if (inventoryConflicts.length > 0) {
+    return respond.json(
+      {
+        code: "inventory_changed",
+        error: buildInventoryConflictMessage(inventoryConflicts),
+        inventory: inventoryMap,
+        inventoryConflicts
+      },
+      { status: 409 }
     );
   }
 
@@ -174,6 +311,14 @@ export async function POST(request) {
     );
   }
   metadata.items = serializedItems;
+
+  const serializedExpectedPreorders = serializeExpectedPreorderMap(
+    normalizedItems,
+    inventoryMap
+  );
+  if (serializedExpectedPreorders) {
+    metadata.expected_preorder = asMetadataValue(serializedExpectedPreorders, 500);
+  }
 
   try {
     const stripePayload = {

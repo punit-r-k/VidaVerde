@@ -20,10 +20,58 @@ import {
   getPickupDetails
 } from "@/lib/pickupDetails";
 import { getInventoryMap } from "@/lib/stock";
+import {
+  SITE_NAME,
+  SOCIAL_LINKS,
+  SUPPORT_EMAIL,
+  SUPPORT_PHONE_E164,
+  createPageMetadata,
+  getServiceAreaJsonLd,
+  getCanonicalUrl
+} from "@/lib/siteMetadata";
 
 export const dynamic = "force-dynamic";
 export const runtime = "nodejs";
 export const revalidate = 0;
+
+const HOME_DESCRIPTION =
+  "Shop live fermented sauerkraut and hot sauces from Vida Verde. Reserve online for Saturday pickup at Fulshear Farmers Market in Richmond, serving Fulshear, Katy, Richmond, and nearby west Houston communities.";
+
+export const metadata = createPageMetadata({
+  title: "Live Fermented Sauerkraut and Hot Sauce",
+  description: HOME_DESCRIPTION,
+  path: "/",
+  keywords: [
+    "live fermented sauerkraut",
+    "raw sauerkraut",
+    "fermented hot sauce",
+    "farmers market pickup",
+    "Katy TX sauerkraut",
+    "Katy TX fermented foods",
+    "Richmond TX sauerkraut",
+    "Fulshear Farmers Market",
+    "Fulshear TX fermented foods"
+  ]
+});
+
+const buildFaqAnswerText = (faq) =>
+  [faq.a, faq.intro, ...(faq.bullets || []), ...(faq.notes || [])]
+    .filter(Boolean)
+    .join(" ");
+
+const getProductAvailabilityUrl = (product, inventory) => {
+  const entry = inventory?.[product.sku];
+
+  if ((entry?.on_hand || 0) > 0) {
+    return "https://schema.org/InStock";
+  }
+
+  if ((entry?.preorders_remaining || 0) > 0) {
+    return "https://schema.org/PreOrder";
+  }
+
+  return "https://schema.org/OutOfStock";
+};
 
 export default async function Home() {
   const medicalDisclaimer =
@@ -217,9 +265,105 @@ export default async function Home() {
   ];
 
   const marketPolicyItems = MARKET_PICKUP_POLICY_ITEMS;
+  const homePageJsonLd = {
+    "@context": "https://schema.org",
+    "@type": "OnlineStore",
+    name: SITE_NAME,
+    url: getCanonicalUrl("/"),
+    description: HOME_DESCRIPTION,
+    image: [
+      getCanonicalUrl("/email/order-confirmation-banner.png"),
+      getCanonicalUrl("/founder-photo.webp")
+    ],
+    logo: getCanonicalUrl("/logo.svg"),
+    email: SUPPORT_EMAIL,
+    telephone: SUPPORT_PHONE_E164,
+    sameAs: SOCIAL_LINKS,
+    address: {
+      "@type": "PostalAddress",
+      streetAddress: MARKET_ADDRESS,
+      addressLocality: "Richmond",
+      addressRegion: "TX",
+      postalCode: "77406",
+      addressCountry: "US"
+    },
+    areaServed: getServiceAreaJsonLd(),
+    availableLanguage: "en-US",
+    paymentAccepted: "Credit Card",
+    hasOfferCatalog: {
+      "@type": "OfferCatalog",
+      name: "Vida Verde fermented foods",
+      itemListElement: products.map((product) => ({
+        "@type": "Offer",
+        itemOffered: {
+          "@type": "Product",
+          name: product.name,
+          sku: product.sku
+        }
+      }))
+    }
+  };
+  const productCollectionJsonLd = {
+    "@context": "https://schema.org",
+    "@type": "ItemList",
+    name: "Vida Verde product collection",
+    itemListElement: products.map((product, index) => ({
+      "@type": "ListItem",
+      position: index + 1,
+      item: {
+        "@type": "Product",
+        name: product.name,
+        sku: product.sku,
+        description: product.description,
+        image: product.image ? getCanonicalUrl(product.image) : undefined,
+        brand: {
+          "@type": "Brand",
+          name: SITE_NAME
+        },
+        offers: {
+          "@type": "Offer",
+          priceCurrency: "USD",
+          price: (product.priceCents / 100).toFixed(2),
+          availability: getProductAvailabilityUrl(product, inventory),
+          url: getCanonicalUrl("/#shop"),
+          itemCondition: "https://schema.org/NewCondition"
+        }
+      }
+    }))
+  };
+  const faqJsonLd = {
+    "@context": "https://schema.org",
+    "@type": "FAQPage",
+    mainEntity: faqs.map((faq) => ({
+      "@type": "Question",
+      name: faq.q,
+      acceptedAnswer: {
+        "@type": "Answer",
+        text: buildFaqAnswerText(faq)
+      }
+    }))
+  };
 
   return (
     <>
+      <script
+        type="application/ld+json"
+        dangerouslySetInnerHTML={{
+          __html: JSON.stringify(homePageJsonLd)
+        }}
+      />
+      <script
+        type="application/ld+json"
+        dangerouslySetInnerHTML={{
+          __html: JSON.stringify(productCollectionJsonLd)
+        }}
+      />
+      <script
+        type="application/ld+json"
+        dangerouslySetInnerHTML={{
+          __html: JSON.stringify(faqJsonLd)
+        }}
+      />
       <EmailListPopup />
       <header className="hero" data-analytics-section="hero">
         <video

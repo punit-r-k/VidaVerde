@@ -5,10 +5,11 @@ import {
   MARKET_DAY_LABEL,
   MARKET_PICKUP_WINDOW
 } from "@/lib/pickupDetails";
-
-const SUPPORT_EMAIL = "vidaverdemicrogreens@gmail.com";
-const INSTAGRAM_URL = "https://www.instagram.com/vidaverdemicrogreens/";
-const FACEBOOK_URL = "https://www.facebook.com/vidaverdemicrogreens";
+import {
+  FACEBOOK_URL,
+  INSTAGRAM_URL,
+  SUPPORT_EMAIL
+} from "@/lib/siteMetadata";
 
 function InstagramIcon(props) {
   return (

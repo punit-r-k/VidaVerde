@@ -299,7 +299,7 @@ export default function EmailListPopup() {
 
         <div className="email-popup__media" aria-hidden="true">
           <Image
-            src="https://images.unsplash.com/photo-1464226184884-fa280b87c399?auto=format&fit=crop&w=1200&q=80"
+            src="/email/order-confirmation-banner.png"
             alt=""
             fill
             sizes="(max-width: 900px) 100vw, 45vw"
