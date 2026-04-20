@@ -21,6 +21,7 @@ import {
 } from "@/lib/pickupDetails";
 import { getInventoryMap } from "@/lib/stock";
 import {
+  GOOGLE_REVIEW_URL,
   SITE_NAME,
   SOCIAL_LINKS,
   SUPPORT_EMAIL,
@@ -463,6 +464,20 @@ export default async function Home() {
             <div className="voices__intro">
               <p className="eyebrow">Customer Voices</p>
               <h2>Real feedback from weekly customers building a daily ferment routine.</h2>
+              <p className="voices__subcopy">
+                Tried Vida Verde recently? Leave a quick Google review to help new
+                customers choose their next jar.
+              </p>
+              <a
+                className="button button--ghost voices__review-link"
+                href={GOOGLE_REVIEW_URL}
+                target="_blank"
+                rel="noreferrer"
+                data-analytics-id="voices_google_review"
+                data-analytics-hover="true"
+              >
+                Leave A Google Review
+              </a>
             </div>
             <TestimonialGrid testimonials={testimonials} />
           </RevealOnScroll>
