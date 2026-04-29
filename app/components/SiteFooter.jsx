@@ -1,6 +1,5 @@
 import Image from "next/image";
 import Link from "next/link";
-import { getGoogleReviewSummary } from "@/lib/googleReviews";
 import {
   MARKET_ADDRESS,
   MARKET_DAY_LABEL,
@@ -12,8 +11,6 @@ import {
   INSTAGRAM_URL,
   SUPPORT_EMAIL
 } from "@/lib/siteMetadata";
-
-const MAX_REVIEW_STARS = 5;
 
 function InstagramIcon(props) {
   return (
@@ -33,25 +30,7 @@ function FacebookIcon(props) {
   );
 }
 
-function StarIcon({ filled = false }) {
-  return (
-    <svg
-      viewBox="0 0 24 24"
-      aria-hidden="true"
-      className={`footer__review-star${filled ? " footer__review-star--filled" : ""}`}
-    >
-      <path d="m12 2.4 2.96 6 6.62.96-4.79 4.67 1.13 6.59L12 17.5l-5.92 3.12 1.13-6.59L2.42 9.36l6.62-.96Z" />
-    </svg>
-  );
-}
-
-export default async function SiteFooter({ showMarketSchedule = true }) {
-  const googleReviewSummary = await getGoogleReviewSummary();
-  const starFillCount = Math.max(
-    0,
-    Math.min(MAX_REVIEW_STARS, Math.round(googleReviewSummary.rating))
-  );
-
+export default function SiteFooter({ showMarketSchedule = true }) {
   return (
     <footer className="footer" data-analytics-section="footer">
       <div>
@@ -70,17 +49,6 @@ export default async function SiteFooter({ showMarketSchedule = true }) {
           >
             Leave A Google Review
           </a>
-          <span
-            className="footer__review-rating"
-            aria-label={`${googleReviewSummary.rating.toFixed(1)} star Google rating`}
-          >
-            <span className="footer__review-stars" aria-hidden="true">
-              {Array.from({ length: MAX_REVIEW_STARS }, (_, index) => (
-                <StarIcon key={`footer-review-star-${index}`} filled={index < starFillCount} />
-              ))}
-            </span>
-            <span className="footer__review-score">{googleReviewSummary.rating.toFixed(1)}</span>
-          </span>
         </div>
         <div className="footer__socials" aria-label="Social links">
           <a

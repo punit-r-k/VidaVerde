@@ -688,7 +688,7 @@ export default async function Home() {
                 alt=""
                 width={6000}
                 height={4000}
-                sizes="(max-width: 1024px) 0px, 260px"
+                sizes="(max-width: 640px) 360px, (max-width: 1024px) 560px, 260px"
               />
             </RevealOnScroll>
 

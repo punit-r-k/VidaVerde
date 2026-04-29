@@ -3201,39 +3201,6 @@ select:focus {
   padding-inline: 22px;
 }
 
-.footer__review-rating {
-  display: inline-flex;
-  align-items: center;
-  gap: 10px;
-  min-height: 24px;
-}
-
-.footer__review-stars {
-  display: inline-flex;
-  align-items: center;
-  gap: 6px;
-}
-
-.footer__review-star {
-  width: 18px;
-  height: 18px;
-  display: block;
-  fill: rgba(255, 255, 255, 0.18);
-}
-
-.footer__review-star--filled {
-  fill: #f7cf62;
-  filter: drop-shadow(0 0 12px rgba(247, 207, 98, 0.28));
-}
-
-.footer__review-score {
-  font-size: 1rem;
-  line-height: 1;
-  font-weight: 700;
-  letter-spacing: 0.08em;
-  color: rgba(255, 255, 255, 0.92);
-}
-
 .footer__brand {
   display: inline-flex;
   align-items: center;
@@ -4767,6 +4734,10 @@ select:focus {
     grid-template-columns: repeat(2, minmax(0, 1fr));
   }
 
+  .pulse__grid > :nth-child(3) {
+    grid-column: 1 / -1;
+  }
+
   .pulse__difference-layout {
     grid-template-columns: 1fr;
     gap: clamp(14px, 2.4vw, 24px);
@@ -4788,8 +4759,12 @@ select:focus {
 
   .buy-cta__actions {
     align-items: stretch;
-    justify-self: start;
+    justify-self: center;
     width: min(100%, 360px);
+  }
+
+  .buy-cta__copy {
+    text-align: center;
   }
 
   .market__intro,
@@ -4863,6 +4838,12 @@ select:focus {
 
   .market__intro {
     order: 1;
+    justify-items: center;
+    text-align: center;
+  }
+
+  .market__summary {
+    max-width: 42ch;
   }
 
   .market__board {
@@ -4995,6 +4976,10 @@ select:focus {
   .pulse__grid,
   .store__grid {
     grid-template-columns: 1fr;
+  }
+
+  .pulse__grid > :nth-child(3) {
+    grid-column: auto;
   }
 
   .signals__logos,
@@ -5642,15 +5627,6 @@ select:focus {
 
   .footer__review-row {
     gap: 10px;
-  }
-
-  .footer__review-star {
-    width: 16px;
-    height: 16px;
-  }
-
-  .footer__review-score {
-    font-size: 0.95rem;
   }
 
   .footer__meta {
