@@ -60,7 +60,7 @@ This file is a practical map of the most important customer flows, operations fl
 - Shared policy/time logic: `lib/pickupDetails.js`
 - Policy UI: `app/components/MarketPickupPolicy.jsx`
 - Behavior:
-  - Market timing, same-day cutoff, pickup policy text, and displayed pickup date are all centralized.
+  - Market timing, pickup cutoff, pickup policy text, and displayed pickup date are all centralized.
   - The homepage market section and checkout flow both depend on this shared source.
   - The policy version is sent into order metadata so checkout records which pickup terms were accepted.
 

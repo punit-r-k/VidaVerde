@@ -19,12 +19,12 @@ Source:
 - Market: Fulshear Farmers Market
 - Pickup day: every Saturday
 - Pickup window: `9:00am-1:00pm`
-- Same-day cutoff: `8:00am Saturday`
+- Pickup cutoff: `12:00pm Friday`
 
 Operational meaning:
-- A customer can place an in-stock market-pickup order up to `7:59am` on Saturday and still qualify for pickup that same day.
-- At `8:00am Saturday`, same-day eligibility closes.
-- Orders placed at or after `8:00am Saturday` roll to the following Saturday pickup date.
+- A customer can place an in-stock market-pickup order up to `11:59am` on Friday and still qualify for pickup the next day, if stock is available.
+- At `12:00pm Friday`, eligibility for that Saturday's pickup closes.
+- Orders placed at or after `12:00pm Friday`, including orders placed on Saturday, roll to the following Saturday pickup date.
 
 Source:
 - `lib/pickupDetails.js`
@@ -33,8 +33,8 @@ Source:
 
 The core market cycle runs on a fixed weekly window:
 
-- Start: previous Saturday at `8:00am` Central
-- End: current Saturday at `7:59am` Central
+- Start: previous Friday at `12:00pm` Central
+- End: current Friday at `11:59am` Central
 
 In system terms:
 - `collection_start_at` is inclusive
@@ -45,19 +45,19 @@ In system terms:
 
 That means the logical order window is:
 
-- `Saturday 8:00am` through `next Saturday 7:59:59...am`
+- `Friday 12:00pm` through `next Friday 11:59:59...am`
 
 Practical examples:
 
 ### Example 1
 
-- Order placed: Saturday `7:59am`
+- Order placed: Friday `11:59am`
 - Result: included in the current market week
-- Pickup date: the current Saturday
+- Pickup date: the next day, Saturday
 
 ### Example 2
 
-- Order placed: Saturday `8:00am`
+- Order placed: Friday `12:00pm`
 - Result: excluded from the current market week
 - Pickup date: the following Saturday
 
@@ -67,13 +67,19 @@ Practical examples:
 - Result: included in the current active market week
 - Pickup date: the upcoming Saturday
 
+### Example 4
+
+- Order placed: Saturday afternoon
+- Result: included in the next market week
+- Pickup date: the following Saturday
+
 Source:
 - `lib/pickupDetails.js`
 - `app/api/admin/prep/route.js`
 
 ## Customer-Facing Pickup Date Logic
 
-Customer-facing pickup timing rolls forward immediately at `8:00am Saturday`.
+Customer-facing pickup timing rolls forward immediately at `12:00pm Friday`.
 
 This affects:
 - storefront pickup messaging
@@ -83,10 +89,10 @@ This affects:
 
 Rule:
 
-- Before `8:00am Saturday`: the active pickup date is the current Saturday
-- At or after `8:00am Saturday`: the active pickup date becomes next Saturday
+- Before `12:00pm Friday`: the active pickup date is the upcoming Saturday
+- At or after `12:00pm Friday`: the active pickup date becomes the following Saturday
 
-This is intentional because same-day pickup is no longer available once the cutoff has passed.
+This is intentional because pickup for the upcoming Saturday is no longer available once the cutoff has passed.
 
 Source:
 - `lib/pickupDetails.js`
@@ -95,7 +101,7 @@ Source:
 
 ## Prep Sheet Display Timing
 
-The supplier prep sheet intentionally does **not** roll forward at `8:00am`.
+The supplier prep sheet intentionally does **not** roll forward at the Friday noon customer cutoff.
 
 It uses a delayed display rollover:
 
@@ -109,17 +115,17 @@ Why:
 
 Operational behavior:
 
-- From Saturday `8:00am` through Saturday `1:59pm`, the prep sheet still shows the just-finished market batch
+- From Friday `12:00pm` through Saturday `1:59pm`, the prep sheet still shows the just-finished market batch
 - At Saturday `2:00pm`, the prep sheet advances to the next collection window
 
 Important distinction:
 
-- The underlying order-collection logic still begins at `8:00am Saturday`
+- The underlying order-collection logic still begins at `12:00pm Friday`
 - Only the **sheet display week** is delayed until `2:00pm`
 
 So there are two simultaneous truths:
 
-1. New customer orders placed after `8:00am Saturday` belong to next week's market cycle
+1. New customer orders placed at or after `12:00pm Friday` belong to next week's market cycle
 2. The `Prepare for this week` sheet keeps displaying the current market batch until `2:00pm Saturday`
 
 Source:
@@ -140,7 +146,7 @@ This displays the collection window for the batch currently shown on the prep sh
 
 Format example:
 
-- `Sat, Apr 4, 8:00am to Sat, Apr 11, 7:59am`
+- `Fri, Apr 3, 12:00pm to Fri, Apr 10, 11:59am`
 
 ### Saturday Pickup
 
@@ -209,8 +215,8 @@ Operational meaning:
 - Any preorder quantity that has not been released yet stays in the separate
   `Pre-orders To Handle Separately` section.
 - Because the prep sheet display rolls at `2:00pm` Saturday, a release created before
-  that roll still belongs to the currently displayed batch, even though same-day
-  customer ordering already closed at `8:00am`.
+  that roll still belongs to the currently displayed batch, even though customer
+  ordering for that Saturday already closed at `12:00pm Friday`.
 
 Source:
 - `app/api/admin/prep/route.js`
@@ -253,8 +259,8 @@ Specifically:
 
 Why this matters:
 
-- If payment succeeds before `8:00am Saturday`, the email should still show the current Saturday pickup date
-- If payment succeeds at or after `8:00am Saturday`, the email should show the following Saturday pickup date
+- If payment succeeds before `12:00pm Friday`, the email should still show the upcoming Saturday pickup date
+- If payment succeeds at or after `12:00pm Friday`, the email should show the following Saturday pickup date
 - This avoids drift if webhook processing is delayed
 
 Source:
@@ -265,28 +271,28 @@ Source:
 
 | Context | Roll Time | Behavior Before Roll | Behavior At/After Roll |
 | --- | --- | --- | --- |
-| Customer same-day pickup eligibility | Saturday `8:00am` | Same-day pickup still allowed for in-stock orders | Same-day pickup closes; next Saturday becomes active |
-| Public pickup-date logic | Saturday `8:00am` | Current Saturday is shown | Next Saturday is shown |
+| Customer pickup eligibility | Friday `12:00pm` | Upcoming Saturday pickup still allowed for in-stock orders | Upcoming Saturday pickup closes; following Saturday becomes active |
+| Public pickup-date logic | Friday `12:00pm` | Upcoming Saturday is shown | Following Saturday is shown |
 | Prep sheet display | Saturday `2:00pm` | Current market batch stays visible | Sheet advances to next market batch |
-| Prep order collection window | Saturday `8:00am` to next Saturday `7:59am` | Orders belong to current batch | New batch begins exactly at `8:00am` |
+| Prep order collection window | Friday `12:00pm` to next Friday `11:59am` | Orders belong to current batch | New batch begins exactly at `12:00pm Friday` |
 
-## Saturday Boundary Examples
+## Cutoff Boundary Examples
 
-### Saturday `7:59am`
+### Friday `11:59am`
 
-- Customer can still reserve same-day pickup
-- Public pickup date shows current Saturday
+- Customer can still reserve pickup for the next day
+- Public pickup date shows the upcoming Saturday
 - Prep sheet shows current Saturday batch
 - Order belongs to the current prep window
 
-### Saturday `8:00am`
+### Friday `12:00pm`
 
-- Same-day pickup closes
-- Public pickup date switches to next Saturday
-- Prep sheet still shows the current Saturday batch
+- Current Saturday pickup closes for new orders
+- Public pickup date switches to the following Saturday
+- Prep sheet still shows the current Saturday batch until Saturday `2:00pm`
 - New orders now belong to the next prep window
 
-### Saturday `1:59pm`
+### Saturday `12:00pm`
 
 - Public pickup date is already on next Saturday
 - Prep sheet still shows the current Saturday batch
