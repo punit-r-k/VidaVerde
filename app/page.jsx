@@ -460,27 +460,52 @@ export default async function Home() {
           className="section section--compact section--fade voices"
           data-analytics-section="voices"
         >
-          <RevealOnScroll className="voices__shell" delay={0.08} preset="driftRight">
-            <div className="voices__intro">
-              <p className="eyebrow">Customer Voices</p>
-              <h2>Real feedback from weekly customers building a daily ferment routine.</h2>
-              <p className="voices__subcopy">
-                Tried Vida Verde recently? Leave a quick Google review to help new
-                customers choose their next jar.
-              </p>
-              <a
-                className="button button--ghost voices__review-link"
-                href={GOOGLE_REVIEW_URL}
-                target="_blank"
-                rel="noreferrer"
-                data-analytics-id="voices_google_review"
-                data-analytics-hover="true"
+          <div className="voices__shell">
+            <div className="voices__feature">
+              <RevealOnScroll className="voices__intro" delay={0.08} preset="driftRight">
+                <p className="eyebrow">Customer Voices</p>
+                <h2>Real feedback from weekly customers building a daily ferment routine.</h2>
+                <p className="voices__subcopy">
+                  Tried Vida Verde recently? Leave a quick Google review to help new
+                  customers choose their next jar.
+                </p>
+              </RevealOnScroll>
+              <RevealOnScroll className="voices__media" delay={0.12} preset="driftLeft">
+                <figure className="voices__media-frame">
+                  <div className="voices__photo">
+                    <Image
+                      src="/Vida Verde-16.avif"
+                      alt="Vida Verde customer smiling while holding two jars of sauerkraut"
+                      width={3254}
+                      height={4338}
+                      sizes="(max-width: 900px) 100vw, 420px"
+                      quality={95}
+                    />
+                  </div>
+                </figure>
+              </RevealOnScroll>
+              <RevealOnScroll
+                className="voices__review-action"
+                delay={0.16}
+                preset="driftRight"
               >
-                Leave A Google Review
-              </a>
+                <a
+                  className="button button--ghost voices__review-link"
+                  href={GOOGLE_REVIEW_URL}
+                  target="_blank"
+                  rel="noreferrer"
+                  data-analytics-id="voices_google_review"
+                  data-analytics-hover="true"
+                >
+                  Leave A Google Review
+                </a>
+              </RevealOnScroll>
             </div>
-            <TestimonialGrid testimonials={testimonials} />
-          </RevealOnScroll>
+            <div className="voices__divider" aria-hidden="true" />
+            <RevealOnScroll delay={0.12} preset="rise">
+              <TestimonialGrid testimonials={testimonials} />
+            </RevealOnScroll>
+          </div>
         </section>
 
         <section
@@ -655,6 +680,16 @@ export default async function Home() {
               <p className="eyebrow">{MARKET_NAME}</p>
               <h2>Find Vida Verde in person.</h2>
               <p className="market__summary">{MARKET_PICKUP_SUMMARY}</p>
+            </RevealOnScroll>
+
+            <RevealOnScroll className="market__photo" delay={0.12} preset="driftRight">
+              <Image
+                src="/Vida Verde-10.avif"
+                alt=""
+                width={6000}
+                height={4000}
+                sizes="(max-width: 1024px) 0px, 260px"
+              />
             </RevealOnScroll>
 
             <RevealOnScroll className="market__cta" delay={0.16} preset="driftLeft">
