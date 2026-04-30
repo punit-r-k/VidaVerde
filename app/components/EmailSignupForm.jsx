@@ -3,7 +3,7 @@
 import { useId, useState } from "react";
 import { trackAnalyticsEvent } from "@/lib/analytics";
 
-const DEFAULT_ERROR = "Unable to save your email right now. Please try again.";
+const DEFAULT_ERROR = "We couldn't save your email right now. Please try again.";
 const SUCCESS_MESSAGE = "Thank you for joining our email list!";
 const EMAIL_REGEX = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 
@@ -21,13 +21,13 @@ export default function EmailSignupForm({ source = "website_email_cta" }) {
 
     const normalizedEmail = email.trim().toLowerCase();
     if (!normalizedEmail) {
-      setStatusMessage("Email is required.");
+      setStatusMessage("Please enter your email.");
       setHasError(true);
       setIsSuccess(false);
       return;
     }
     if (!EMAIL_REGEX.test(normalizedEmail)) {
-      setStatusMessage("Enter a valid email address.");
+      setStatusMessage("Please enter a valid email address.");
       setHasError(true);
       setIsSuccess(false);
       return;

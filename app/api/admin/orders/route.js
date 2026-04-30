@@ -40,7 +40,7 @@ export async function GET(request) {
 
   if (!supabaseAdmin) {
     return respond.json(
-      { error: "Supabase is not configured." },
+      { error: "Orders are not connected right now." },
       { status: 500 }
     );
   }
@@ -48,7 +48,7 @@ export async function GET(request) {
   const parsedQuery = ordersQuerySchema.safeParse(parseSearchParams(request));
   if (!parsedQuery.success) {
     return respond.json(
-      { error: parsedQuery.error.issues[0]?.message || "Invalid query parameters." },
+      { error: parsedQuery.error.issues[0]?.message || "Please check the order filters and try again." },
       { status: 400 }
     );
   }
@@ -75,7 +75,7 @@ export async function GET(request) {
   if (ordersError) {
     console.error("orders admin read error:", ordersError);
     return respond.json(
-      { error: "Unable to read orders." },
+      { error: "We couldn't load orders right now." },
       { status: 500 }
     );
   }
@@ -94,7 +94,7 @@ export async function GET(request) {
     if (itemsError) {
       console.error("orders admin items read error:", itemsError);
       return respond.json(
-        { error: "Unable to read order items." },
+        { error: "We couldn't load the items for those orders." },
         { status: 500 }
       );
     }

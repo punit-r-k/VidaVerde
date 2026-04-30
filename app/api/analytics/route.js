@@ -52,7 +52,7 @@ const analyticsEventSchema = z
       ctx.addIssue({
         code: z.ZodIssueCode.custom,
         path: ["metadata"],
-        message: "Too many analytics metadata fields."
+        message: "That analytics event has too much extra detail."
       });
     }
   });
@@ -84,7 +84,7 @@ const validateSameOriginAnalyticsRequest = (request) => {
     return {
       ok: false,
       status: 500,
-      error: "Site URL is not configured."
+      error: "Analytics is not set up right now."
     };
   }
 
@@ -145,7 +145,7 @@ export async function POST(request) {
 
   if (!supabaseAdmin) {
     return respond.json(
-      { error: "Supabase is not configured." },
+      { error: "Analytics is not connected right now." },
       { status: 500 }
     );
   }
@@ -170,7 +170,10 @@ export async function POST(request) {
   try {
     rawBody = await request.text();
   } catch {
-    return respond.json({ error: "Invalid payload." }, { status: 400 });
+    return respond.json(
+      { error: "We couldn't read that analytics request." },
+      { status: 400 }
+    );
   }
 
   if (!rawBody || Buffer.byteLength(rawBody, "utf8") > MAX_REQUEST_BYTES) {
@@ -184,7 +187,10 @@ export async function POST(request) {
   try {
     payload = JSON.parse(rawBody);
   } catch {
-    return respond.json({ error: "Invalid payload." }, { status: 400 });
+    return respond.json(
+      { error: "We couldn't read that analytics request." },
+      { status: 400 }
+    );
   }
 
   const parsedPayload = payloadSchema.safeParse(payload);
@@ -192,7 +198,7 @@ export async function POST(request) {
     return respond.json(
       {
         error:
-          parsedPayload.error.issues[0]?.message || "Analytics payload is invalid."
+          parsedPayload.error.issues[0]?.message || "That analytics request looks off."
       },
       { status: 400 }
     );
@@ -205,7 +211,7 @@ export async function POST(request) {
     const sanitizedEvent = sanitizeAnalyticsEvent(analyticsEvent);
     if (!sanitizedEvent) {
       return respond.json(
-        { error: "Analytics event is invalid." },
+        { error: "That analytics event looks off." },
         { status: 400 }
       );
     }
@@ -217,9 +223,9 @@ export async function POST(request) {
     if (!normalizedOccurredAt) {
       return respond.json(
         {
-          error: `Analytics event timestamps must be within ${Math.round(
+          error: `Please send analytics events from the last ${Math.round(
             ANALYTICS_MAX_EVENT_AGE_MS / (60 * 60 * 1000)
-          )} hours of receipt and no more than ${Math.round(
+          )} hours, and no more than ${Math.round(
             ANALYTICS_MAX_CLOCK_SKEW_MS / (60 * 1000)
           )} minutes in the future.`
         },
@@ -240,7 +246,7 @@ export async function POST(request) {
   if (error) {
     console.error("analytics insert error:", error);
     return respond.json(
-      { error: "Unable to record analytics." },
+      { error: "We couldn't save analytics right now." },
       { status: 500 }
     );
   }

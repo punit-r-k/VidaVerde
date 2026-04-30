@@ -38,7 +38,7 @@ export async function GET(request) {
 
   if (!supabaseAdmin) {
     return respond.json(
-      { error: "Supabase is not configured." },
+      { error: "Shipments are not connected right now." },
       { status: 500 }
     );
   }
@@ -46,7 +46,7 @@ export async function GET(request) {
   const parsedQuery = shipmentsQuerySchema.safeParse(parseSearchParams(request));
   if (!parsedQuery.success) {
     return respond.json(
-      { error: parsedQuery.error.issues[0]?.message || "Invalid query parameters." },
+      { error: parsedQuery.error.issues[0]?.message || "Please check the shipment filters and try again." },
       { status: 400 }
     );
   }
@@ -61,7 +61,7 @@ export async function GET(request) {
     if (syncError) {
       console.error("sync_all_shipments error:", syncError);
       return respond.json(
-        { error: "Unable to refresh shipments." },
+        { error: "We couldn't refresh shipments right now." },
         { status: 500 }
       );
     }
@@ -84,7 +84,7 @@ export async function GET(request) {
   if (error) {
     console.error("shipments admin read error:", error);
     return respond.json(
-      { error: "Unable to read shipments." },
+      { error: "We couldn't load shipments right now." },
       { status: 500 }
     );
   }

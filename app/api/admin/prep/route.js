@@ -33,7 +33,7 @@ export async function GET(request) {
 
   if (!supabaseAdmin) {
     return respond.json(
-      { error: "Supabase is not configured." },
+      { error: "Prep data is not connected right now." },
       { status: 500 }
     );
   }
@@ -59,7 +59,7 @@ export async function GET(request) {
   if (prepError) {
     console.error("admin prep rpc error:", prepError);
     return respond.json(
-      { error: "Unable to build prep data." },
+      { error: "We couldn't build the prep sheet right now." },
       { status: 500 }
     );
   }

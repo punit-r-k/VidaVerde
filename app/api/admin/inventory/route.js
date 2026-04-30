@@ -37,7 +37,7 @@ export async function GET(request) {
 
   if (!supabaseAdmin) {
     return respond.json(
-      { error: "Supabase is not configured." },
+      { error: "Inventory is not connected right now." },
       { status: 500 }
     );
   }
@@ -51,7 +51,7 @@ export async function GET(request) {
 
   if (error) {
     console.error("inventory admin read error:", error);
-    return respond.json({ error: "Unable to read inventory." }, { status: 500 });
+    return respond.json({ error: "We couldn't load inventory right now." }, { status: 500 });
   }
 
   const inventory = (data || []).map((row) => ({
@@ -86,7 +86,7 @@ export async function PATCH(request) {
 
   if (!supabaseAdmin) {
     return respond.json(
-      { error: "Supabase is not configured." },
+      { error: "Inventory is not connected right now." },
       { status: 500 }
     );
   }
@@ -95,13 +95,16 @@ export async function PATCH(request) {
   try {
     payload = await request.json();
   } catch {
-    return respond.json({ error: "Invalid payload." }, { status: 400 });
+    return respond.json(
+      { error: "We couldn't read that inventory update. Please try again." },
+      { status: 400 }
+    );
   }
 
   const parsedPayload = inventoryPatchSchema.safeParse(payload);
   if (!parsedPayload.success) {
     return respond.json(
-      { error: parsedPayload.error.issues[0]?.message || "Invalid payload." },
+      { error: parsedPayload.error.issues[0]?.message || "Please check that inventory update and try again." },
       { status: 400 }
     );
   }
@@ -120,7 +123,7 @@ export async function PATCH(request) {
     } catch (error) {
       console.error("show_stock update error:", error);
       return respond.json(
-        { error: "Unable to update stock display setting." },
+        { error: "We couldn't update the stock display setting right now." },
         { status: 500 }
       );
     }
@@ -138,7 +141,7 @@ export async function PATCH(request) {
 
   if (hasPreordersField) {
     if (!cleanSku) {
-      return respond.json({ error: "Invalid payload." }, { status: 400 });
+      return respond.json({ error: "Choose an item before updating preorders." }, { status: 400 });
     }
 
     return respond.json({
@@ -148,11 +151,11 @@ export async function PATCH(request) {
   }
 
   if (!cleanSku) {
-    return respond.json({ error: "Invalid payload." }, { status: 400 });
+    return respond.json({ error: "Choose an item before updating its restock date." }, { status: 400 });
   }
 
   if (!hasRestockDateField) {
-    return respond.json({ error: "Invalid payload." }, { status: 400 });
+    return respond.json({ error: "Choose a restock date to update." }, { status: 400 });
   }
 
   const rawDate = payload?.expected_restock_date;
@@ -166,7 +169,7 @@ export async function PATCH(request) {
   if (error) {
     console.error("set_expected_restock_date error:", error);
     return respond.json(
-      { error: "Unable to update restock date." },
+      { error: "We couldn't update the restock date right now." },
       { status: 500 }
     );
   }

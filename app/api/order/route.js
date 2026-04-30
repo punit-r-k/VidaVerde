@@ -14,6 +14,21 @@ const ORDER_RATE_LIMIT = getRouteRateLimitConfig("ORDER_CREATE", {
   ipMax: 6
 });
 
+const CHECKOUT_UNAVAILABLE_MESSAGE =
+  "Checkout is not available right now. Please try again later.";
+
+const getCheckoutValidationMessage = (issues) => {
+  const message = issues?.[0]?.message || "";
+  if (
+    !message ||
+    /invalid input|unrecognized key|expected|required/i.test(message)
+  ) {
+    return "Please check your checkout details and try again.";
+  }
+
+  return message;
+};
+
 const asMetadataValue = (value, maxLength = 500) =>
   String(value || "").trim().slice(0, maxLength);
 
@@ -145,7 +160,7 @@ export async function POST(request) {
 
   if (!stripeConfig) {
     return respond.json(
-      { error: "Stripe is not configured." },
+      { error: CHECKOUT_UNAVAILABLE_MESSAGE },
       { status: 500 }
     );
   }
@@ -154,18 +169,20 @@ export async function POST(request) {
   try {
     payload = await request.json();
   } catch {
-    return respond.json({ error: "Invalid payload." }, { status: 400 });
+    return respond.json(
+      { error: "We couldn't read your checkout details. Please try again." },
+      { status: 400 }
+    );
   }
 
   const parsedPayload = checkoutPayloadSchema.safeParse(payload);
   if (!parsedPayload.success) {
     const issues = parsedPayload.error.issues;
-    const firstIssue = issues[0];
     const fieldErrors = mapCheckoutIssuesToFieldErrors(issues);
 
     return respond.json(
       {
-        error: firstIssue?.message || "Checkout details are invalid.",
+        error: getCheckoutValidationMessage(issues),
         fieldErrors
       },
       { status: 400 }
@@ -184,7 +201,7 @@ export async function POST(request) {
 
   if (isPickup && !consents?.pickupPolicyAccepted) {
     return respond.json(
-      { error: "Pickup policy acceptance is required for market pickup." },
+      { error: "Please check the pickup policy box before continuing." },
       { status: 400 }
     );
   }
@@ -219,7 +236,7 @@ export async function POST(request) {
 
   if (lineItems.length === 0 || lineItems.length !== normalizedItems.length) {
     return respond.json(
-      { error: "Items are unavailable." },
+      { error: "One or more items in your cart are no longer available. Please refresh and try again." },
       { status: 400 }
     );
   }
@@ -250,7 +267,7 @@ export async function POST(request) {
 
   if (!siteUrl) {
     return respond.json(
-      { error: "Site URL is not configured." },
+      { error: CHECKOUT_UNAVAILABLE_MESSAGE },
       { status: 500 }
     );
   }
@@ -262,7 +279,7 @@ export async function POST(request) {
 
   if (!Number.isFinite(subtotal) || subtotal <= 0) {
     return respond.json(
-      { error: "Invalid order total." },
+      { error: "Your order total looks off. Please refresh your cart and try again." },
       { status: 400 }
     );
   }
@@ -357,14 +374,14 @@ export async function POST(request) {
     if (!ok) {
       console.error("stripe payment_intent error:", error);
       return respond.json(
-        { error: "Unable to start payment." },
+        { error: "We couldn't start payment. Please try again." },
         { status: 500 }
       );
     }
 
     if (!data?.client_secret || !data?.id) {
       return respond.json(
-        { error: "Unable to start payment." },
+        { error: "We couldn't start payment. Please try again." },
         { status: 500 }
       );
     }
@@ -380,7 +397,7 @@ export async function POST(request) {
   } catch (error) {
     console.error("payment_intent create error:", error);
     return respond.json(
-      { error: "Unable to start payment." },
+      { error: "We couldn't start payment. Please try again." },
       { status: 500 }
     );
   }

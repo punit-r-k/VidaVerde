@@ -295,7 +295,7 @@ function StripePaymentForm({
     try {
       clientSecret = await createPaymentIntent();
     } catch (error) {
-      const message = error?.message || "Unable to initialize payment.";
+      const message = error?.message || "We couldn't start payment. Please try again.";
       setPaymentError(message);
       onPaymentState({ status: "error", message });
       setIsSubmitting(false);
@@ -307,7 +307,7 @@ function StripePaymentForm({
     });
 
     if (error) {
-      const message = error.message || "Payment could not be completed.";
+      const message = error.message || "Payment didn't go through. Please check your card and try again.";
       setPaymentError(message);
       onPaymentState({ status: "error", message });
       setIsSubmitting(false);
@@ -1689,7 +1689,7 @@ export default function Storefront({ products, inventory = null }) {
     }
 
     if (hasPreorderItems && !preorderAcknowledged) {
-      const message = "Please acknowledge the pre-order notice before payment.";
+      const message = "Please check the pre-order notice before payment.";
       trackAnalyticsEvent({
         name: "checkout_validation_blocked",
         sectionId: "shop",
@@ -1731,11 +1731,11 @@ export default function Storefront({ products, inventory = null }) {
         setFieldErrors((prev) => ({ ...prev, ...result.fieldErrors }));
         focusFirstInvalidField(result.fieldErrors, fulfillment);
       }
-      throw new Error(result?.error || "Unable to start payment.");
+      throw new Error(result?.error || "We couldn't start payment. Please try again.");
     }
 
     if (!result?.clientSecret) {
-      throw new Error("Payment session did not return a client secret.");
+      throw new Error("We couldn't start payment. Please try again.");
     }
 
     return result.clientSecret;
@@ -1788,7 +1788,7 @@ export default function Storefront({ products, inventory = null }) {
         }
       });
       setStatus("error");
-      setNotice(message || "Payment could not be completed.");
+      setNotice(message || "Payment didn't go through. Please check your card and try again.");
     },
     [finalizePaidOrder]
   );
@@ -1832,7 +1832,7 @@ export default function Storefront({ products, inventory = null }) {
         }
       });
       setStatus("error");
-      setNotice("Please fix the highlighted fields before checkout.");
+      setNotice("Please fix the highlighted fields before checking out.");
       focusFirstInvalidField(nextErrors, fulfillment);
       return;
     }

@@ -231,7 +231,7 @@ const handleCheckoutSessionEvent = async (session, eventType, eventPlacedAt = ""
       console.error("stripe line items fetch error:", error);
       return {
         ok: false,
-        error: "Unable to read line items.",
+        error: "We couldn't read the order items from Stripe.",
         status: 500
       };
     }
@@ -293,7 +293,7 @@ const handleCheckoutSessionEvent = async (session, eventType, eventPlacedAt = ""
     console.error("record_paid_order error:", recordResult.error);
     return {
       ok: false,
-      error: "Unable to record order.",
+      error: "We couldn't save the paid order.",
       status: 500
     };
   }
@@ -385,7 +385,7 @@ const handlePaymentIntentSucceeded = async (intent, eventPlacedAt = "") => {
     console.error("record_paid_order error:", recordResult.error);
     return {
       ok: false,
-      error: "Unable to record order.",
+      error: "We couldn't save the paid order.",
       status: 500
     };
   }
@@ -421,14 +421,14 @@ export async function POST(request) {
 
   if (!stripeConfig) {
     return respond.json(
-      { error: "Stripe is not configured." },
+      { error: "Stripe webhooks are not connected right now." },
       { status: 500 }
     );
   }
 
   if (!supabaseAdmin) {
     return respond.json(
-      { error: "Supabase is not configured." },
+      { error: "Order storage is not connected right now." },
       { status: 500 }
     );
   }
@@ -442,7 +442,7 @@ export async function POST(request) {
 
   if (!webhookSecret) {
     return respond.json(
-      { error: "Stripe webhook secret is not configured." },
+      { error: "Stripe webhooks are not set up right now." },
       { status: 500 }
     );
   }
@@ -462,7 +462,10 @@ export async function POST(request) {
   try {
     event = JSON.parse(body);
   } catch {
-    return respond.json({ error: "Invalid payload." }, { status: 400 });
+    return respond.json(
+      { error: "We couldn't read the Stripe webhook payload." },
+      { status: 400 }
+    );
   }
 
   const eventType = String(event?.type || "");
@@ -491,7 +494,7 @@ export async function POST(request) {
     const result = await handleCheckoutSessionEvent(session, eventType, eventPlacedAt);
     if (!result.ok) {
       return respond.json(
-        { error: result.error || "Unable to record order." },
+        { error: result.error || "We couldn't save the paid order." },
         { status: result.status || 500 }
       );
     }
@@ -503,7 +506,7 @@ export async function POST(request) {
   const result = await handlePaymentIntentSucceeded(intent, eventPlacedAt);
   if (!result.ok) {
     return respond.json(
-      { error: result.error || "Unable to record order." },
+      { error: result.error || "We couldn't save the paid order." },
       { status: result.status || 500 }
     );
   }

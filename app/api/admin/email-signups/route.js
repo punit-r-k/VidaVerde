@@ -33,7 +33,7 @@ export async function GET(request) {
 
   if (!supabaseAdmin) {
     return respond.json(
-      { error: "Supabase is not configured." },
+      { error: "Email signups are not connected right now." },
       { status: 500 }
     );
   }
@@ -50,7 +50,7 @@ export async function GET(request) {
   if (error) {
     console.error("email signups admin read error:", error);
     return respond.json(
-      { error: "Unable to read email signups." },
+      { error: "We couldn't load email signups right now." },
       { status: 500 }
     );
   }

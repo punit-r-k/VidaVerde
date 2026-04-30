@@ -1,6 +1,7 @@
 import { secureAdminRoute } from "@/lib/apiSecurity";
 import { processEmailJobs } from "@/lib/emailJobQueue";
 import { getRouteRateLimitConfig } from "@/lib/rateLimit";
+import { z } from "zod";
 
 const ADMIN_EMAIL_JOBS_RATE_LIMIT = getRouteRateLimitConfig("ADMIN_EMAIL_JOBS_POST", {
   windowMs: 60_000,
@@ -10,10 +11,27 @@ const ADMIN_EMAIL_JOBS_RATE_LIMIT = getRouteRateLimitConfig("ADMIN_EMAIL_JOBS_PO
 
 const ADMIN_EMAIL_JOBS_ROLES = ["admin", "ops_admin"];
 
-const toInt = (value, fallback = 0) => {
-  const parsed = Number.parseInt(value, 10);
-  return Number.isFinite(parsed) ? parsed : fallback;
+const parseLimit = (value) => {
+  if (value === undefined || value === null || value === "") return 10;
+  if (typeof value === "number") return value;
+  if (typeof value === "string" && /^\d+$/.test(value.trim())) {
+    return Number(value.trim());
+  }
+  return Number.NaN;
 };
+
+const payloadSchema = z
+  .object({
+    limit: z.preprocess(
+      parseLimit,
+      z
+        .number("Use a whole number for the job limit.")
+        .int("Use a whole number for the job limit.")
+        .min(1, "Run at least 1 email job.")
+        .max(25, "Run 25 email jobs or fewer at a time.")
+    )
+  })
+  .strict();
 
 export const runtime = "nodejs";
 
@@ -37,8 +55,16 @@ export async function POST(request) {
     payload = {};
   }
 
+  const parsedPayload = payloadSchema.safeParse(payload);
+  if (!parsedPayload.success) {
+    return respond.json(
+      { error: parsedPayload.error.issues[0]?.message || "Please check the email job request and try again." },
+      { status: 400 }
+    );
+  }
+
   const result = await processEmailJobs({
-    limit: Math.min(Math.max(toInt(payload?.limit, 10), 1), 25)
+    limit: parsedPayload.data.limit
   });
 
   if (!result.ok) {
@@ -46,7 +72,7 @@ export async function POST(request) {
     return respond.json(
       {
         ok: false,
-        error: "Unable to process email queue.",
+        error: "We couldn't process the email queue right now.",
         processed: result.processed || 0,
         sentCount: result.sentCount || 0,
         failedCount: result.failedCount || 0,

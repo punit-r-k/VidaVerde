@@ -297,6 +297,10 @@ test("security regression suite", { timeout: 300_000 }, async (t) => {
       roles: ["inventory_admin"],
       sub: "security-test-inventory"
     });
+    const opsToken = createAdminJwt({
+      roles: ["ops_admin"],
+      sub: "security-test-ops-mutation"
+    });
 
     const inventoryAttempt = await requestJson("/api/admin/inventory", {
       method: "PATCH",
@@ -323,9 +327,21 @@ test("security regression suite", { timeout: 300_000 }, async (t) => {
       })
     });
     assert.equal(restockAttempt.response.status, 400);
+
+    const emailJobsAttempt = await requestJson("/api/admin/email-jobs", {
+      method: "POST",
+      headers: {
+        Authorization: `Bearer ${opsToken}`,
+        "Content-Type": "application/json"
+      },
+      body: JSON.stringify({
+        limit: "1; DROP TABLE email_jobs;--"
+      })
+    });
+    assert.equal(emailJobsAttempt.response.status, 400);
   });
 
-  await t.test("public checkout payload rejects injection-shaped SKU values", async () => {
+  await t.test("public checkout payload rejects injection-shaped cart values", async () => {
     const { response, json } = await requestJson("/api/order", {
       method: "POST",
       headers: {
@@ -355,7 +371,55 @@ test("security regression suite", { timeout: 300_000 }, async (t) => {
     });
 
     assert.equal(response.status, 400);
-    assert.match(JSON.stringify(json), /invalid/i);
+    assert.match(JSON.stringify(json), /cart|refresh/i);
+
+    const quantityAttempt = await requestJson("/api/order", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        Origin: baseUrl
+      },
+      body: JSON.stringify({
+        fulfillment: "market",
+        customer: {
+          name: "Test User",
+          email: "security@example.com",
+          phone: "+15555550123",
+          address1: "",
+          address2: "",
+          city: "",
+          state: "",
+          postalCode: "",
+          note: ""
+        },
+        items: [
+          {
+            sku: "VV1",
+            quantity: "1; DROP TABLE orders;--"
+          }
+        ]
+      })
+    });
+
+    assert.equal(quantityAttempt.response.status, 400);
+    assert.match(JSON.stringify(quantityAttempt.json), /whole number|invalid/i);
+  });
+
+  await t.test("public email signup rejects injection-shaped source values", async () => {
+    const { response, json } = await requestJson("/api/email-signups", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        Origin: baseUrl
+      },
+      body: JSON.stringify({
+        email: "security@example.com",
+        source: "homepage_join_email'; DROP TABLE email_signups;--"
+      })
+    });
+
+    assert.equal(response.status, 400);
+    assert.match(JSON.stringify(json), /signup|refresh/i);
   });
 
   await t.test("public order finalization rejects injection-shaped payment intent ids", async () => {

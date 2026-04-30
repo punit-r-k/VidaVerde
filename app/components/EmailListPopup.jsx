@@ -8,7 +8,7 @@ import { lockPageScroll, unlockPageScroll } from "@/lib/scrollLock";
 
 const DISMISS_KEY = "vidaverde-email-popup-dismissed-v1";
 const OPEN_DELAY_MS = 1200;
-const DEFAULT_ERROR = "Unable to save your email right now. Please try again.";
+const DEFAULT_ERROR = "We couldn't save your email right now. Please try again.";
 const SUCCESS_MESSAGE = "Thank you. You are on the email list!";
 const EMAIL_REGEX = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 
@@ -141,11 +141,11 @@ export default function EmailListPopup() {
 
     const normalizedEmail = email.trim().toLowerCase();
     if (!normalizedEmail) {
-      setErrorMessage("Email is required.");
+      setErrorMessage("Please enter your email.");
       return;
     }
     if (!EMAIL_REGEX.test(normalizedEmail)) {
-      setErrorMessage("Enter a valid email address.");
+      setErrorMessage("Please enter a valid email address.");
       return;
     }
 

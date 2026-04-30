@@ -31,7 +31,7 @@ export async function POST(request) {
 
   if (!supabaseAdmin) {
     return respond.json(
-      { error: "Supabase is not configured." },
+      { error: "Inventory is not connected right now." },
       { status: 500 }
     );
   }
@@ -40,13 +40,16 @@ export async function POST(request) {
   try {
     payload = await request.json();
   } catch {
-    return respond.json({ error: "Invalid payload" }, { status: 400 });
+    return respond.json(
+      { error: "We couldn't read that restock update. Please try again." },
+      { status: 400 }
+    );
   }
 
   const parsedPayload = restockPayloadSchema.safeParse(payload);
   if (!parsedPayload.success) {
     return respond.json(
-      { error: parsedPayload.error.issues[0]?.message || "Invalid payload" },
+      { error: parsedPayload.error.issues[0]?.message || "Please check that restock update and try again." },
       { status: 400 }
     );
   }
@@ -56,7 +59,7 @@ export async function POST(request) {
   const qty = Number.parseInt(restock, 10);
 
   if (!cleanSku || Number.isNaN(qty)) {
-    return respond.json({ error: "Invalid payload" }, { status: 400 });
+    return respond.json({ error: "Choose an item and a restock amount before updating." }, { status: 400 });
   }
 
   const { data, error } = await supabaseAdmin.rpc("apply_restock", {
@@ -66,7 +69,7 @@ export async function POST(request) {
 
   if (error) {
     console.error("apply_restock error:", error);
-    return respond.json({ error: "Unable to restock" }, { status: 500 });
+    return respond.json({ error: "We couldn't update stock right now." }, { status: 500 });
   }
 
   let preorderReadyEmailResult = null;

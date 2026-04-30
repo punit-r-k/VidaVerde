@@ -16,9 +16,9 @@ const payloadSchema = z
     paymentIntentId: z
       .string()
       .trim()
-      .min(1, "Payment intent is required.")
-      .max(255, "Payment intent is invalid.")
-      .regex(/^pi_[A-Za-z0-9_]+$/, "Payment intent is invalid.")
+      .min(1, "We couldn't find that payment. Please try checking out again.")
+      .max(255, "That payment link looks invalid. Please try checking out again.")
+      .regex(/^pi_[A-Za-z0-9_]+$/, "That payment link looks invalid. Please try checking out again.")
   })
   .strict();
 
@@ -260,7 +260,7 @@ const runOrderSideEffects = async ({
   if (!orderId) {
     return {
       ok: false,
-      error: "Unable to resolve order id.",
+      error: "We couldn't find that order after payment.",
       status: 500
     };
   }
@@ -270,7 +270,7 @@ const runOrderSideEffects = async ({
     console.error("sync_shipment_for_order error:", shipmentError);
     return {
       ok: false,
-      error: "Unable to sync shipment.",
+      error: "We couldn't prepare shipping for that order yet.",
       status: 500
     };
   }
@@ -295,7 +295,11 @@ const runOrderSideEffects = async ({
 
 const finalizePaymentIntent = async (intent) => {
   if (!intent || intent.object !== "payment_intent") {
-    return { ok: false, error: "Payment intent is invalid.", status: 400 };
+    return {
+      ok: false,
+      error: "That payment link looks invalid. Please try checking out again.",
+      status: 400
+    };
   }
 
   const paymentStatus = toText(intent?.status, 64).toLowerCase();
@@ -380,7 +384,7 @@ const finalizePaymentIntent = async (intent) => {
     console.error("record_paid_order error:", recordResult.error);
     return {
       ok: false,
-      error: "Unable to record order.",
+      error: "We couldn't save your order after payment.",
       status: 500
     };
   }
@@ -442,14 +446,14 @@ export async function POST(request) {
 
   if (!stripeConfig) {
     return respond.json(
-      { error: "Stripe is not configured." },
+      { error: "Checkout is not available right now. Please try again later." },
       { status: 500 }
     );
   }
 
   if (!supabaseAdmin) {
     return respond.json(
-      { error: "Supabase is not configured." },
+      { error: "Checkout is not available right now. Please try again later." },
       { status: 500 }
     );
   }
@@ -458,13 +462,20 @@ export async function POST(request) {
   try {
     payload = await request.json();
   } catch {
-    return respond.json({ error: "Invalid payload." }, { status: 400 });
+    return respond.json(
+      { error: "We couldn't read that payment confirmation. Please try again." },
+      { status: 400 }
+    );
   }
 
   const parsedPayload = payloadSchema.safeParse(payload);
   if (!parsedPayload.success) {
     return respond.json(
-      { error: parsedPayload.error.issues[0]?.message || "Invalid payload." },
+      {
+        error:
+          parsedPayload.error.issues[0]?.message ||
+          "We couldn't read that payment confirmation. Please try again."
+      },
       { status: 400 }
     );
   }
@@ -480,7 +491,7 @@ export async function POST(request) {
   if (!ok) {
     console.error("stripe payment_intent verify error:", error);
     return respond.json(
-      { error: "Unable to verify payment." },
+      { error: "We couldn't confirm the payment yet. Please wait a moment and try again." },
       { status: 502 }
     );
   }
@@ -488,7 +499,7 @@ export async function POST(request) {
   const result = await finalizePaymentIntent(data);
   if (!result.ok) {
     return respond.json(
-      { error: result.error || "Unable to finalize order." },
+      { error: result.error || "We couldn't finish confirming your order. Please try again." },
       { status: result.status || 500 }
     );
   }

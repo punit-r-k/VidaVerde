@@ -46,7 +46,7 @@ export async function POST(request) {
   return respond.json(
     {
       ok: false,
-      error: "Unable to send pickup reminder emails.",
+      error: "We couldn't send pickup reminder emails right now.",
       sentCount: result.sentCount || 0,
       pickupDate: result.pickupDate || "",
       details: result.errors || result.error || null
