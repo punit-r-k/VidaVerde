@@ -1,5 +1,6 @@
 import { securePublicRoute } from "@/lib/apiSecurity";
 import { maybeSendCustomerConfirmationEmail } from "@/lib/orderConfirmationDispatch";
+import { getAssignedPickupDateKey } from "@/lib/pickupDetails";
 import { getRouteRateLimitConfig } from "@/lib/rateLimit";
 import { stripeConfig, stripeRequest } from "@/lib/stripe";
 import { supabaseAdmin } from "@/lib/supabaseAdmin";
@@ -201,9 +202,14 @@ const recordPaidOrder = async ({
   items,
   placedAt
 }) => {
+  const pickupDate = getAssignedPickupDateKey({
+    fulfillment,
+    placedAt
+  });
   const customerPayload = {
     ...(customer || {}),
-    placed_at: toText(placedAt, 64)
+    placed_at: toText(placedAt, 64),
+    pickup_date: pickupDate
   };
 
   const { data: orderId, error: recordError } = await supabaseAdmin.rpc("record_paid_order", {

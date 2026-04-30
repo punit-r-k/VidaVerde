@@ -22,8 +22,8 @@ npm run dev
 
 Inventory is stored in Supabase and synced to the `Inventory` sheet via Apps Script.
 Column C is a restock delta; it is cleared after a successful sync to prevent double-counting.
-The same Apps Script also syncs the weekly prep, orders, shipments, and email
-signup tabs used by operations.
+The same Apps Script also syncs the weekly prep, orders, shipments, email
+signup, and health-check tabs used by operations.
 When a positive restock releases market-pickup preorder units, the backend can also
 send preorder-ready pickup emails, refresh the prep sheet, and return a count that
 the sheet shows as a toast.
@@ -58,6 +58,8 @@ Sheet columns:
 Additional sheet behavior:
 - The `Prepare for this week` tab now includes preorder units released by restocks
   in the active prep window as fresh demand for the current batch.
+- The `Health` tab shows pickup-date backfill status, email queue status, latest
+  order activity, latest restock activity, and latest pickup reminder activity.
 - The prep, orders, and shipments tabs normalize phone numbers into readable sheet
   output such as `+1 (346) 387-2454`.
 - Manual edits to the preorder count column are reverted. Preorder backlog is managed
@@ -74,9 +76,12 @@ Email signup sheet:
 
 ## Supabase Schema
 
-Schema + seed data live in `supabase/schema.sql`.
+Schema + seed data live in `supabase/schema.sql` for fresh rebuilds.
+Incremental production changes live in `supabase/migrations/` and should be run
+in filename order.
 It defines tables for `products`, `inventory`, `orders`, `order_items`,
-`preorder_queue`, `preorder_release_events`, `shipments`, and analytics data.
+`preorder_queue`, `preorder_release_events`, `shipments`, `email_jobs`, and
+analytics data.
 
 Preorder-specific data model:
 - `preorder_queue` stores the remaining preorder backlog by order and SKU.
@@ -84,9 +89,13 @@ Preorder-specific data model:
   generation and preorder-ready pickup emails can react to newly available units.
 - New paid orders stamp `orders`, `order_items`, and `preorder_queue` with the Stripe
   payment success time so restocks can fulfill preorders in true order sequence.
+- Ready market pickup orders store `orders.pickup_date`, so prep sheets and
+  reminder emails can ask directly for the target pickup date instead of
+  recalculating old cutoff rules every time.
 
 RPC functions:
 - `record_paid_order` (Stripe webhook)
+- `get_admin_prep_data` (grouped weekly prep and pickup verification data)
 - `apply_restock` (restock delta plus preorder release event creation)
 - `set_expected_restock_date`
 - `consume_api_rate_limit` (distributed API throttling)
@@ -114,12 +123,17 @@ Optional for customer order confirmation and preorder-ready pickup emails:
 - `ORDER_EMAIL_REPLY_TO`
 - `ORDER_EMAIL_BCC`
 - `ORDER_EMAIL_BANNER_URL`
+- `ORDER_CONFIRMATION_EMAIL_MODE=queue` to queue confirmation emails instead of
+  sending them inline during checkout/webhook work
+- `EMAIL_JOB_RETRY_DELAY_MS` to control queued email retry spacing
 
 The webhook sends the customer confirmation email after a paid order is recorded.
 To avoid duplicate sends on normal webhook retries, the database now tracks
 `orders.customer_confirmation_email_sent_at`. Apply the updated
 `supabase/schema.sql` in Supabase before relying on this in production.
 The default banner image is bundled at `public/email/order-confirmation-banner.png`.
+When `ORDER_CONFIRMATION_EMAIL_MODE=queue` is enabled, confirmations are written
+to `email_jobs` and processed through `POST /api/admin/email-jobs`.
 
 Preorder-ready pickup emails are sent separately from `lib/preorderReadyEmail.js`
 when a restock releases market-pickup preorder units. Those emails use the same
@@ -146,7 +160,8 @@ Tokens are validated on every request and must:
 - include role claims (`admin`, `ops_admin`, or `inventory_admin`) depending on the route
 
 Role enforcement:
-- `orders`, `shipments`, and `prep` require `admin` or `ops_admin`
+- `orders`, `shipments`, `prep`, `health`, `pickup-reminders`, and `email-jobs`
+  require `admin` or `ops_admin`
 - `inventory` and `restock` require `admin` or `inventory_admin`
 
 ## CORS

@@ -63,6 +63,7 @@ create table if not exists orders (
   customer_confirmation_email_sent_at timestamptz,
   customer_confirmation_email_claimed_at timestamptz,
   pickup_reminder_email_sent_at timestamptz,
+  pickup_date date,
   created_at timestamptz not null default now()
 );
 
@@ -126,6 +127,23 @@ create table if not exists analytics_events (
   created_at timestamptz not null default now()
 );
 
+create table if not exists email_jobs (
+  id uuid primary key default gen_random_uuid(),
+  type text not null check (type in ('order_confirmation')),
+  status text not null default 'pending'
+    check (status in ('pending', 'processing', 'sent', 'failed')),
+  order_id uuid references orders(id) on delete cascade,
+  payload jsonb not null default '{}'::jsonb check (jsonb_typeof(payload) = 'object'),
+  attempts integer not null default 0 check (attempts >= 0),
+  max_attempts integer not null default 5 check (max_attempts > 0),
+  available_at timestamptz not null default now(),
+  claimed_at timestamptz,
+  processed_at timestamptz,
+  last_error text,
+  created_at timestamptz not null default now(),
+  updated_at timestamptz not null default now()
+);
+
 create index if not exists email_signups_email_idx on email_signups (email);
 create index if not exists email_signups_created_at_idx on email_signups (created_at desc);
 create index if not exists analytics_events_created_at_idx on analytics_events (created_at desc);
@@ -136,6 +154,16 @@ create index if not exists analytics_events_product_created_at_idx on analytics_
 create index if not exists analytics_events_session_created_at_idx on analytics_events (session_id, created_at desc);
 create index if not exists shipments_status_created_at_idx on shipments (status, created_at desc);
 create index if not exists shipments_created_at_idx on shipments (created_at desc);
+create index if not exists orders_status_created_fulfillment_idx
+  on orders (status, created_at desc, fulfillment);
+create index if not exists email_jobs_status_available_idx
+  on email_jobs (status, available_at, created_at);
+create index if not exists email_jobs_order_type_idx
+  on email_jobs (order_id, type);
+create unique index if not exists email_jobs_order_confirmation_active_idx
+  on email_jobs (order_id, type)
+  where type = 'order_confirmation'
+    and status in ('pending', 'processing', 'failed');
 
 do $$
 begin
@@ -188,7 +216,19 @@ begin
   ) then
     alter table orders add column pickup_reminder_email_sent_at timestamptz;
   end if;
+
+  if not exists (
+    select 1
+    from information_schema.columns
+    where table_name = 'orders' and column_name = 'pickup_date'
+  ) then
+    alter table orders add column pickup_date date;
+  end if;
 end $$;
+
+create index if not exists orders_pickup_date_status_idx
+  on orders (pickup_date, status)
+  where pickup_date is not null;
 
 create table if not exists order_items (
   id uuid primary key default gen_random_uuid(),
@@ -199,6 +239,8 @@ create table if not exists order_items (
   preorder_qty integer not null default 0 check (preorder_qty >= 0),
   created_at timestamptz not null default now()
 );
+
+create index if not exists order_items_order_id_idx on order_items (order_id);
 
 create table if not exists preorder_queue (
   id uuid primary key default gen_random_uuid(),
@@ -271,6 +313,9 @@ begin
     alter table preorder_release_events add column pickup_reminder_email_sent_at timestamptz;
   end if;
 end $$;
+
+create index if not exists preorder_release_events_created_pickup_reminder_idx
+  on preorder_release_events (created_at desc, pickup_reminder_email_sent_at);
 
 create table if not exists restock_events (
   id uuid primary key default gen_random_uuid(),
@@ -402,6 +447,11 @@ create trigger set_shipments_updated_at
 before update on shipments
 for each row execute function set_updated_at();
 
+drop trigger if exists set_email_jobs_updated_at on email_jobs;
+create trigger set_email_jobs_updated_at
+before update on email_jobs
+for each row execute function set_updated_at();
+
 create or replace function record_paid_order(
   p_session_id text,
   p_payment_reference text,
@@ -425,6 +475,11 @@ declare
     nullif(trim(both from coalesce(p_customer->>'placed_at', '')), '')::timestamptz,
     now()
   );
+  v_requested_pickup_date date := case
+    when p_fulfillment = 'market' then nullif(trim(both from coalesce(p_customer->>'pickup_date', '')), '')::date
+    else null
+  end;
+  v_has_ready_pickup boolean := false;
   v_item jsonb;
   v_sku text;
   v_qty integer;
@@ -437,6 +492,19 @@ begin
   where payment_session_id = p_session_id;
 
   if v_order_id is not null then
+    if p_fulfillment = 'market' and v_requested_pickup_date is not null then
+      update orders o
+        set pickup_date = v_requested_pickup_date
+        where o.id = v_order_id
+          and o.pickup_date is null
+          and exists (
+            select 1
+            from order_items oi
+            where oi.order_id = o.id
+              and oi.quantity > oi.preorder_qty
+          );
+    end if;
+
     return v_order_id;
   end if;
 
@@ -460,6 +528,7 @@ begin
     amount_tax,
     amount_shipping,
     amount_total,
+    pickup_date,
     created_at
   ) values (
     p_session_id,
@@ -481,6 +550,7 @@ begin
     coalesce(p_amount_tax, 0),
     coalesce(p_amount_shipping, 0),
     coalesce(p_amount_total, 0),
+    null,
     v_order_created_at
   )
   returning id into v_order_id;
@@ -505,6 +575,9 @@ begin
     end if;
 
     v_preorder := greatest(v_qty - v_available, 0);
+    if p_fulfillment = 'market' and (v_qty - v_preorder) > 0 then
+      v_has_ready_pickup := true;
+    end if;
 
     update inventory
       set on_hand = case when on_hand >= v_qty then on_hand - v_qty else 0 end,
@@ -521,6 +594,12 @@ begin
         values (v_order_id, v_sku, v_preorder, v_preorder, v_order_created_at);
     end if;
   end loop;
+
+  if v_has_ready_pickup and v_requested_pickup_date is not null then
+    update orders
+      set pickup_date = v_requested_pickup_date
+      where id = v_order_id;
+  end if;
 
   return v_order_id;
 end;
@@ -668,6 +747,209 @@ begin
   end loop;
 
   return v_synced;
+end;
+$$;
+
+create or replace function get_admin_prep_data(
+  p_pickup_date date,
+  p_collection_start_at timestamptz,
+  p_collection_end_at timestamptz
+) returns jsonb
+language plpgsql
+security definer
+set search_path = public
+as $$
+declare
+  v_prep jsonb := '[]'::jsonb;
+  v_pickup_orders jsonb := '[]'::jsonb;
+begin
+  with count_rows as (
+    select
+      oi.sku,
+      coalesce(p.name, oi.sku) as name,
+      coalesce(p.sort_order, 999999) as sort_order,
+      case when o.fulfillment = 'ship' then greatest(oi.quantity - oi.preorder_qty, 0) else 0 end as shipping_qty,
+      case when o.fulfillment = 'market' then greatest(oi.quantity - oi.preorder_qty, 0) else 0 end as market_qty,
+      case when o.fulfillment = 'ship' then least(greatest(oi.preorder_qty, 0), oi.quantity) else 0 end as shipping_preorder_qty,
+      case when o.fulfillment = 'market' then least(greatest(oi.preorder_qty, 0), oi.quantity) else 0 end as market_preorder_qty,
+      least(greatest(oi.preorder_qty, 0), oi.quantity) as preorder_qty
+    from order_items oi
+    join orders o on o.id = oi.order_id
+    left join products p on p.sku = oi.sku
+    where o.status = 'paid'
+      and (
+        (
+          o.fulfillment = 'market'
+          and (
+            (
+              o.pickup_date = p_pickup_date
+              and greatest(oi.quantity - oi.preorder_qty, 0) > 0
+            )
+            or (
+              o.created_at >= p_collection_start_at
+              and o.created_at < p_collection_end_at
+              and least(greatest(oi.preorder_qty, 0), oi.quantity) > 0
+            )
+          )
+        )
+        or (
+          o.fulfillment <> 'market'
+          and o.created_at >= p_collection_start_at
+          and o.created_at < p_collection_end_at
+        )
+      )
+
+    union all
+
+    select
+      pre.sku,
+      coalesce(p.name, pre.sku) as name,
+      coalesce(p.sort_order, 999999) as sort_order,
+      case when o.fulfillment = 'market' then 0 else pre.quantity end as shipping_qty,
+      case when o.fulfillment = 'market' then pre.quantity else 0 end as market_qty,
+      0 as shipping_preorder_qty,
+      0 as market_preorder_qty,
+      0 as preorder_qty
+    from preorder_release_events pre
+    join orders o on o.id = pre.order_id
+    left join products p on p.sku = pre.sku
+    where o.status = 'paid'
+      and pre.created_at >= p_collection_start_at
+      and pre.created_at < p_collection_end_at
+  ),
+  prep_rows as (
+    select
+      sku,
+      max(name) as name,
+      min(sort_order) as sort_order,
+      sum(shipping_qty)::integer as shipping_qty,
+      sum(market_qty)::integer as market_qty,
+      sum(shipping_preorder_qty)::integer as shipping_preorder_qty,
+      sum(market_preorder_qty)::integer as market_preorder_qty,
+      sum(preorder_qty)::integer as preorder_qty,
+      (sum(shipping_qty) + sum(market_qty))::integer as total_qty
+    from count_rows
+    group by sku
+  )
+  select coalesce(
+    jsonb_agg(
+      jsonb_build_object(
+        'sku', sku,
+        'name', name,
+        'shipping_qty', shipping_qty,
+        'market_qty', market_qty,
+        'shipping_preorder_qty', shipping_preorder_qty,
+        'market_preorder_qty', market_preorder_qty,
+        'preorder_qty', preorder_qty,
+        'total_qty', total_qty
+      )
+      order by sort_order, name, sku
+    ),
+    '[]'::jsonb
+  )
+  into v_prep
+  from prep_rows
+  where total_qty > 0 or preorder_qty > 0;
+
+  with pickup_items as (
+    select
+      o.id as order_id,
+      o.created_at,
+      o.customer_name,
+      o.customer_email,
+      o.customer_phone,
+      o.pickup_date,
+      oi.sku,
+      coalesce(p.name, oi.sku) as name,
+      greatest(oi.quantity - oi.preorder_qty, 0)::integer as quantity
+    from order_items oi
+    join orders o on o.id = oi.order_id
+    left join products p on p.sku = oi.sku
+    where o.status = 'paid'
+      and o.fulfillment = 'market'
+      and o.pickup_date = p_pickup_date
+      and greatest(oi.quantity - oi.preorder_qty, 0) > 0
+
+    union all
+
+    select
+      o.id as order_id,
+      pre.created_at,
+      o.customer_name,
+      o.customer_email,
+      o.customer_phone,
+      p_pickup_date as pickup_date,
+      pre.sku,
+      coalesce(p.name, pre.sku) as name,
+      pre.quantity::integer as quantity
+    from preorder_release_events pre
+    join orders o on o.id = pre.order_id
+    left join products p on p.sku = pre.sku
+    where o.status = 'paid'
+      and o.fulfillment = 'market'
+      and pre.created_at >= p_collection_start_at
+      and pre.created_at < p_collection_end_at
+  ),
+  grouped_items as (
+    select
+      order_id,
+      min(created_at) as created_at,
+      max(customer_name) as customer_name,
+      max(customer_email) as customer_email,
+      max(customer_phone) as customer_phone,
+      max(pickup_date) as pickup_date,
+      sku,
+      max(name) as name,
+      sum(quantity)::integer as quantity
+    from pickup_items
+    where quantity > 0
+    group by order_id, sku
+  ),
+  grouped_orders as (
+    select
+      order_id,
+      min(created_at) as created_at,
+      max(customer_name) as customer_name,
+      max(customer_email) as customer_email,
+      max(customer_phone) as customer_phone,
+      max(pickup_date) as pickup_date,
+      sum(quantity)::integer as item_count,
+      string_agg(format('%s x%s', name, quantity), ', ' order by name, sku) as items_summary,
+      jsonb_agg(
+        jsonb_build_object(
+          'sku', sku,
+          'name', name,
+          'quantity', quantity
+        )
+        order by name, sku
+      ) as items
+    from grouped_items
+    group by order_id
+  )
+  select coalesce(
+    jsonb_agg(
+      jsonb_build_object(
+        'id', order_id::text,
+        'created_at', created_at,
+        'customer_name', customer_name,
+        'customer_email', customer_email,
+        'customer_phone', customer_phone,
+        'pickup_date', pickup_date,
+        'item_count', item_count,
+        'items_summary', items_summary,
+        'items', items
+      )
+      order by customer_name, created_at
+    ),
+    '[]'::jsonb
+  )
+  into v_pickup_orders
+  from grouped_orders;
+
+  return jsonb_build_object(
+    'prep', v_prep,
+    'pickup_orders', v_pickup_orders
+  );
 end;
 $$;
 
@@ -863,6 +1145,7 @@ begin
     'shipments',
     'email_signups',
     'analytics_events',
+    'email_jobs',
     'order_items',
     'preorder_queue',
     'preorder_release_events',
@@ -894,6 +1177,7 @@ revoke execute on function consume_api_rate_limit(text, text, integer, integer) 
 revoke execute on function record_paid_order(text, text, text, text, text, integer, integer, integer, integer, jsonb, jsonb) from public, anon, authenticated;
 revoke execute on function sync_shipment_for_order(uuid) from public, anon, authenticated;
 revoke execute on function sync_all_shipments() from public, anon, authenticated;
+revoke execute on function get_admin_prep_data(date, timestamptz, timestamptz) from public, anon, authenticated;
 revoke execute on function apply_restock(text, integer) from public, anon, authenticated;
 revoke execute on function set_expected_restock_date(text, date) from public, anon, authenticated;
 
@@ -901,6 +1185,7 @@ grant execute on function consume_api_rate_limit(text, text, integer, integer) t
 grant execute on function record_paid_order(text, text, text, text, text, integer, integer, integer, integer, jsonb, jsonb) to service_role;
 grant execute on function sync_shipment_for_order(uuid) to service_role;
 grant execute on function sync_all_shipments() to service_role;
+grant execute on function get_admin_prep_data(date, timestamptz, timestamptz) to service_role;
 grant execute on function apply_restock(text, integer) to service_role;
 grant execute on function set_expected_restock_date(text, date) to service_role;
 

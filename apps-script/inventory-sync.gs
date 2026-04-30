@@ -4,6 +4,7 @@ const CONFIG = {
   ORDERS_SHEET_NAME: "Orders",
   SHIPMENTS_SHEET_NAME: "Shipments",
   EMAIL_SIGNUPS_SHEET_NAME: "Email List",
+  HEALTH_SHEET_NAME: "Health",
   SETTINGS_SHEET_NAME: "Settings",
   HEADER_ROW: 1,
   START_ROW: 2,
@@ -43,6 +44,10 @@ const CONFIG = {
   EMAIL_SIGNUPS: {
     HEADER_ROW: 1,
     START_ROW: 2
+  },
+  HEALTH: {
+    HEADER_ROW: 1,
+    START_ROW: 2
   }
 };
 
@@ -54,6 +59,8 @@ function onOpen() {
     .addItem("Master Sync", "masterSync")
     .addItem("Setup Edit Trigger", "setupEditTrigger")
     .addItem("Send Pickup Reminders Now", "sendPickupReminders")
+    .addItem("Process Email Queue", "processEmailQueue")
+    .addItem("Sync Health Check", "syncHealthCheck")
     .addItem("Setup Friday Reminder Trigger", "setupFridayReminderTrigger")
     .addToUi();
 }
@@ -153,7 +160,8 @@ function masterSync() {
     { name: "Weekly Prep", run: syncWeeklyPrep },
     { name: "Orders", run: syncOrders },
     { name: "Shipments", run: syncShipments },
-    { name: "Email List", run: syncEmailSignups }
+    { name: "Email List", run: syncEmailSignups },
+    { name: "Health", run: syncHealthCheck }
   ];
   const failed = [];
 
@@ -173,7 +181,7 @@ function masterSync() {
   }
 
   SpreadsheetApp.getActive().toast(
-    "Inventory, prep, orders, shipments, and email signups synced.",
+    "Inventory, prep, orders, shipments, email signups, and health synced.",
     "Vida Verde",
     5
   );
@@ -223,6 +231,107 @@ function sendPickupReminders() {
     "Vida Verde",
     5
   );
+}
+
+function processEmailQueue() {
+  ensureSettingsSheet_();
+
+  const settings = getSettings_();
+  const response = postJson_(
+    `${settings.apiBaseUrl}/api/admin/email-jobs`,
+    settings,
+    { limit: 10 }
+  );
+
+  if (!response?.ok) {
+    Logger.log(
+      "Email queue processing failed (status: %s, error: %s)",
+      response?.status ?? "unknown",
+      response?.error || response?.message || response?.raw || "unknown"
+    );
+    SpreadsheetApp.getActive().toast(
+      "Email queue processing failed. Check Apps Script logs.",
+      "Vida Verde",
+      5
+    );
+    syncHealthCheck();
+    return;
+  }
+
+  SpreadsheetApp.getActive().toast(
+    `${Number(response?.sentCount || 0)} email(s) sent, ${Number(response?.failedCount || 0)} failed.`,
+    "Vida Verde",
+    5
+  );
+  syncHealthCheck();
+}
+
+function syncHealthCheck() {
+  ensureSettingsSheet_();
+
+  const settings = getSettings_();
+  const response = getJson_(
+    `${settings.apiBaseUrl}/api/admin/health`,
+    settings
+  );
+
+  const checks = Array.isArray(response?.checks) ? response.checks : [];
+  const checkedAt = response?.generatedAt ? new Date(response.generatedAt) : new Date();
+  const sheet = ensureHealthSheet_();
+  sheet.clearContents();
+
+  const headerValues = [[
+    "Checked At",
+    "Area",
+    "Status",
+    "Value",
+    "Details"
+  ]];
+  sheet
+    .getRange(CONFIG.HEALTH.HEADER_ROW, 1, 1, headerValues[0].length)
+    .setValues(headerValues)
+    .setFontWeight("bold");
+
+  if (checks.length === 0) {
+    sheet
+      .getRange(CONFIG.HEALTH.START_ROW, 1)
+      .setValue("No health checks returned.");
+  } else {
+    const rows = checks.map((check) => ([
+      checkedAt,
+      String(check?.label || check?.key || ""),
+      String(check?.status || ""),
+      String(check?.value ?? ""),
+      String(check?.detail || "")
+    ]));
+
+    sheet
+      .getRange(CONFIG.HEALTH.START_ROW, 1, rows.length, rows[0].length)
+      .setValues(rows);
+    sheet
+      .getRange(CONFIG.HEALTH.START_ROW, 1, rows.length, 1)
+      .setNumberFormat("yyyy-mm-dd hh:mm");
+
+    for (let index = 0; index < rows.length; index += 1) {
+      const status = String(rows[index][2] || "").toLowerCase();
+      const range = sheet.getRange(CONFIG.HEALTH.START_ROW + index, 1, 1, 5);
+      if (status === "ok") {
+        range.setBackground("#d9ead3");
+      } else if (status === "warning") {
+        range.setBackground("#fff2cc");
+      } else {
+        range.setBackground("#f4cccc");
+      }
+    }
+  }
+
+  sheet.setFrozenRows(1);
+  sheet.setColumnWidth(1, 150);
+  sheet.setColumnWidth(2, 260);
+  sheet.setColumnWidth(3, 100);
+  sheet.setColumnWidth(4, 220);
+  sheet.setColumnWidth(5, 520);
+  sheet.getRange(1, 1, Math.max(sheet.getLastRow(), 1), 5).setWrap(true);
 }
 
 function syncInventory() {
@@ -524,6 +633,7 @@ function syncOrders() {
     "Created At",
     "Order ID",
     "Fulfillment",
+    "Pickup Date",
     "Customer",
     "Email",
     "Phone",
@@ -551,11 +661,15 @@ function syncOrders() {
       const createdAt = order?.created_at
         ? new Date(order.created_at)
         : "";
+      const pickupDate = order?.pickup_date
+        ? new Date(`${order.pickup_date}T00:00:00`)
+        : "";
 
       return [
         createdAt,
         String(order?.id || ""),
         formatOrderFulfillment_(order?.fulfillment),
+        pickupDate,
         String(order?.customer_name || ""),
         String(order?.customer_email || ""),
         formatPhoneForSheet_(order?.customer_phone),
@@ -580,18 +694,21 @@ function syncOrders() {
       .getRange(CONFIG.ORDERS.START_ROW, 1, rows.length, 1)
       .setNumberFormat("yyyy-mm-dd hh:mm");
     sheet
-      .getRange(CONFIG.ORDERS.START_ROW, 9, rows.length, 1)
+      .getRange(CONFIG.ORDERS.START_ROW, 4, rows.length, 1)
+      .setNumberFormat("yyyy-mm-dd");
+    sheet
+      .getRange(CONFIG.ORDERS.START_ROW, 10, rows.length, 1)
       .setNumberFormat("0");
     sheet
-      .getRange(CONFIG.ORDERS.START_ROW, 10, rows.length, 4)
+      .getRange(CONFIG.ORDERS.START_ROW, 11, rows.length, 4)
       .setNumberFormat("$#,##0.00");
   }
 
   sheet
-    .getRange(CONFIG.ORDERS.HEADER_ROW, 1, 1, 16)
+    .getRange(CONFIG.ORDERS.HEADER_ROW, 1, 1, 17)
     .setFontWeight("bold");
   sheet.setFrozenRows(1);
-  sheet.autoResizeColumns(1, 16);
+  sheet.autoResizeColumns(1, 17);
 }
 
 function syncShipments() {
@@ -1015,6 +1132,17 @@ function ensureEmailSignupsSheet_() {
   return sheet;
 }
 
+function ensureHealthSheet_() {
+  const book = SpreadsheetApp.getActive();
+  let sheet = book.getSheetByName(CONFIG.HEALTH_SHEET_NAME);
+
+  if (!sheet) {
+    sheet = book.insertSheet(CONFIG.HEALTH_SHEET_NAME);
+  }
+
+  return sheet;
+}
+
 function formatShipmentAddress_(shipment) {
   const addressParts = [
     String(shipment?.address1 || "").trim(),
@@ -1383,7 +1511,7 @@ function getJson_(url, settings) {
   const parsed = parseJsonResponse_(response);
   if (parsed.status === 404) {
     throw new Error(
-      `GET ${url} failed (404): Route not found on the deployed site. Redeploy ${settings.apiBaseUrl} with the latest code so /api/admin/email-signups exists.`
+      `GET ${url} failed (404): Route not found on the deployed site. Redeploy ${settings.apiBaseUrl} with the latest code.`
     );
   }
   if (parsed.status < 200 || parsed.status >= 300) {

@@ -38,7 +38,9 @@ const privilegedEndpoints = [
   { name: "admin orders", method: "GET", path: "/api/admin/orders" },
   { name: "admin shipments", method: "GET", path: "/api/admin/shipments" },
   { name: "admin prep", method: "GET", path: "/api/admin/prep" },
+  { name: "admin health", method: "GET", path: "/api/admin/health" },
   { name: "admin pickup reminders", method: "POST", path: "/api/admin/pickup-reminders", body: {} },
+  { name: "admin email jobs", method: "POST", path: "/api/admin/email-jobs", body: {} },
   { name: "admin inventory get", method: "GET", path: "/api/admin/inventory" },
   {
     name: "admin inventory patch",
