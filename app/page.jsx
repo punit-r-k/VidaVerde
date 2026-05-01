@@ -466,8 +466,8 @@ export default async function Home() {
                       src="/Vida Verde-16.webp"
                       alt="Vida Verde customer smiling while holding two jars of sauerkraut"
                       width={1200}
-                      height={1600}
-                      sizes="(max-width: 900px) 100vw, 420px"
+                      height={1500}
+                      sizes="(max-width: 640px) 216px, (max-width: 900px) 276px, 246px"
                     />
                   </div>
                 </figure>
