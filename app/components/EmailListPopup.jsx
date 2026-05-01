@@ -299,7 +299,7 @@ export default function EmailListPopup() {
 
         <div className="email-popup__media" aria-hidden="true">
           <Image
-            src="/email/order-confirmation-banner.png"
+            src="/Vida%20Verde-8.avif"
             alt=""
             fill
             sizes="(max-width: 900px) 100vw, 45vw"
