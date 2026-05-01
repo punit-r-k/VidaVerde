@@ -7,7 +7,7 @@ import { trackAnalyticsEvent } from "@/lib/analytics";
 import { lockPageScroll, unlockPageScroll } from "@/lib/scrollLock";
 
 const DISMISS_KEY = "vidaverde-email-popup-dismissed-v1";
-const OPEN_DELAY_MS = 9000;
+const OPEN_DELAY_MS = 1200;
 const DEFAULT_ERROR = "We couldn't save your email right now. Please try again.";
 const SUCCESS_MESSAGE = "Thank you. You are on the email list!";
 const EMAIL_REGEX = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
@@ -299,7 +299,7 @@ export default function EmailListPopup() {
 
         <div className="email-popup__media" aria-hidden="true">
           <Image
-            src="/hero-product-cluster.webp"
+            src="/Vida%20Verde-8.avif"
             alt=""
             fill
             sizes="(max-width: 900px) 100vw, 45vw"

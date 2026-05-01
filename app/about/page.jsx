@@ -53,10 +53,11 @@ export default function AboutPage() {
           <div className="about-hero__media">
             <div className="about__portrait about-hero__portrait">
               <Image
-                src="/founder-photo-optimized.webp"
+                src="/founder-photo.webp"
                 alt="Vida Verde founder portrait"
-                width={1200}
-                height={795}
+                width={2048}
+                height={1356}
+                quality={95}
                 sizes="(max-width: 600px) 100vw, (max-width: 900px) 85vw, 760px"
               />
             </div>
