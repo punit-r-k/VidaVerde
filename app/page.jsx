@@ -246,23 +246,33 @@ export default async function Home() {
   const allergenBadges = [
     {
       label: "Gluten-free",
-      icon: "gluten-free.svg"
+      icon: "gluten-free.svg",
+      iconWidth: 265,
+      iconHeight: 265
     },
     {
       label: "Dairy-free",
-      icon: "dairy-free.svg"
+      icon: "dairy-free.svg",
+      iconWidth: 249,
+      iconHeight: 249
     },
     {
       label: "Nut-free",
-      icon: "nut-free.svg"
+      icon: "nut-free.svg",
+      iconWidth: 239,
+      iconHeight: 239
     },
     {
       label: "Soy-free",
-      icon: "soy-free.svg"
+      icon: "soy-free.svg",
+      iconWidth: 239,
+      iconHeight: 239
     },
     {
       label: "Egg-free",
-      icon: "egg-free.svg"
+      icon: "egg-free.svg",
+      iconWidth: 239,
+      iconHeight: 239
     }
   ];
 
@@ -372,7 +382,7 @@ export default async function Home() {
         <div className="hero__overlay"></div>
         <div className="hero__content">
           <div className="hero__brand reveal" style={{ "--delay": "0.05s" }}>
-            <Image src="/logo.svg" alt="Vida Verde logo" width={46} height={46} />
+            <Image src="/logo.svg" alt="Vida Verde logo" width={502} height={474} />
             <span className="hero__brand-text">
               <span>vida verde</span>
               <span>sauerkraut</span>
@@ -463,11 +473,12 @@ export default async function Home() {
                 <figure className="voices__media-frame">
                   <div className="voices__photo">
                     <Image
-                      src="/Vida Verde-16.webp"
+                      src="/Vida Verde-16.avif"
                       alt="Vida Verde customer smiling while holding two jars of sauerkraut"
-                      width={1200}
-                      height={1500}
-                      sizes="(max-width: 640px) 216px, (max-width: 900px) 276px, 246px"
+                      width={3254}
+                      height={4338}
+                      sizes="(max-width: 640px) 260px, (max-width: 900px) 300px, 246px"
+                      quality={95}
                     />
                   </div>
                 </figure>
@@ -617,15 +628,15 @@ export default async function Home() {
           <div className="collection__bar" aria-label="Default dietary profile">
             <span className="collection__bar-title">Allergen-friendly</span>
             <ul className="collection__bar-list">
-              {allergenBadges.map(({ label, icon }) => (
+              {allergenBadges.map(({ label, icon, iconWidth, iconHeight }) => (
                 <li key={label}>
                   <span className="collection__bar-pill">
                     <Image
                       src={`/allergen-icons/${encodeURIComponent(icon)}`}
                       alt=""
                       aria-hidden="true"
-                      width={18}
-                      height={18}
+                      width={iconWidth}
+                      height={iconHeight}
                       className="collection__bar-pill-icon"
                     />
                     <span className="collection__bar-pill-label">{label}</span>
@@ -671,11 +682,12 @@ export default async function Home() {
 
             <RevealOnScroll className="market__photo" delay={0.12} preset="driftRight">
               <Image
-                src="/Vida Verde-10.webp"
+                src="/Vida Verde-10.avif"
                 alt=""
-                width={1200}
-                height={800}
-                sizes="(max-width: 640px) 360px, (max-width: 1024px) 560px, 260px"
+                width={6000}
+                height={4000}
+                sizes="(max-width: 640px) 340px, (max-width: 1024px) 520px, 260px"
+                quality={95}
               />
             </RevealOnScroll>
 

@@ -197,13 +197,13 @@ img {
 }
 
 .logo img {
-  width: 36px;
   height: 36px;
+  width: auto;
 }
 
 .nav .logo img {
-  width: 44px;
   height: 44px;
+  width: auto;
   filter: brightness(0) invert(1);
 }
 
@@ -274,8 +274,8 @@ img {
 }
 
 .hero__brand img {
-  width: 58px;
   height: 58px;
+  width: auto;
   filter: brightness(0) invert(1);
 }
 
@@ -3212,8 +3212,8 @@ select:focus {
 }
 
 .footer__brand img {
-  width: 32px;
   height: 32px;
+  width: auto;
   filter: brightness(0) invert(1);
 }
 
@@ -4696,7 +4696,7 @@ select:focus {
   }
 
   .voices__media {
-    width: min(100%, 300px);
+    width: min(70vw, 320px);
   }
 
   .voices__review-action {
@@ -4837,7 +4837,7 @@ select:focus {
     position: static;
     order: 2;
     grid-column: 1 / -1;
-    width: min(100%, 560px);
+    width: min(88vw, 520px);
     margin: 0 auto;
     pointer-events: auto;
   }
@@ -5018,7 +5018,7 @@ select:focus {
   }
 
   .market__photo {
-    width: min(100%, 360px);
+    width: min(86vw, 340px);
   }
 
   .market__board {
@@ -5282,8 +5282,8 @@ select:focus {
   }
 
   .hero__brand img {
-    width: 48px;
     height: 48px;
+    width: auto;
     flex-shrink: 0;
   }
 
@@ -5619,7 +5619,7 @@ select:focus {
   }
 
   .voices__media {
-    width: min(72vw, 240px);
+    width: min(78vw, 280px);
   }
 
   .section--compact.pulse--why {

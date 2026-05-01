@@ -35,7 +35,7 @@ export default function SiteFooter({ showMarketSchedule = true }) {
     <footer className="footer" data-analytics-section="footer">
       <div>
         <div className="footer__brand">
-          <Image src="/logo.svg" alt="Vida Verde logo" width={32} height={32} />
+          <Image src="/logo.svg" alt="Vida Verde logo" width={502} height={474} />
           <span>Vida Verde Sauerkraut</span>
         </div>
         <p>Live fermented sauerkraut and hot sauce for daily nourishment.</p>
