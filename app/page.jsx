@@ -9,6 +9,7 @@ import TestimonialGrid from "./components/TestimonialGrid";
 import FaqAccordion from "./components/FaqAccordion";
 import SiteFooter from "./components/SiteFooter";
 import Image from "next/image";
+import { unstable_cache } from "next/cache";
 import { getProducts } from "@/lib/products";
 import {
   MARKET_ADDRESS,
@@ -31,9 +32,8 @@ import {
   getCanonicalUrl
 } from "@/lib/siteMetadata";
 
-export const dynamic = "force-dynamic";
 export const runtime = "nodejs";
-export const revalidate = 0;
+export const revalidate = 60;
 
 const HOME_DESCRIPTION =
   "Shop live fermented sauerkraut and hot sauces from Vida Verde. Reserve online for Saturday pickup at Fulshear Farmers Market in Richmond, serving Fulshear, Katy, Richmond, and nearby west Houston communities.";
@@ -60,6 +60,18 @@ const buildFaqAnswerText = (faq) =>
     .filter(Boolean)
     .join(" ");
 
+const getCachedProducts = unstable_cache(
+  async () => getProducts(),
+  ["homepage-products-v1"],
+  { revalidate: 300 }
+);
+
+const getCachedInventoryMap = unstable_cache(
+  async () => getInventoryMap(),
+  ["homepage-inventory-v1"],
+  { revalidate: 30 }
+);
+
 const getProductAvailabilityUrl = (product, inventory) => {
   const entry = inventory?.[product.sku];
 
@@ -79,8 +91,8 @@ export default async function Home() {
     "Not intended as medical advice, consult your healthcare provider before dietary changes.";
 
   const [products, inventory] = await Promise.all([
-    getProducts(),
-    getInventoryMap()
+    getCachedProducts(),
+    getCachedInventoryMap()
   ]);
   const pickupDetails = getPickupDetails();
   const showProofSection = false;
@@ -274,7 +286,7 @@ export default async function Home() {
     description: HOME_DESCRIPTION,
     image: [
       getCanonicalUrl("/email/order-confirmation-banner.png"),
-      getCanonicalUrl("/founder-photo.webp")
+      getCanonicalUrl("/founder-photo-optimized.webp")
     ],
     logo: getCanonicalUrl("/logo.svg"),
     email: SUPPORT_EMAIL,
@@ -367,19 +379,16 @@ export default async function Home() {
       />
       <EmailListPopup />
       <header className="hero" data-analytics-section="hero">
-        <video
-          className="hero__video"
-          autoPlay
-          muted
-          loop
-          playsInline
-          poster="https://images.unsplash.com/photo-1512621776951-a57141f2eefd?auto=format&fit=crop&w=1600&q=80"
-        >
-          <source
-            src="https://interactive-examples.mdn.mozilla.net/media/cc0-videos/flower.mp4"
-            type="video/mp4"
-          />
-        </video>
+        <Image
+          className="hero__image"
+          src="/hero-product-cluster.webp"
+          alt=""
+          fill
+          priority
+          fetchPriority="high"
+          sizes="100vw"
+          quality={75}
+        />
         <div className="hero__overlay"></div>
         <div className="hero__content">
           <div className="hero__brand reveal" style={{ "--delay": "0.05s" }}>
@@ -474,12 +483,11 @@ export default async function Home() {
                 <figure className="voices__media-frame">
                   <div className="voices__photo">
                     <Image
-                      src="/Vida Verde-16.avif"
-                      alt="Vida Verde customer smiling while holding two jars of sauerkraut"
-                      width={3254}
-                      height={4338}
+                      src="/hero-product-cluster.webp"
+                      alt="Illustrated Vida Verde fermented jars, hot sauces, and fresh vegetables"
+                      width={1600}
+                      height={1000}
                       sizes="(max-width: 900px) 100vw, 420px"
-                      quality={95}
                     />
                   </div>
                 </figure>
@@ -660,11 +668,10 @@ export default async function Home() {
             amount={0.08}
           >
             <Image
-              src="/storefront-vines.svg"
+              src="/storefront-vines.webp"
               alt=""
-              width={2647}
-              height={305}
-              loading="eager"
+              width={1600}
+              height={184}
               sizes="100vw"
               className="shop-market-divider__img"
             />
@@ -684,10 +691,10 @@ export default async function Home() {
 
             <RevealOnScroll className="market__photo" delay={0.12} preset="driftRight">
               <Image
-                src="/Vida Verde-10.avif"
+                src="/hero-product-cluster.webp"
                 alt=""
-                width={6000}
-                height={4000}
+                width={1600}
+                height={1000}
                 sizes="(max-width: 640px) 360px, (max-width: 1024px) 560px, 260px"
               />
             </RevealOnScroll>
@@ -771,11 +778,10 @@ export default async function Home() {
             <RevealOnScroll className="about-hero__media" delay={0.14} preset="driftLeft">
               <div className="about__portrait about-hero__portrait">
                 <Image
-                  src="/founder-photo.webp"
+                  src="/founder-photo-optimized.webp"
                   alt="Vida Verde founder portrait"
-                  width={2048}
-                  height={1356}
-                  quality={95}
+                  width={1200}
+                  height={795}
                   sizes="(max-width: 600px) 100vw, (max-width: 900px) 85vw, 700px"
                 />
               </div>

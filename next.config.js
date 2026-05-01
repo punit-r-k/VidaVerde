@@ -69,6 +69,8 @@ assertSafeProductionCorsConfig();
 const nextConfig = {
   reactStrictMode: true,
   images: {
+    formats: ["image/avif", "image/webp"],
+    minimumCacheTTL: 31536000,
     qualities: [75, 95],
     remotePatterns: [
       {
@@ -76,6 +78,33 @@ const nextConfig = {
         hostname: "images.unsplash.com"
       }
     ]
+  },
+  async headers() {
+    const immutableImageHeaders = [
+      {
+        key: "Cache-Control",
+        value: "public, max-age=31536000, immutable"
+      }
+    ];
+
+    return [
+      {
+        source: "/:path*.avif",
+        headers: immutableImageHeaders
+      },
+      {
+        source: "/:path*.webp",
+        headers: immutableImageHeaders
+      },
+      {
+        source: "/:path*.png",
+        headers: immutableImageHeaders
+      },
+      {
+        source: "/:path*.svg",
+        headers: immutableImageHeaders
+      }
+    ];
   }
 };
 
