@@ -1,6 +1,7 @@
 import Storefront from "./components/Storefront";
 import EmailListPopup from "./components/EmailListPopup";
 import EmailSignupForm from "./components/EmailSignupForm";
+import HeroVideo from "./components/HeroVideo";
 import MarketPickupPolicy from "./components/MarketPickupPolicy";
 import RevealOnScroll from "./components/RevealOnScroll";
 import JumpNav from "./components/JumpNav";
@@ -274,7 +275,7 @@ export default async function Home() {
     description: HOME_DESCRIPTION,
     image: [
       getCanonicalUrl("/email/order-confirmation-banner.png"),
-      getCanonicalUrl("/founder-photo.webp")
+      getCanonicalUrl("/founder-photo.avif")
     ],
     logo: getCanonicalUrl("/logo.svg"),
     email: SUPPORT_EMAIL,
@@ -367,19 +368,7 @@ export default async function Home() {
       />
       <EmailListPopup />
       <header className="hero" data-analytics-section="hero">
-        <video
-          className="hero__video"
-          autoPlay
-          muted
-          loop
-          playsInline
-          poster="https://images.unsplash.com/photo-1512621776951-a57141f2eefd?auto=format&fit=crop&w=1600&q=80"
-        >
-          <source
-            src="https://interactive-examples.mdn.mozilla.net/media/cc0-videos/flower.mp4"
-            type="video/mp4"
-          />
-        </video>
+        <HeroVideo />
         <div className="hero__overlay"></div>
         <div className="hero__content">
           <div className="hero__brand reveal" style={{ "--delay": "0.05s" }}>
@@ -474,12 +463,11 @@ export default async function Home() {
                 <figure className="voices__media-frame">
                   <div className="voices__photo">
                     <Image
-                      src="/Vida Verde-16.avif"
+                      src="/Vida Verde-16.webp"
                       alt="Vida Verde customer smiling while holding two jars of sauerkraut"
-                      width={3254}
-                      height={4338}
+                      width={1200}
+                      height={1600}
                       sizes="(max-width: 900px) 100vw, 420px"
-                      quality={95}
                     />
                   </div>
                 </figure>
@@ -660,11 +648,10 @@ export default async function Home() {
             amount={0.08}
           >
             <Image
-              src="/storefront-vines.svg"
+              src="/storefront-vines.avif"
               alt=""
               width={2647}
               height={305}
-              loading="eager"
               sizes="100vw"
               className="shop-market-divider__img"
             />
@@ -684,10 +671,10 @@ export default async function Home() {
 
             <RevealOnScroll className="market__photo" delay={0.12} preset="driftRight">
               <Image
-                src="/Vida Verde-10.avif"
+                src="/Vida Verde-10.webp"
                 alt=""
-                width={6000}
-                height={4000}
+                width={1200}
+                height={800}
                 sizes="(max-width: 640px) 360px, (max-width: 1024px) 560px, 260px"
               />
             </RevealOnScroll>
@@ -771,11 +758,10 @@ export default async function Home() {
             <RevealOnScroll className="about-hero__media" delay={0.14} preset="driftLeft">
               <div className="about__portrait about-hero__portrait">
                 <Image
-                  src="/founder-photo.webp"
+                  src="/founder-photo.avif"
                   alt="Vida Verde founder portrait"
                   width={2048}
                   height={1356}
-                  quality={95}
                   sizes="(max-width: 600px) 100vw, (max-width: 900px) 85vw, 700px"
                 />
               </div>
@@ -790,7 +776,7 @@ export default async function Home() {
 
         <div className="founder-faq-divider" aria-hidden="true">
           <Image
-            src="/ornament-divider-collectio.png"
+            src="/ornament-divider-collectio.avif"
             alt=""
             width={923}
             height={215}

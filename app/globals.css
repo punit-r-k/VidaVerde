@@ -4623,14 +4623,26 @@ select:focus {
 
 .js-reveal {
   opacity: 1;
-  transform: none;
   backface-visibility: hidden;
   transform: translateZ(0);
 }
 
+.js-reveal.is-ready {
+  opacity: 0;
+  transform:
+    translate3d(var(--reveal-x, 0), var(--reveal-y, 18px), 0)
+    scale(var(--reveal-scale, 1));
+  transition:
+    opacity var(--reveal-duration, 0.48s) ease-out,
+    transform var(--reveal-duration, 0.48s) cubic-bezier(0.22, 1, 0.36, 1);
+  transition-delay: var(--reveal-delay, 0s);
+  will-change: opacity, transform;
+}
+
 .js-reveal.is-visible {
   opacity: 1;
-  transform: translateZ(0);
+  transform: translate3d(0, 0, 0) scale(1);
+  will-change: auto;
 }
 
 .js-reveal .section__disclaimer::before,
@@ -5812,7 +5824,9 @@ select:focus {
   }
 
   .reveal,
-  .js-reveal {
+  .js-reveal,
+  .js-reveal.is-ready,
+  .js-reveal.is-visible {
     opacity: 1;
     transform: none;
   }

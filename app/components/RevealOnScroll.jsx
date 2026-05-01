@@ -1,7 +1,6 @@
 "use client";
 
-import { motion, useInView, useReducedMotion } from "framer-motion";
-import { useRef } from "react";
+import { useEffect, useRef, useState } from "react";
 
 const VIEWPORT_MARGIN = "0px 0px -10% 0px";
 const DEFAULT_VIEWPORT_AMOUNT = 0.18;
@@ -9,66 +8,34 @@ const DEFAULT_PRESET = "rise";
 
 const REVEAL_PRESETS = {
   rise: {
-    hidden: {
-      opacity: 0,
-      y: 24
-    },
-    visible: {
-      opacity: 1,
-      y: 0
-    }
+    x: "0px",
+    y: "24px",
+    scale: 1
   },
   driftLeft: {
-    hidden: {
-      opacity: 0,
-      x: 28
-    },
-    visible: {
-      opacity: 1,
-      x: 0
-    }
+    x: "28px",
+    y: "0px",
+    scale: 1
   },
   driftRight: {
-    hidden: {
-      opacity: 0,
-      x: -28
-    },
-    visible: {
-      opacity: 1,
-      x: 0
-    }
+    x: "-28px",
+    y: "0px",
+    scale: 1
   },
   fade: {
-    hidden: {
-      opacity: 0
-    },
-    visible: {
-      opacity: 1
-    }
+    x: "0px",
+    y: "0px",
+    scale: 1
   },
   softScale: {
-    hidden: {
-      opacity: 0,
-      y: 18,
-      scale: 0.97
-    },
-    visible: {
-      opacity: 1,
-      y: 0,
-      scale: 1
-    }
+    x: "0px",
+    y: "18px",
+    scale: 0.97
   },
   tiltLift: {
-    hidden: {
-      opacity: 0,
-      y: 26,
-      scale: 0.985
-    },
-    visible: {
-      opacity: 1,
-      y: 0,
-      scale: 1
-    }
+    x: "0px",
+    y: "26px",
+    scale: 0.985
   }
 };
 
@@ -81,38 +48,70 @@ export default function RevealOnScroll({
   preset = DEFAULT_PRESET
 }) {
   const rootRef = useRef(null);
-  const shouldReduceMotion = useReducedMotion();
+  const [isVisible, setIsVisible] = useState(false);
   const motionPreset = REVEAL_PRESETS[preset] || REVEAL_PRESETS[DEFAULT_PRESET];
-  const isInView = useInView(rootRef, {
-    once: true,
-    amount,
-    margin: VIEWPORT_MARGIN
-  });
+
+  useEffect(() => {
+    const node = rootRef.current;
+    if (!(node instanceof HTMLElement)) return undefined;
+
+    const prefersReducedMotion =
+      typeof window.matchMedia === "function" &&
+      window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+
+    if (prefersReducedMotion || typeof IntersectionObserver !== "function") {
+      const frameId = window.requestAnimationFrame(() => {
+        setIsVisible(true);
+      });
+
+      return () => {
+        window.cancelAnimationFrame(frameId);
+      };
+    }
+
+    const observer = new IntersectionObserver(
+      (entries) => {
+        const isIntersecting = entries.some(
+          (entry) => entry.isIntersecting || entry.intersectionRatio >= amount
+        );
+
+        if (!isIntersecting) return;
+        setIsVisible(true);
+        observer.disconnect();
+      },
+      {
+        threshold: [0, amount],
+        rootMargin: VIEWPORT_MARGIN
+      }
+    );
+
+    observer.observe(node);
+
+    return () => {
+      observer.disconnect();
+    };
+  }, [amount]);
 
   return (
-    <motion.div
+    <div
       ref={rootRef}
-      className={["js-reveal", isInView || shouldReduceMotion ? "is-visible" : "", className]
+      className={[
+        "js-reveal",
+        "is-ready",
+        isVisible ? "is-visible" : "",
+        className
+      ]
         .filter(Boolean)
         .join(" ")}
-      initial={shouldReduceMotion ? false : motionPreset.hidden}
-      whileInView={shouldReduceMotion ? undefined : motionPreset.visible}
-      viewport={{
-        once: true,
-        amount,
-        margin: VIEWPORT_MARGIN
+      style={{
+        "--reveal-delay": `${delay}s`,
+        "--reveal-duration": `${duration}s`,
+        "--reveal-x": motionPreset.x,
+        "--reveal-y": motionPreset.y,
+        "--reveal-scale": motionPreset.scale
       }}
-      transition={
-        shouldReduceMotion
-          ? undefined
-          : {
-              duration,
-              delay,
-              ease: [0.22, 1, 0.36, 1]
-            }
-      }
     >
       {children}
-    </motion.div>
+    </div>
   );
 }
