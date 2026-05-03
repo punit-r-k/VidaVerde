@@ -475,8 +475,8 @@ export default async function Home() {
                     <Image
                       src="/Vida Verde-16.avif"
                       alt="Vida Verde customer smiling while holding two jars of sauerkraut"
-                      width={3254}
-                      height={4338}
+                      width={3181}
+                      height={4241}
                       sizes="(max-width: 640px) 260px, (max-width: 900px) 300px, 246px"
                       quality={95}
                     />
@@ -684,8 +684,8 @@ export default async function Home() {
               <Image
                 src="/Vida Verde-10.avif"
                 alt=""
-                width={6000}
-                height={4000}
+                width={5854}
+                height={3903}
                 sizes="(max-width: 640px) 340px, (max-width: 1024px) 520px, 260px"
                 quality={95}
               />
