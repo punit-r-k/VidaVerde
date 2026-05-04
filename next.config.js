@@ -69,7 +69,9 @@ assertSafeProductionCorsConfig();
 const nextConfig = {
   reactStrictMode: true,
   images: {
-    qualities: [75, 95],
+    formats: ["image/avif", "image/webp"],
+    imageSizes: [32, 48, 64, 96, 128, 256, 384, 512],
+    qualities: [75],
     remotePatterns: [
       {
         protocol: "https",

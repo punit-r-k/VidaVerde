@@ -41,7 +41,7 @@ export default function HeroVideo() {
       loop
       playsInline
       preload="none"
-      poster="/hero-poster.webp"
+      poster="/hero-poster.avif"
       fetchPriority="high"
       aria-hidden="true"
     />

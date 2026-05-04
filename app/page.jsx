@@ -478,7 +478,6 @@ export default async function Home() {
                       width={3181}
                       height={4241}
                       sizes="(max-width: 640px) 260px, (max-width: 900px) 300px, 246px"
-                      quality={95}
                     />
                   </div>
                 </figure>
@@ -687,7 +686,6 @@ export default async function Home() {
                 width={5854}
                 height={3903}
                 sizes="(max-width: 640px) 340px, (max-width: 1024px) 520px, 260px"
-                quality={95}
               />
             </RevealOnScroll>
 
