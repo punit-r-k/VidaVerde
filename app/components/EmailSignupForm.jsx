@@ -1,19 +1,29 @@
 "use client";
 
-import { useId, useState } from "react";
+import { useEffect, useId, useState } from "react";
 import { trackAnalyticsEvent } from "@/lib/analytics";
 
 const DEFAULT_ERROR = "We couldn't save your email right now. Please try again.";
 const SUCCESS_MESSAGE = "Thank you for joining our email list!";
 const EMAIL_REGEX = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 
-export default function EmailSignupForm({ source = "website_email_cta" }) {
+export default function EmailSignupForm({
+  source = "website_email_cta",
+  initialEmail = "",
+  hideSubmitButton = false,
+  className = ""
+}) {
   const inputId = useId();
-  const [email, setEmail] = useState("");
+  const normalizedInitialEmail = String(initialEmail || "").trim().toLowerCase();
+  const [email, setEmail] = useState(() => normalizedInitialEmail);
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [statusMessage, setStatusMessage] = useState("");
   const [hasError, setHasError] = useState(false);
   const [isSuccess, setIsSuccess] = useState(false);
+
+  useEffect(() => {
+    setEmail(normalizedInitialEmail);
+  }, [normalizedInitialEmail]);
 
   const handleSubmit = async (event) => {
     event.preventDefault();
@@ -96,7 +106,17 @@ export default function EmailSignupForm({ source = "website_email_cta" }) {
   };
 
   return (
-    <form className="email-signup-form" onSubmit={handleSubmit} noValidate>
+    <form
+      className={[
+        "email-signup-form",
+        hideSubmitButton ? "email-signup-form--input-only" : "",
+        className
+      ]
+        .filter(Boolean)
+        .join(" ")}
+      onSubmit={handleSubmit}
+      noValidate
+    >
       <label className="email-signup-form__label" htmlFor={inputId}>
         Email address
       </label>
@@ -129,15 +149,17 @@ export default function EmailSignupForm({ source = "website_email_cta" }) {
           required
           disabled={isSubmitting || isSuccess}
         />
-        <button
-          type="submit"
-          className={`button button--dark email-signup-form__submit${isSuccess ? " email-signup-form__submit--success" : ""}`}
-          disabled={isSubmitting || isSuccess}
-          data-analytics-id={`email_signup_submit_${source}`}
-          data-analytics-hover="true"
-        >
-          {isSuccess ? "Thanks!" : isSubmitting ? "Joining..." : "Join The List"}
-        </button>
+        {hideSubmitButton ? null : (
+          <button
+            type="submit"
+            className={`button button--dark email-signup-form__submit${isSuccess ? " email-signup-form__submit--success" : ""}`}
+            disabled={isSubmitting || isSuccess}
+            data-analytics-id={`email_signup_submit_${source}`}
+            data-analytics-hover="true"
+          >
+            {isSuccess ? "Thanks!" : isSubmitting ? "Joining..." : "Join The List"}
+          </button>
+        )}
       </div>
       {statusMessage ? (
         <p

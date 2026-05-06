@@ -473,10 +473,10 @@ export default async function Home() {
                 <figure className="voices__media-frame">
                   <div className="voices__photo">
                     <Image
-                      src="/Vida Verde-16.avif"
+                      src="/VV Market (16).webp"
                       alt="Vida Verde customer smiling while holding two jars of sauerkraut"
-                      width={3181}
-                      height={4241}
+                      width={1536}
+                      height={2048}
                       sizes="(max-width: 640px) 260px, (max-width: 900px) 300px, 246px"
                     />
                   </div>
@@ -681,10 +681,10 @@ export default async function Home() {
 
             <RevealOnScroll className="market__photo" delay={0.12} preset="driftRight">
               <Image
-                src="/Vida Verde-10.avif"
-                alt=""
-                width={5854}
-                height={3903}
+                src="/VV Market (10).webp"
+                alt="Vida Verde market booth with customers sampling products"
+                width={2048}
+                height={1365}
                 sizes="(max-width: 640px) 340px, (max-width: 1024px) 520px, 260px"
               />
             </RevealOnScroll>

@@ -299,7 +299,7 @@ export default function EmailListPopup() {
 
         <div className="email-popup__media" aria-hidden="true">
           <Image
-            src="/Vida Verde-8.avif"
+            src="/VV Market (8).webp"
             alt=""
             fill
             sizes="(max-width: 900px) 100vw, 45vw"

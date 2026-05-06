@@ -7,6 +7,11 @@ import { createPortal } from "react-dom";
 import { trackAnalyticsEvent } from "@/lib/analytics";
 import { lockPageScroll, unlockPageScroll } from "@/lib/scrollLock";
 import {
+  SUPPORT_EMAIL,
+  SUPPORT_PHONE_DISPLAY,
+  SUPPORT_PHONE_E164
+} from "@/lib/siteMetadata";
+import {
   FORM_FIELD_ORDER,
   INITIAL_FORM_VALUES,
   SHIPPING_FIELDS,
@@ -24,6 +29,7 @@ import {
   MARKET_PICKUP_NOTE_LINES,
   MARKET_PICKUP_POLICY_ITEMS
 } from "@/lib/pickupDetails";
+import EmailSignupForm from "./EmailSignupForm";
 
 const StripePaymentPanel = dynamic(() => import("./StripePaymentPanel"), {
   loading: () => (
@@ -56,11 +62,11 @@ const PREORDER_ACKNOWLEDGEMENT_LABEL =
 const ORDER_FINALIZE_MESSAGE =
   "Payment received. Finalizing your order...";
 const ORDER_FINALIZE_PENDING_NOTICE =
-  "Payment received. We are still finalizing your order. Please do not submit again. We will email confirmation as soon as it is recorded.";
+  `Payment received. We are still finalizing your order, so please do not submit again. We will email confirmation as soon as it is recorded. If you do not see it shortly, contact us at ${SUPPORT_EMAIL} or ${SUPPORT_PHONE_DISPLAY}.`;
 const ORDER_SUCCESS_NOTICE =
-  "Payment received. Your order is confirmed and fulfillment details are on the way.";
+  `Payment received. Your order is confirmed, and receipt plus pickup details are on the way by email. If you would like future batch drops, seasonal releases, and pickup reminders, you can join our email list below. Questions? Contact us at ${SUPPORT_EMAIL} or ${SUPPORT_PHONE_DISPLAY}.`;
 const ORDER_SUCCESS_POPUP_MESSAGE =
-  "Your payment was received. Confirmation details are on the way.";
+  "Your payment was received. Watch your email for your receipt and pickup details.";
 const PREORDER_NOTICE_MESSAGES = new Set([
   "Please acknowledge the pre-order notice before proceeding to payment.",
   "Please acknowledge the pre-order notice before payment."
@@ -238,6 +244,7 @@ export default function Storefront({ products, inventory = null }) {
   const [orderSuccessPopupMessage, setOrderSuccessPopupMessage] = useState(
     ORDER_SUCCESS_POPUP_MESSAGE
   );
+  const [orderSuccessEmail, setOrderSuccessEmail] = useState("");
   const [pickupAcknowledged, setPickupAcknowledged] = useState(false);
   const [pickupTouched, setPickupTouched] = useState(false);
   const [preorderAcknowledged, setPreorderAcknowledged] = useState(false);
@@ -251,7 +258,8 @@ export default function Storefront({ products, inventory = null }) {
   const fieldRefs = useRef({});
   const pairingsPanelRefs = useRef({});
   const addPulseTimeoutsRef = useRef({});
-  const orderSuccessPopupTimeoutRef = useRef(null);
+  const orderSuccessDialogRef = useRef(null);
+  const orderSuccessLastFocusedRef = useRef(null);
   const cartSummaryRef = useRef(null);
   const checkoutStartedRef = useRef(false);
   const previousCheckoutStepRef = useRef("details");
@@ -326,19 +334,30 @@ export default function Storefront({ products, inventory = null }) {
     finalizingPaymentIntentRef.current = "";
   }, [resetCartChangeTracking]);
 
-  const triggerOrderSuccessPopup = useCallback((message = ORDER_SUCCESS_POPUP_MESSAGE) => {
+  const closeOrderSuccessPopup = useCallback((reason = "close_button") => {
+    trackAnalyticsEvent({
+      name: "order_success_popup_close",
+      sectionId: "shop",
+      elementId: "order_success_popup",
+      metadata: {
+        reason
+      }
+    });
+    setShowOrderSuccessPopup(false);
+
+    window.requestAnimationFrame(() => {
+      const lastFocusedElement = orderSuccessLastFocusedRef.current;
+      if (lastFocusedElement instanceof HTMLElement && lastFocusedElement.isConnected) {
+        lastFocusedElement.focus();
+      }
+    });
+  }, []);
+
+  const triggerOrderSuccessPopup = useCallback((message = ORDER_SUCCESS_POPUP_MESSAGE, email = "") => {
     setOrderSuccessPopupMessage(message);
+    setOrderSuccessEmail(String(email || "").trim().toLowerCase());
     setOrderSuccessPopupKey((prev) => prev + 1);
     setShowOrderSuccessPopup(true);
-
-    if (orderSuccessPopupTimeoutRef.current) {
-      clearTimeout(orderSuccessPopupTimeoutRef.current);
-    }
-
-    orderSuccessPopupTimeoutRef.current = setTimeout(() => {
-      setShowOrderSuccessPopup(false);
-      orderSuccessPopupTimeoutRef.current = null;
-    }, 6500);
   }, []);
 
   const finalizePaidOrder = useCallback(
@@ -407,7 +426,8 @@ export default function Storefront({ products, inventory = null }) {
           setStatus("success");
           setNotice(firstAutomationWarning?.customerMessage || ORDER_SUCCESS_NOTICE);
           triggerOrderSuccessPopup(
-            firstAutomationWarning?.popupMessage || ORDER_SUCCESS_POPUP_MESSAGE
+            firstAutomationWarning?.popupMessage || ORDER_SUCCESS_POPUP_MESSAGE,
+            formValues.email
           );
           resetCheckoutAfterSuccess();
           return;
@@ -442,7 +462,7 @@ export default function Storefront({ products, inventory = null }) {
       setNotice(ORDER_FINALIZE_PENDING_NOTICE);
       finalizingPaymentIntentRef.current = "";
     },
-    [resetCheckoutAfterSuccess, triggerOrderSuccessPopup]
+    [formValues.email, resetCheckoutAfterSuccess, triggerOrderSuccessPopup]
   );
 
   const setFieldRef = useCallback((name) => {
@@ -873,16 +893,84 @@ export default function Storefront({ products, inventory = null }) {
   }, [closePickupPolicyModal, showPickupPolicyModal]);
 
   useEffect(() => {
+    if (!showOrderSuccessPopup) return undefined;
+
+    orderSuccessLastFocusedRef.current =
+      document.activeElement instanceof HTMLElement ? document.activeElement : null;
+
+    const dialog = orderSuccessDialogRef.current;
+    const getFocusableElements = () => {
+      if (!(dialog instanceof HTMLElement)) {
+        return [];
+      }
+
+      return Array.from(
+        dialog.querySelectorAll(
+          'button:not([disabled]), [href], input:not([disabled]), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex="-1"])'
+        )
+      ).filter(
+        (element) =>
+          element instanceof HTMLElement &&
+          !element.hasAttribute("hidden") &&
+          element.getAttribute("aria-hidden") !== "true" &&
+          element.getClientRects().length > 0
+      );
+    };
+
+    const handleKeyDown = (event) => {
+      if (event.key === "Escape") {
+        closeOrderSuccessPopup("escape");
+        return;
+      }
+
+      if (event.key !== "Tab") {
+        return;
+      }
+
+      const focusableElements = getFocusableElements();
+      if (!focusableElements.length) {
+        event.preventDefault();
+        if (dialog instanceof HTMLElement) {
+          dialog.focus();
+        }
+        return;
+      }
+
+      const firstFocusable = focusableElements[0];
+      const lastFocusable = focusableElements[focusableElements.length - 1];
+
+      if (event.shiftKey && document.activeElement === firstFocusable) {
+        event.preventDefault();
+        lastFocusable.focus();
+      } else if (!event.shiftKey && document.activeElement === lastFocusable) {
+        event.preventDefault();
+        firstFocusable.focus();
+      }
+    };
+
+    lockPageScroll();
+    window.addEventListener("keydown", handleKeyDown);
+    window.requestAnimationFrame(() => {
+      const focusableElements = getFocusableElements();
+      if (focusableElements[0] instanceof HTMLElement) {
+        focusableElements[0].focus();
+      } else if (dialog instanceof HTMLElement) {
+        dialog.focus();
+      }
+    });
+
+    return () => {
+      unlockPageScroll();
+      window.removeEventListener("keydown", handleKeyDown);
+    };
+  }, [closeOrderSuccessPopup, showOrderSuccessPopup]);
+
+  useEffect(() => {
     return () => {
       Object.values(addPulseTimeoutsRef.current).forEach((timeoutId) => {
         clearTimeout(timeoutId);
       });
       addPulseTimeoutsRef.current = {};
-
-      if (orderSuccessPopupTimeoutRef.current) {
-        clearTimeout(orderSuccessPopupTimeoutRef.current);
-        orderSuccessPopupTimeoutRef.current = null;
-      }
     };
   }, []);
 
@@ -2007,8 +2095,24 @@ export default function Storefront({ products, inventory = null }) {
   return (
     <>
       {showOrderSuccessPopup ? (
-        <div className="order-success-overlay" role="status" aria-live="polite">
-          <div key={orderSuccessPopupKey} className="order-success-popup">
+        <div className="order-success-overlay">
+          <div
+            key={orderSuccessPopupKey}
+            className="order-success-popup"
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="order-success-popup-title"
+            ref={orderSuccessDialogRef}
+            tabIndex={-1}
+          >
+            <button
+              type="button"
+              className="order-success-popup__close"
+              aria-label="Close order confirmation"
+              onClick={() => closeOrderSuccessPopup("close_button")}
+            >
+              x
+            </button>
             <div className="order-success-popup__icon" aria-hidden="true">
               <svg viewBox="0 0 24 24" fill="none" role="presentation">
                 <path
@@ -2020,8 +2124,25 @@ export default function Storefront({ products, inventory = null }) {
                 />
               </svg>
             </div>
-            <h4>Thank you for your order!</h4>
+            <h4 id="order-success-popup-title">Thank you for your order!</h4>
             <p>{orderSuccessPopupMessage}</p>
+            <div className="order-success-popup__followup">
+              <p>
+                If you would like new batch drops, seasonal releases, and pickup
+                reminders, leave your email below.
+              </p>
+              <EmailSignupForm
+                source="order_success_popup"
+                initialEmail={orderSuccessEmail}
+                hideSubmitButton
+                className="order-success-popup__signup"
+              />
+              <p className="order-success-popup__contact">
+                Need help with your order? Email{" "}
+                <a href={`mailto:${SUPPORT_EMAIL}`}>{SUPPORT_EMAIL}</a> or call/text{" "}
+                <a href={`tel:${SUPPORT_PHONE_E164}`}>{SUPPORT_PHONE_DISPLAY}</a>.
+              </p>
+            </div>
           </div>
         </div>
       ) : null}
