@@ -5703,6 +5703,16 @@ select:focus {
     width: min(78vw, 280px);
   }
 
+  .voices__photo {
+    aspect-ratio: auto;
+  }
+
+  .voices__photo img {
+    height: auto;
+    object-fit: contain;
+    object-position: center;
+  }
+
   .section--compact.pulse--why {
     padding-top: 18px;
   }
