@@ -238,13 +238,13 @@ export default function EmailListPopup() {
         </button>
 
         <div className="email-popup__copy">
-          <p className="email-popup__eyebrow">Fresh drops, market updates</p>
+          <p className="email-popup__eyebrow">New products, recipes, updates</p>
           <h2 id="email-popup-title">
-            Want to join our email list for new ferments and weekly updates?
+            Want to join our email list for new products and fresh ideas?
           </h2>
           <p className="email-popup__body">
-            Get first access to new flavors, seasonal releases, and Saturday
-            pickup reminders from Vida Verde.
+            Get new product announcements, healthy eating notes, recipe ideas,
+            and Vida Verde updates.
           </p>
 
           <form className="email-popup__form" onSubmit={handleSubmit}>

@@ -11,6 +11,7 @@ export default function EmailSignupForm({
   source = "website_email_cta",
   initialEmail = "",
   hideSubmitButton = false,
+  submitLabel = "Join The List",
   className = ""
 }) {
   const inputId = useId();
@@ -153,11 +154,11 @@ export default function EmailSignupForm({
           <button
             type="submit"
             className={`button button--dark email-signup-form__submit${isSuccess ? " email-signup-form__submit--success" : ""}`}
-            disabled={isSubmitting || isSuccess}
-            data-analytics-id={`email_signup_submit_${source}`}
-            data-analytics-hover="true"
-          >
-            {isSuccess ? "Thanks!" : isSubmitting ? "Joining..." : "Join The List"}
+          disabled={isSubmitting || isSuccess}
+          data-analytics-id={`email_signup_submit_${source}`}
+          data-analytics-hover="true"
+        >
+            {isSuccess ? "Thanks!" : isSubmitting ? "Joining..." : submitLabel}
           </button>
         )}
       </div>

@@ -645,7 +645,11 @@ export default async function Home() {
             </ul>
           </div>
 
-          <Storefront products={products} inventory={inventory} />
+          <Storefront
+            products={products}
+            inventory={inventory}
+            pickupDetails={pickupDetails}
+          />
         </section>
 
         <div className="shop-market-divider" aria-hidden="true">
@@ -736,7 +740,7 @@ export default async function Home() {
             <p className="eyebrow">Stay Updated</p>
             <h2>Join our email list.</h2>
             <p>
-              Get new batch drops, seasonal flavor releases, and Saturday pickup reminders.
+              Get new product announcements, healthy eating notes, recipe ideas, and Vida Verde updates.
             </p>
             <EmailSignupForm source="homepage_join_email" />
           </RevealOnScroll>

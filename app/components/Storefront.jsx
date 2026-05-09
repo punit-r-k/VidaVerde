@@ -22,12 +22,15 @@ import {
   normalizeFulfillment
 } from "@/lib/checkoutSchema";
 import {
+  MARKET_ADDRESS,
   MARKET_NAME,
   MARKET_PICKUP_ACKNOWLEDGEMENT_LABEL,
   MARKET_PICKUP_ACKNOWLEDGEMENT_NOTICE,
   MARKET_PICKUP_LABEL,
   MARKET_PICKUP_NOTE_LINES,
-  MARKET_PICKUP_POLICY_ITEMS
+  MARKET_PICKUP_POLICY_ITEMS,
+  MARKET_PICKUP_WINDOW,
+  getPickupDetails
 } from "@/lib/pickupDetails";
 import EmailSignupForm from "./EmailSignupForm";
 
@@ -64,7 +67,7 @@ const ORDER_FINALIZE_MESSAGE =
 const ORDER_FINALIZE_PENDING_NOTICE =
   `Payment received. We are still finalizing your order, so please do not submit again. We will email confirmation as soon as it is recorded. If you do not see it shortly, contact us at ${SUPPORT_EMAIL} or ${SUPPORT_PHONE_DISPLAY}.`;
 const ORDER_SUCCESS_NOTICE =
-  `Payment received. Your order is confirmed, and receipt plus pickup details are on the way by email. If you would like future batch drops, seasonal releases, and pickup reminders, you can join our email list below. Questions? Contact us at ${SUPPORT_EMAIL} or ${SUPPORT_PHONE_DISPLAY}.`;
+  `Payment received. Your order is confirmed, and receipt plus pickup details are on the way by email. If you would like new product announcements, healthy eating notes, recipe ideas, and Vida Verde updates, you can join our email list below. Questions? Contact us at ${SUPPORT_EMAIL} or ${SUPPORT_PHONE_DISPLAY}.`;
 const ORDER_SUCCESS_POPUP_MESSAGE =
   "Your payment was received. Watch your email for your receipt and pickup details.";
 const PREORDER_NOTICE_MESSAGES = new Set([
@@ -223,7 +226,7 @@ const splitDescription = (description) => {
   };
 };
 
-export default function Storefront({ products, inventory = null }) {
+export default function Storefront({ products, inventory = null, pickupDetails = null }) {
   const searchParams = useSearchParams();
   const [cart, setCart] = useState({});
   const [cartHydrated, setCartHydrated] = useState(false);
@@ -245,6 +248,7 @@ export default function Storefront({ products, inventory = null }) {
     ORDER_SUCCESS_POPUP_MESSAGE
   );
   const [orderSuccessEmail, setOrderSuccessEmail] = useState("");
+  const [orderSuccessContext, setOrderSuccessContext] = useState(null);
   const [pickupAcknowledged, setPickupAcknowledged] = useState(false);
   const [pickupTouched, setPickupTouched] = useState(false);
   const [preorderAcknowledged, setPreorderAcknowledged] = useState(false);
@@ -273,10 +277,33 @@ export default function Storefront({ products, inventory = null }) {
   const isPaymentStep = checkoutStep === "payment";
   const isOrderFinalizing =
     status === "finalizing" || status === "pending_confirmation";
+  const checkoutPickupDetails = useMemo(() => {
+    const source =
+      pickupDetails && typeof pickupDetails === "object"
+        ? pickupDetails
+        : getPickupDetails();
+
+    return {
+      market_name: source.market_name || MARKET_NAME,
+      market_address: source.market_address || MARKET_ADDRESS,
+      pickup_window: source.pickup_window || MARKET_PICKUP_WINDOW,
+      same_day_cutoff_label: source.same_day_cutoff_label || "",
+      market_date_label: source.market_date_label || ""
+    };
+  }, [pickupDetails]);
+  const pickupMapUrl = useMemo(
+    () =>
+      `https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(
+        checkoutPickupDetails.market_address
+      )}`,
+    [checkoutPickupDetails.market_address]
+  );
+  const supportSmsHref = `sms:${SUPPORT_PHONE_E164}`;
   const cartRef = useRef(cart);
   const liveInventoryRef = useRef(liveInventory);
   const checkoutStepRef = useRef(checkoutStep);
   const isOrderFinalizingRef = useRef(isOrderFinalizing);
+  const checkoutSuccessContextRef = useRef(null);
 
   cartRef.current = cart;
   liveInventoryRef.current = liveInventory;
@@ -353,9 +380,10 @@ export default function Storefront({ products, inventory = null }) {
     });
   }, []);
 
-  const triggerOrderSuccessPopup = useCallback((message = ORDER_SUCCESS_POPUP_MESSAGE, email = "") => {
+  const triggerOrderSuccessPopup = useCallback((message = ORDER_SUCCESS_POPUP_MESSAGE, email = "", context = null) => {
     setOrderSuccessPopupMessage(message);
     setOrderSuccessEmail(String(email || "").trim().toLowerCase());
+    setOrderSuccessContext(context && typeof context === "object" ? context : null);
     setOrderSuccessPopupKey((prev) => prev + 1);
     setShowOrderSuccessPopup(true);
   }, []);
@@ -427,7 +455,8 @@ export default function Storefront({ products, inventory = null }) {
           setNotice(firstAutomationWarning?.customerMessage || ORDER_SUCCESS_NOTICE);
           triggerOrderSuccessPopup(
             firstAutomationWarning?.popupMessage || ORDER_SUCCESS_POPUP_MESSAGE,
-            formValues.email
+            formValues.email,
+            checkoutSuccessContextRef.current
           );
           resetCheckoutAfterSuccess();
           return;
@@ -1117,6 +1146,25 @@ export default function Storefront({ products, inventory = null }) {
   );
   const requiresAddress = fulfillment === "ship";
   const cartCountLabel = `${itemCount} item${itemCount === 1 ? "" : "s"}`;
+  const pickupScenario =
+    fulfillment === "market"
+      ? preorderUnitsInCart > 0
+        ? preorderUnitsInCart >= itemCount
+          ? "preorder_only"
+          : "mixed"
+        : "standard"
+      : "shipping";
+
+  checkoutSuccessContextRef.current = {
+    fulfillment,
+    pickupScenario,
+    pickupDateLabel: checkoutPickupDetails.market_date_label,
+    pickupWindow: checkoutPickupDetails.pickup_window,
+    marketName: checkoutPickupDetails.market_name,
+    marketAddress: checkoutPickupDetails.market_address,
+    preorderUnits: preorderUnitsInCart,
+    totalCents: subtotal
+  };
   const cityOptions = useMemo(() => {
     const selectedCity = String(formValues.city || "").trim();
     if (!selectedCity) return US_CITY_OPTIONS;
@@ -1854,7 +1902,7 @@ export default function Storefront({ products, inventory = null }) {
             data-analytics-id="checkout_pickup_policy_open"
             data-analytics-type="checkout-policy"
           >
-            View Pickup Policy
+            View Pickup Instructions & Policy
           </button>
         </div>
         {pickupAcknowledgementError ? (
@@ -2126,22 +2174,87 @@ export default function Storefront({ products, inventory = null }) {
             </div>
             <h4 id="order-success-popup-title">Thank you for your order!</h4>
             <p>{orderSuccessPopupMessage}</p>
-            <div className="order-success-popup__followup">
-              <p>
-                If you would like new batch drops, seasonal releases, and pickup
-                reminders, leave your email below.
-              </p>
-              <EmailSignupForm
-                source="order_success_popup"
-                initialEmail={orderSuccessEmail}
-                hideSubmitButton
-                className="order-success-popup__signup"
-              />
-              <p className="order-success-popup__contact">
-                Need help with your order? Email{" "}
-                <a href={`mailto:${SUPPORT_EMAIL}`}>{SUPPORT_EMAIL}</a> or call/text{" "}
-                <a href={`tel:${SUPPORT_PHONE_E164}`}>{SUPPORT_PHONE_DISPLAY}</a>.
-              </p>
+            {orderSuccessContext?.fulfillment === "market" ? (
+              <div className="order-success-popup__summary" aria-label="Pickup details">
+                <div className="order-success-popup__summary-header">
+                  <span>
+                    {orderSuccessContext.pickupScenario === "preorder_only"
+                      ? "Preorder Follow-up"
+                      : orderSuccessContext.pickupScenario === "mixed"
+                        ? "Pickup And Preorder"
+                        : "Pickup Details"}
+                  </span>
+                  <strong>
+                    {orderSuccessContext.pickupScenario === "preorder_only"
+                      ? "Email Follow-up"
+                      : orderSuccessContext.pickupDateLabel || "Next Market"}
+                  </strong>
+                </div>
+                <dl className="order-success-popup__details">
+                  {orderSuccessContext.pickupScenario !== "preorder_only" ? (
+                    <div>
+                      <dt>Window</dt>
+                      <dd>{orderSuccessContext.pickupWindow}</dd>
+                    </div>
+                  ) : null}
+                  <div>
+                    <dt>Market</dt>
+                    <dd>{orderSuccessContext.marketName}</dd>
+                  </div>
+                  <div>
+                    <dt>Address</dt>
+                    <dd>{orderSuccessContext.marketAddress}</dd>
+                  </div>
+                </dl>
+                <p className="order-success-popup__instruction">
+                  {orderSuccessContext.pickupScenario === "preorder_only"
+                    ? "We will email you when the preorder is ready and confirm the pickup date before you come to market."
+                    : orderSuccessContext.pickupScenario === "mixed"
+                      ? "Pick up ready items on the date above. Preorder items will be scheduled separately by email when restocked."
+                      : "At pickup, give the name or email used at checkout at the Vida Verde booth."}
+                </p>
+              </div>
+            ) : orderSuccessContext?.fulfillment === "shipping" ? (
+              <div className="order-success-popup__summary" aria-label="Shipping details">
+                <div className="order-success-popup__summary-header">
+                  <span>Shipping</span>
+                  <strong>Tracking By Email</strong>
+                </div>
+                <p className="order-success-popup__instruction">
+                  We will email tracking once your order ships. Open and inspect the package when it arrives, and refrigerate after opening.
+                </p>
+              </div>
+            ) : null}
+            <div className="order-success-popup__aftercare">
+              <div className="order-success-popup__followup">
+                <p className="order-success-popup__email-list-label">
+                  Join the email list
+                </p>
+                <p>
+                  Get new product announcements, healthy eating notes, recipe ideas, and Vida Verde updates.
+                </p>
+                <EmailSignupForm
+                  source="order_success_popup"
+                  initialEmail={orderSuccessEmail}
+                  submitLabel="Join"
+                  className="order-success-popup__signup"
+                />
+              </div>
+              <div className="order-success-popup__contact" aria-label="Order support">
+                <span className="order-success-popup__contact-title">
+                  Need help with your order?
+                </span>
+                <div className="order-success-popup__contact-links">
+                  <span>
+                    Email{" "}
+                    <a href={`mailto:${SUPPORT_EMAIL}`}>{SUPPORT_EMAIL}</a>
+                  </span>
+                  <span>
+                    Call/text{" "}
+                    <a href={`tel:${SUPPORT_PHONE_E164}`}>{SUPPORT_PHONE_DISPLAY}</a>
+                  </span>
+                </div>
+              </div>
             </div>
           </div>
         </div>
@@ -2862,10 +2975,18 @@ export default function Storefront({ products, inventory = null }) {
           >
             <div className="pickup-policy-modal__topbar">
               <div className="pickup-policy-modal__heading">
-                <p className="pickup-policy-modal__eyebrow">Pickup Policy</p>
-                <h3 id="pickup-policy-modal-title">Review before payment</h3>
+                <p className="pickup-policy-modal__eyebrow">
+                  {fulfillment === "ship" ? "Shipping Instructions" : "Pickup Instructions"}
+                </p>
+                <h3 id="pickup-policy-modal-title">
+                  {fulfillment === "ship"
+                    ? "Confirm delivery details before payment"
+                    : "Confirm pickup details before payment"}
+                </h3>
                 <p id="pickup-policy-modal-intro" className="pickup-policy-modal__intro">
-                  {MARKET_PICKUP_ACKNOWLEDGEMENT_NOTICE}
+                  {fulfillment === "ship"
+                    ? "Review where this order will go, what happens after payment, and the total charged today."
+                    : "Review when and where to pick up, what to do at the booth, and what happens if any item is a preorder."}
                 </p>
               </div>
               <button
@@ -2878,13 +2999,140 @@ export default function Storefront({ products, inventory = null }) {
               </button>
             </div>
 
-            <div className="pickup-policy-modal__grid">
-              {MARKET_PICKUP_POLICY_ITEMS.map((item) => (
-                <article key={item.label} className="pickup-policy-modal__item">
-                  <strong>{item.label}</strong>
-                  <p>{item.body}</p>
-                </article>
-              ))}
+            <div className="pickup-policy-modal__body">
+              <section className="pickup-policy-modal__summary" aria-label="Fulfillment summary">
+                {fulfillment === "ship" ? (
+                  <>
+                    <article>
+                      <span>Fulfillment</span>
+                      <strong>Shipping</strong>
+                    </article>
+                    <article>
+                      <span>Ship To</span>
+                      <strong>
+                        {shippingAddressLines.map((line) => (
+                          <span key={line}>{line}</span>
+                        ))}
+                      </strong>
+                    </article>
+                    <article>
+                      <span>Next Step</span>
+                      <strong>Tracking will be emailed when available.</strong>
+                    </article>
+                  </>
+                ) : (
+                  <>
+                    <article>
+                      <span>Pickup Date</span>
+                      <strong>
+                        {pickupScenario === "preorder_only"
+                          ? "Scheduled after restock"
+                          : checkoutPickupDetails.market_date_label || "Next available Saturday"}
+                      </strong>
+                    </article>
+                    <article>
+                      <span>Window</span>
+                      <strong>{checkoutPickupDetails.pickup_window}</strong>
+                    </article>
+                    <article>
+                      <span>Location</span>
+                      <strong>
+                        {checkoutPickupDetails.market_name}
+                        <span>{checkoutPickupDetails.market_address}</span>
+                      </strong>
+                    </article>
+                  </>
+                )}
+              </section>
+
+              <section className="pickup-policy-modal__section">
+                <div className="pickup-policy-modal__section-heading">
+                  <span>{fulfillment === "ship" ? "Shipping Steps" : "How Pickup Works"}</span>
+                </div>
+                {fulfillment === "ship" ? (
+                  <ul className="pickup-policy-modal__steps">
+                    <li>Orders ship after packing or production is complete.</li>
+                    <li>Tracking will be emailed when available.</li>
+                    <li>Open and inspect the package when it arrives.</li>
+                    <li>Refrigerate after opening.</li>
+                  </ul>
+                ) : (
+                  <ul className="pickup-policy-modal__steps">
+                    <li>Find the Vida Verde booth at {checkoutPickupDetails.market_name}.</li>
+                    <li>Give the name or email used at checkout.</li>
+                    <li>Pick up during the {checkoutPickupDetails.pickup_window} market window.</li>
+                    <li>If you may be late or need a change, text {SUPPORT_PHONE_DISPLAY} as soon as possible.</li>
+                  </ul>
+                )}
+                {fulfillment !== "ship" ? (
+                  <div className="pickup-policy-modal__actions">
+                    <a href={pickupMapUrl} target="_blank" rel="noreferrer">
+                      Open Map
+                    </a>
+                    <a href={supportSmsHref}>Text Us</a>
+                  </div>
+                ) : null}
+              </section>
+
+              {hasPreorderItems ? (
+                <section className="pickup-policy-modal__section pickup-policy-modal__section--notice">
+                  <div className="pickup-policy-modal__section-heading">
+                    <span>
+                      {pickupScenario === "mixed"
+                        ? "Ready Items And Preorders"
+                        : "Preorder Timing"}
+                    </span>
+                  </div>
+                  <p>
+                    {pickupScenario === "mixed"
+                      ? "Ready items can be picked up on the date above. Preorder items will be scheduled separately when restocked, and we will email you before that pickup."
+                      : "This order contains preorder items. We will email you when they are ready and confirm the pickup date before you come to market."}
+                  </p>
+                </section>
+              ) : null}
+
+              <section className="pickup-policy-modal__section pickup-policy-modal__payment" aria-label="Payment review">
+                <div className="pickup-policy-modal__section-heading">
+                  <span>Payment Review</span>
+                </div>
+                <dl>
+                  <div>
+                    <dt>Items</dt>
+                    <dd>{formatCurrency(subtotal)}</dd>
+                  </div>
+                  <div>
+                    <dt>Tax</dt>
+                    <dd>$0.00</dd>
+                  </div>
+                  <div>
+                    <dt>Shipping</dt>
+                    <dd>$0.00</dd>
+                  </div>
+                  <div>
+                    <dt>Total charged today</dt>
+                    <dd>{formatCurrency(subtotal)}</dd>
+                  </div>
+                </dl>
+                <p>
+                  {fulfillment === "ship"
+                    ? "Your card will be charged today after you confirm payment."
+                    : "Pickup orders have no shipping charge. Your card will be charged today to reserve available inventory and preorder items."}
+                </p>
+              </section>
+
+              <section className="pickup-policy-modal__section">
+                <div className="pickup-policy-modal__section-heading">
+                  <span>Pickup Policy</span>
+                </div>
+                <div className="pickup-policy-modal__grid">
+                  {MARKET_PICKUP_POLICY_ITEMS.map((item) => (
+                    <article key={item.label} className="pickup-policy-modal__item">
+                      <strong>{item.label}</strong>
+                      <p>{item.body}</p>
+                    </article>
+                  ))}
+                </div>
+              </section>
             </div>
           </div>
         </div>,
