@@ -753,7 +753,8 @@ img {
 
 .product-card__media,
 .product-card__placeholder {
-  height: 220px;
+  aspect-ratio: 16 / 10;
+  height: auto;
   border-bottom: 1px solid var(--line);
 }
 
@@ -6027,11 +6028,6 @@ select:focus {
 
   .store {
     gap: 18px;
-  }
-
-  .product-card__media,
-  .product-card__placeholder {
-    height: 180px;
   }
 
   .product-card__content {
