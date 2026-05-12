@@ -1214,7 +1214,7 @@ insert into products (
       'Supports circulation and overall vitality',
       'Jar size: 12oz'
     ],
-    'https://images.unsplash.com/photo-1504674900247-0877df9cc836?auto=format&fit=crop&w=800&q=80',
+    '/product-photos/Red-Coral.webp',
     1199,
     12,
     1,

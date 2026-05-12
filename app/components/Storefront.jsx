@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useSearchParams } from "next/navigation";
 import dynamic from "next/dynamic";
+import Image from "next/image";
 import { createPortal } from "react-dom";
 import { trackAnalyticsEvent } from "@/lib/analytics";
 import { lockPageScroll, unlockPageScroll } from "@/lib/scrollLock";
@@ -2340,6 +2341,7 @@ export default function Storefront({ products, inventory = null, pickupDetails =
             const isPairingsOpen = Boolean(openPairings[product.sku]);
             const pairingsId = `product-pairings-${sanitizeFieldName(product.sku)}`;
             const pairingsButtonId = `${pairingsId}-toggle`;
+            const hasRedCoralPhoto = product.sku === "VV1" && Boolean(product.image);
 
             return (
               <article
@@ -2349,9 +2351,21 @@ export default function Storefront({ products, inventory = null, pickupDetails =
                 data-analytics-product-sku={product.sku}
                 data-analytics-hover="true"
               >
-                <div className="product-card__placeholder" aria-hidden="true">
-                  <span>Photos Coming Soon</span>
-                </div>
+                {hasRedCoralPhoto ? (
+                  <div className="product-card__media">
+                    <Image
+                      src={product.image}
+                      alt="Red Coral sauerkraut product photo"
+                      fill
+                      sizes="(max-width: 720px) 100vw, (max-width: 1080px) 50vw, 360px"
+                      className="product-card__image"
+                    />
+                  </div>
+                ) : (
+                  <div className="product-card__placeholder" aria-hidden="true">
+                    <span>Photos Coming Soon</span>
+                  </div>
+                )}
                 <div className="product-card__content">
                   <div>
                     <div className="product-card__header">

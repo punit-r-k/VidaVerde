@@ -751,15 +751,29 @@ img {
   flex-direction: column;
 }
 
+.product-card__media,
 .product-card__placeholder {
   height: 220px;
+  border-bottom: 1px solid var(--line);
+}
+
+.product-card__media {
+  position: relative;
+  overflow: hidden;
+  background: var(--surface);
+}
+
+.product-card__image {
+  object-fit: cover;
+}
+
+.product-card__placeholder {
   display: grid;
   place-items: center;
   padding: 24px;
   background:
     linear-gradient(135deg, rgba(216, 125, 82, 0.08), rgba(52, 117, 88, 0.12)),
     var(--surface);
-  border-bottom: 1px solid var(--line);
   text-align: center;
 }
 
@@ -6015,6 +6029,7 @@ select:focus {
     gap: 18px;
   }
 
+  .product-card__media,
   .product-card__placeholder {
     height: 180px;
   }
