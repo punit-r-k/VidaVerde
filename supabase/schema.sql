@@ -1268,7 +1268,7 @@ insert into products (
       'Nutrients that support eye health and vitality',
       'Jar size: 12oz'
     ],
-    'https://images.unsplash.com/photo-1512621776951-a57141f2eefd?auto=format&fit=crop&w=800&q=80',
+    '/product-photos/Endless-Summer.webp',
     1199,
     12,
     4,

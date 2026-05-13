@@ -753,7 +753,7 @@ img {
 
 .product-card__media,
 .product-card__placeholder {
-  aspect-ratio: 16 / 10;
+  aspect-ratio: 3 / 2;
   height: auto;
   border-bottom: 1px solid var(--line);
 }
