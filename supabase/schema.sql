@@ -1304,7 +1304,7 @@ insert into products (
       'Flavor profile: bold heat with bright finish',
       'Bottle size: 5oz'
     ],
-    'https://images.unsplash.com/photo-1505250469679-203ad9ced0cb?auto=format&fit=crop&w=800&q=80',
+    '/product-photos/Hell-Yeah.webp',
     999,
     5,
     6,
