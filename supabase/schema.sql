@@ -1286,7 +1286,7 @@ insert into products (
       'Flavor profile: fresh, herbal, mild heat',
       'Bottle size: 5oz'
     ],
-    'https://images.unsplash.com/photo-1476718406336-bb5a9690ee2a?auto=format&fit=crop&w=800&q=80',
+    '/product-photos/Green-Kick.webp',
     999,
     5,
     5,
