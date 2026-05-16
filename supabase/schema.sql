@@ -1250,7 +1250,7 @@ insert into products (
       'Vitamin C and antioxidant support',
       'Jar size: 12oz'
     ],
-    'https://images.unsplash.com/photo-1473093295043-cdd812d0e601?auto=format&fit=crop&w=800&q=80',
+    '/product-photos/Caribean-Heat.webp',
     1199,
     12,
     3,
