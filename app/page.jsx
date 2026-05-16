@@ -23,10 +23,12 @@ import {
 import { getInventoryMap } from "@/lib/stock";
 import {
   GOOGLE_REVIEW_URL,
+  SITE_ALTERNATE_NAMES,
   SITE_NAME,
   SOCIAL_LINKS,
   SUPPORT_EMAIL,
   SUPPORT_PHONE_E164,
+  TARGET_SEARCH_PHRASES,
   createPageMetadata,
   getServiceAreaJsonLd,
   getCanonicalUrl
@@ -37,13 +39,16 @@ export const runtime = "nodejs";
 export const revalidate = 0;
 
 const HOME_DESCRIPTION =
-  "Shop live fermented sauerkraut and hot sauces from Vida Verde. Reserve online for Saturday pickup at Fulshear Farmers Market in Richmond, serving Fulshear, Katy, Richmond, and nearby west Houston communities.";
+  "Shop live fermented sauerkraut and hot sauces from Vida Verde Sauerkraut at vvsauerkraut.com, also associated with Vida Verde Microgreens. Reserve online for Saturday pickup at Fulshear Farmers Market in Richmond, serving Fulshear, Katy, Richmond, and nearby west Houston communities.";
 
 export const metadata = createPageMetadata({
   title: "Live Fermented Sauerkraut and Hot Sauce",
   description: HOME_DESCRIPTION,
   path: "/",
   keywords: [
+    ...TARGET_SEARCH_PHRASES,
+    "Vida Verde Microgreens",
+    "VidaVerde Sauerkraut",
     "live fermented sauerkraut",
     "raw sauerkraut",
     "fermented hot sauce",
@@ -280,9 +285,13 @@ export default async function Home() {
   const homePageJsonLd = {
     "@context": "https://schema.org",
     "@type": "OnlineStore",
+    "@id": `${getCanonicalUrl("/")}#store`,
     name: SITE_NAME,
+    alternateName: SITE_ALTERNATE_NAMES,
     url: getCanonicalUrl("/"),
     description: HOME_DESCRIPTION,
+    disambiguatingDescription:
+      "Official online storefront for Vida Verde Sauerkraut, also searched as vvsauerkraut and Vida Verde Microgreens.",
     image: [
       getCanonicalUrl("/email/order-confirmation-banner.png"),
       getCanonicalUrl("/founder-photo.avif")
@@ -290,7 +299,19 @@ export default async function Home() {
     logo: getCanonicalUrl("/logo.svg"),
     email: SUPPORT_EMAIL,
     telephone: SUPPORT_PHONE_E164,
+    identifier: TARGET_SEARCH_PHRASES.map((phrase) => ({
+      "@type": "PropertyValue",
+      propertyID: "search phrase",
+      value: phrase
+    })),
     sameAs: SOCIAL_LINKS,
+    knowsAbout: [
+      "live fermented sauerkraut",
+      "raw sauerkraut",
+      "fermented hot sauce",
+      "microgreens",
+      "Fulshear Farmers Market pickup"
+    ],
     address: {
       "@type": "PostalAddress",
       streetAddress: MARKET_ADDRESS,
@@ -330,7 +351,8 @@ export default async function Home() {
         image: product.image ? getCanonicalUrl(product.image) : undefined,
         brand: {
           "@type": "Brand",
-          name: SITE_NAME
+          name: SITE_NAME,
+          alternateName: SITE_ALTERNATE_NAMES
         },
         offers: {
           "@type": "Offer",
