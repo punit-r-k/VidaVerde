@@ -1232,7 +1232,7 @@ insert into products (
       'Turmeric and cumin support overall wellness',
       'Jar size: 12oz'
     ],
-    'https://images.unsplash.com/photo-1467003909585-2f8a72700288?auto=format&fit=crop&w=800&q=80',
+    '/product-photos/Sunset.webp',
     1199,
     12,
     2,
@@ -1250,7 +1250,7 @@ insert into products (
       'Vitamin C and antioxidant support',
       'Jar size: 12oz'
     ],
-    '/product-photos/Caribean-Heat.webp',
+    '/product-photos/Caribbean-Heat.webp',
     1199,
     12,
     3,
