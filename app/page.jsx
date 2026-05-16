@@ -42,7 +42,7 @@ const HOME_DESCRIPTION =
   "Shop live fermented sauerkraut and hot sauces from Vida Verde Sauerkraut at vvsauerkraut.com, also associated with Vida Verde Microgreens. Reserve online for Saturday pickup at Fulshear Farmers Market in Richmond, serving Fulshear, Katy, Richmond, and nearby west Houston communities.";
 
 export const metadata = createPageMetadata({
-  title: "Live Fermented Sauerkraut and Hot Sauce",
+  title: "Vida Verde Sauerkraut | Live Fermented Sauerkraut and Hot Sauce",
   description: HOME_DESCRIPTION,
   path: "/",
   keywords: [
@@ -322,19 +322,7 @@ export default async function Home() {
     },
     areaServed: getServiceAreaJsonLd(),
     availableLanguage: "en-US",
-    paymentAccepted: "Credit Card",
-    hasOfferCatalog: {
-      "@type": "OfferCatalog",
-      name: "Vida Verde fermented foods",
-      itemListElement: products.map((product) => ({
-        "@type": "Offer",
-        itemOffered: {
-          "@type": "Product",
-          name: product.name,
-          sku: product.sku
-        }
-      }))
-    }
+    paymentAccepted: "Credit Card"
   };
   const productCollectionJsonLd = {
     "@context": "https://schema.org",
