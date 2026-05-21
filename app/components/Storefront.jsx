@@ -13,13 +13,19 @@ import {
   SUPPORT_PHONE_E164
 } from "@/lib/siteMetadata";
 import {
+  DEFAULT_SHIPPING_OPTION_ID,
   FORM_FIELD_ORDER,
   INITIAL_FORM_VALUES,
+  OWNER_DELIVERY_SHIPPING_OPTION_ID,
   SHIPPING_FIELDS,
+  SHIPPING_OPTIONS,
   US_CITY_OPTIONS,
   US_STATE_OPTIONS,
   formatCheckoutInputValue,
+  getShippingOptionById,
   getCheckoutFieldErrors,
+  isOwnerDeliveryAddressEligible,
+  normalizeShippingOptionId,
   normalizeFulfillment
 } from "@/lib/checkoutSchema";
 import {
@@ -55,8 +61,6 @@ const ORDER_FINALIZE_MAX_ATTEMPTS = 8;
 const CART_STORAGE_KEY = "vidaverde-cart-v1";
 const PREORDER_TIMING_NOTICE =
   `Pre-orders are estimates only. Fermentation timelines vary, and preorder items may take up to 15 days before pickup is available. The next ${MARKET_NAME} date is not guaranteed for preorder items.`;
-const PRODUCT_PREORDER_NOTICE =
-  "Next unit is a pre-order. Not guaranteed for next farmers market; kraut can take up to 15 days.";
 const CART_CHANGE_NOTICE_SUMMARY =
   "Stock changed while you were shopping. Review the updated cart before continuing.";
 const CART_CHANGE_ACKNOWLEDGEMENT_BUTTON_LABEL =
@@ -69,8 +73,13 @@ const ORDER_FINALIZE_PENDING_NOTICE =
   `Payment received. We are still finalizing your order, so please do not submit again. We will email confirmation as soon as it is recorded. If you do not see it shortly, contact us at ${SUPPORT_EMAIL} or ${SUPPORT_PHONE_DISPLAY}.`;
 const ORDER_SUCCESS_NOTICE =
   `Payment received. Your order is confirmed, and receipt plus pickup details are on the way by email. If you would like new product announcements, healthy eating notes, recipe ideas, and Vida Verde updates, you can join our email list below. Questions? Contact us at ${SUPPORT_EMAIL} or ${SUPPORT_PHONE_DISPLAY}.`;
+const ORDER_SHIPPING_SUCCESS_NOTICE =
+  `Payment received. Your order is confirmed, and your receipt is on the way by email. Shipping updates or delivery details will be emailed when available. Questions? Contact us at ${SUPPORT_EMAIL} or ${SUPPORT_PHONE_DISPLAY}.`;
 const ORDER_SUCCESS_POPUP_MESSAGE =
   "Your payment was received. Watch your email for your receipt and pickup details.";
+const ORDER_SHIPPING_SUCCESS_POPUP_MESSAGE =
+  "Your payment was received. Watch your email for your receipt and shipping updates.";
+const SHIPPING_CHECKOUT_VISIBLE = false;
 const PREORDER_NOTICE_MESSAGES = new Set([
   "Please acknowledge the pre-order notice before proceeding to payment.",
   "Please acknowledge the pre-order notice before payment."
@@ -235,6 +244,7 @@ export default function Storefront({ products, inventory = null, pickupDetails =
   const [notice, setNotice] = useState("");
   const [checkoutStep, setCheckoutStep] = useState("details");
   const [fulfillment, setFulfillment] = useState("market");
+  const [shippingOptionId, setShippingOptionId] = useState(DEFAULT_SHIPPING_OPTION_ID);
   const [liveInventory, setLiveInventory] = useState(() =>
     isInventorySnapshot(inventory) ? inventory : null
   );
@@ -348,6 +358,7 @@ export default function Storefront({ products, inventory = null, pickupDetails =
   const resetCheckoutAfterSuccess = useCallback(() => {
     setCart({});
     setFulfillment("market");
+    setShippingOptionId(DEFAULT_SHIPPING_OPTION_ID);
     setFormValues(INITIAL_FORM_VALUES);
     setFieldErrors({});
     setTouchedFields({});
@@ -452,12 +463,21 @@ export default function Storefront({ products, inventory = null, pickupDetails =
               automationWarningCode: String(firstAutomationWarning?.code || "")
             }
           });
+          const successContext = checkoutSuccessContextRef.current;
+          const successNotice =
+            successContext?.fulfillment === "ship"
+              ? ORDER_SHIPPING_SUCCESS_NOTICE
+              : ORDER_SUCCESS_NOTICE;
+          const successPopupMessage =
+            successContext?.fulfillment === "ship"
+              ? ORDER_SHIPPING_SUCCESS_POPUP_MESSAGE
+              : ORDER_SUCCESS_POPUP_MESSAGE;
           setStatus("success");
-          setNotice(firstAutomationWarning?.customerMessage || ORDER_SUCCESS_NOTICE);
+          setNotice(firstAutomationWarning?.customerMessage || successNotice);
           triggerOrderSuccessPopup(
-            firstAutomationWarning?.popupMessage || ORDER_SUCCESS_POPUP_MESSAGE,
+            firstAutomationWarning?.popupMessage || successPopupMessage,
             formValues.email,
-            checkoutSuccessContextRef.current
+            successContext
           );
           resetCheckoutAfterSuccess();
           return;
@@ -505,14 +525,16 @@ export default function Storefront({ products, inventory = null, pickupDetails =
     };
   }, []);
 
-  const validateCheckoutForm = useCallback((values, nextFulfillment) => {
-    return getCheckoutFieldErrors(values, nextFulfillment);
-  }, []);
+  const validateCheckoutForm = useCallback((values, nextFulfillment, nextShippingOptionId = shippingOptionId) => {
+    return getCheckoutFieldErrors(values, nextFulfillment, nextShippingOptionId);
+  }, [shippingOptionId]);
 
   const focusFirstInvalidField = useCallback((errors, nextFulfillment) => {
     const fields = nextFulfillment === "ship"
       ? FORM_FIELD_ORDER
-      : FORM_FIELD_ORDER.filter((name) => !SHIPPING_FIELDS.includes(name));
+      : FORM_FIELD_ORDER.filter(
+        (name) => !SHIPPING_FIELDS.includes(name) && name !== "shippingOption"
+      );
 
     const firstInvalid = fields.find((name) => errors[name]);
     if (!firstInvalid) return;
@@ -1095,6 +1117,16 @@ export default function Storefront({ products, inventory = null, pickupDetails =
 
   const itemCount = cartItems.reduce((sum, item) => sum + item.quantity, 0);
   const subtotal = cartItems.reduce((sum, item) => sum + item.lineTotal, 0);
+  const selectedShippingOption = useMemo(
+    () => getShippingOptionById(shippingOptionId),
+    [shippingOptionId]
+  );
+  const ownerDeliveryEligible = isOwnerDeliveryAddressEligible(formValues);
+  const shippingCents =
+    SHIPPING_CHECKOUT_VISIBLE && fulfillment === "ship" && itemCount > 0
+      ? Number(selectedShippingOption?.amountCents || 0)
+      : 0;
+  const orderTotal = subtotal + shippingCents;
   const preorderUnitsInCart = cartItems.reduce((sum, item) => sum + item.preorderUnits, 0);
   const hasPreorderItems = preorderUnitsInCart > 0;
   const pickupAcknowledgementError = fulfillment === "market" &&
@@ -1145,7 +1177,7 @@ export default function Storefront({ products, inventory = null, pickupDetails =
       preorderAcknowledgementError
     )
   );
-  const requiresAddress = fulfillment === "ship";
+  const requiresAddress = SHIPPING_CHECKOUT_VISIBLE && fulfillment === "ship";
   const cartCountLabel = `${itemCount} item${itemCount === 1 ? "" : "s"}`;
   const pickupScenario =
     fulfillment === "market"
@@ -1163,8 +1195,10 @@ export default function Storefront({ products, inventory = null, pickupDetails =
     pickupWindow: checkoutPickupDetails.pickup_window,
     marketName: checkoutPickupDetails.market_name,
     marketAddress: checkoutPickupDetails.market_address,
+    shippingOptionLabel: selectedShippingOption?.label || "",
+    shippingTransitLabel: selectedShippingOption?.transitLabel || "",
     preorderUnits: preorderUnitsInCart,
-    totalCents: subtotal
+    totalCents: orderTotal
   };
   const cityOptions = useMemo(() => {
     const selectedCity = String(formValues.city || "").trim();
@@ -1175,6 +1209,21 @@ export default function Storefront({ products, inventory = null, pickupDetails =
     );
     return hasMatch ? US_CITY_OPTIONS : [selectedCity, ...US_CITY_OPTIONS];
   }, [formValues.city]);
+
+  useEffect(() => {
+    if (
+      shippingOptionId === OWNER_DELIVERY_SHIPPING_OPTION_ID &&
+      !ownerDeliveryEligible
+    ) {
+      setShippingOptionId(DEFAULT_SHIPPING_OPTION_ID);
+      setFieldErrors((prev) => {
+        if (!prev.shippingOption) return prev;
+        const next = { ...prev };
+        delete next.shippingOption;
+        return next;
+      });
+    }
+  }, [ownerDeliveryEligible, shippingOptionId]);
 
   useEffect(() => {
     if (fulfillment === "market") return;
@@ -1210,10 +1259,12 @@ export default function Storefront({ products, inventory = null, pickupDetails =
         source: previousStep,
         result: checkoutStep,
         itemCount,
-        subtotalCents: subtotal
+        subtotalCents: subtotal,
+        shippingCents,
+        totalCents: orderTotal
       }
     });
-  }, [checkoutStep, itemCount, subtotal]);
+  }, [checkoutStep, itemCount, orderTotal, shippingCents, subtotal]);
 
   useEffect(() => {
     if (itemCount <= 0) {
@@ -1236,7 +1287,9 @@ export default function Storefront({ products, inventory = null, pickupDetails =
             elementId: "cart_summary",
             metadata: {
               itemCount,
-              subtotalCents: subtotal
+              subtotalCents: subtotal,
+              shippingCents,
+              totalCents: orderTotal
             }
           });
         });
@@ -1250,7 +1303,7 @@ export default function Storefront({ products, inventory = null, pickupDetails =
     return () => {
       observer.disconnect();
     };
-  }, [itemCount, subtotal]);
+  }, [itemCount, orderTotal, shippingCents, subtotal]);
 
   useEffect(() => {
     if (!showOrderSuccessPopup) return;
@@ -1261,10 +1314,12 @@ export default function Storefront({ products, inventory = null, pickupDetails =
       elementId: "order_success_popup",
       metadata: {
         itemCount,
-        subtotalCents: subtotal
+        subtotalCents: subtotal,
+        shippingCents,
+        totalCents: orderTotal
       }
     });
-  }, [itemCount, showOrderSuccessPopup, subtotal]);
+  }, [itemCount, orderTotal, shippingCents, showOrderSuccessPopup, subtotal]);
 
   const handleMobileCheckoutJump = useCallback(() => {
     const cartSummary = document.getElementById("cart-summary");
@@ -1276,12 +1331,14 @@ export default function Storefront({ products, inventory = null, pickupDetails =
       elementId: "cart_drawer_toggle",
       metadata: {
         itemCount,
-        subtotalCents: subtotal
+        subtotalCents: subtotal,
+        shippingCents,
+        totalCents: orderTotal
       }
     });
 
     cartSummary.scrollIntoView({ behavior: "smooth", block: "start" });
-  }, [itemCount, subtotal]);
+  }, [itemCount, orderTotal, shippingCents, subtotal]);
 
   const handlePairingsToggle = useCallback((sku) => {
     setOpenPairings((prev) => ({
@@ -1331,6 +1388,7 @@ export default function Storefront({ products, inventory = null, pickupDetails =
 
     return {
       fulfillment: normalizeFulfillment(fulfillment),
+      shippingOption: normalizeShippingOptionId(shippingOptionId),
       customer: {
         name: String(formValues.name || "").trim(),
         email: String(formValues.email || "").trim(),
@@ -1362,7 +1420,7 @@ export default function Storefront({ products, inventory = null, pickupDetails =
           }
         : undefined
     };
-  }, [cartItems, formValues, fulfillment, pickupAcknowledged]);
+  }, [cartItems, formValues, fulfillment, pickupAcknowledged, shippingOptionId]);
 
   const handleAdd = (product) => {
     if (isOrderFinalizing) return;
@@ -1448,6 +1506,7 @@ export default function Storefront({ products, inventory = null, pickupDetails =
 
     resetPaymentState();
     setCart({});
+    setShippingOptionId(DEFAULT_SHIPPING_OPTION_ID);
     setPickupAcknowledged(false);
     setPickupTouched(false);
     setPreorderAcknowledged(false);
@@ -1549,6 +1608,68 @@ export default function Storefront({ products, inventory = null, pickupDetails =
     if (submitAttempted || touchedFields[name]) {
       setFieldErrors(validateCheckoutForm(nextValues, fulfillment));
     }
+  };
+
+  const handleFulfillmentChange = (event) => {
+    const nextFulfillment = normalizeFulfillment(event.currentTarget.value);
+    if (nextFulfillment === fulfillment) return;
+
+    setFulfillment(nextFulfillment);
+    resetPaymentState();
+    setSubmitAttempted(false);
+    setFieldErrors(validateCheckoutForm(formValues, nextFulfillment));
+
+    if (status !== "idle") {
+      setStatus("idle");
+      setNotice("");
+    }
+
+    trackAnalyticsEvent({
+      name: "checkout_step_changed",
+      sectionId: "shop",
+      elementId: "checkout_fulfillment",
+      checkoutStep,
+      metadata: {
+        source: fulfillment,
+        destination: nextFulfillment
+      }
+    });
+  };
+
+  const handleShippingOptionChange = (event) => {
+    const nextShippingOptionId = normalizeShippingOptionId(event.currentTarget.value);
+    const nextOption = getShippingOptionById(nextShippingOptionId);
+
+    if (
+      nextShippingOptionId === OWNER_DELIVERY_SHIPPING_OPTION_ID &&
+      !ownerDeliveryEligible
+    ) {
+      setTouchedFields((prev) => ({ ...prev, shippingOption: true }));
+      setFieldErrors(validateCheckoutForm(formValues, fulfillment, nextShippingOptionId));
+      return;
+    }
+
+    setShippingOptionId(nextShippingOptionId);
+    setTouchedFields((prev) => ({ ...prev, shippingOption: true }));
+    setFieldErrors(validateCheckoutForm(formValues, fulfillment, nextShippingOptionId));
+    resetPaymentState();
+
+    if (status !== "idle") {
+      setStatus("idle");
+      setNotice("");
+    }
+
+    trackAnalyticsEvent({
+      name: "checkout_field_blur",
+      sectionId: "shop",
+      elementId: "checkout_field_shipping_option",
+      checkoutStep,
+      metadata: {
+        fieldName: "shipping_option",
+        shippingOption: nextShippingOptionId,
+        shippingCents: Number(nextOption?.amountCents || 0)
+      }
+    });
   };
 
   const handleFieldBlur = (event) => {
@@ -1857,6 +1978,8 @@ export default function Storefront({ products, inventory = null, pickupDetails =
       metadata: {
         itemCount,
         subtotalCents: subtotal,
+        shippingCents,
+        totalCents: orderTotal,
         preorderUnits: preorderUnitsInCart
       }
     });
@@ -2006,21 +2129,20 @@ export default function Storefront({ products, inventory = null, pickupDetails =
       ) : (
         <div className="cart__list">
           {cartItems.map((item) => {
-            const spiceProfile = getSpiceProfile(item.profile);
-
             return (
               <div className="cart__item" key={`${keyPrefix}-${item.sku}`}>
                 <div>
                   <strong>{item.name}</strong>
-                  <span>
-                    Qty: {item.quantity}
-                    {spiceProfile ? ` | ${spiceProfile}` : ""}
-                  </span>
-                  {shouldDisplayStock && item.hasInventoryRecord ? (
+                  <span>Qty: {item.quantity}</span>
+                  {shouldDisplayStock && item.hasInventoryRecord && item.preorderUnits > 0 ? (
                     <span className="cart__split">
-                      <span>{item.inStockUnits} in stock</span>
-                      {" | "}
-                      <span className={item.preorderUnits > 0 ? "cart__preorder-count cart__preorder-count--accent" : "cart__preorder-count"}>
+                      {item.inStockUnits > 0 ? (
+                        <>
+                          <span>{item.inStockUnits} in stock</span>
+                          {" | "}
+                        </>
+                      ) : null}
+                      <span className="cart__preorder-count cart__preorder-count--accent">
                         {item.preorderUnits} preorder
                       </span>
                     </span>
@@ -2088,16 +2210,88 @@ export default function Storefront({ products, inventory = null, pickupDetails =
           <strong>$0.00</strong>
         </div>
         <div>
-          <span>Shipping</span>
-          <strong>$0.00</strong>
+          <span>{fulfillment === "ship" ? selectedShippingOption.label : "Shipping"}</span>
+          <strong>{formatCurrency(shippingCents)}</strong>
         </div>
+        {fulfillment === "ship" ? (
+          <div>
+            <span>Delivery window</span>
+            <strong>{selectedShippingOption.transitLabel}</strong>
+          </div>
+        ) : null}
         <div>
           <span>Total due today</span>
-          <strong>{formatCurrency(subtotal)}</strong>
+          <strong>{formatCurrency(orderTotal)}</strong>
         </div>
       </div>
     </>
   );
+
+  const renderShippingOptions = () => {
+    if (!SHIPPING_CHECKOUT_VISIBLE || !requiresAddress) return null;
+
+    return (
+      <fieldset
+        ref={setFieldRef("shippingOption")}
+        className={`shipping-options${
+          hasFieldError("shippingOption") ? " shipping-options--error" : ""
+        }`}
+        aria-describedby={
+          hasFieldError("shippingOption")
+            ? "shipping-option-error"
+            : "shipping-option-hint"
+        }
+        tabIndex={-1}
+      >
+        <legend>Shipping method *</legend>
+        <p id="shipping-option-hint" className="shipping-options__hint">
+          Personal owner delivery is available only for Greater Houston-area TX ZIP codes.
+        </p>
+        <div className="shipping-options__list">
+          {SHIPPING_OPTIONS.map((option) => {
+            const isOwnerDelivery = option.id === OWNER_DELIVERY_SHIPPING_OPTION_ID;
+            const isDisabled = isOwnerDelivery && !ownerDeliveryEligible;
+
+            return (
+              <label
+                key={option.id}
+                className={`shipping-option${
+                  shippingOptionId === option.id ? " shipping-option--selected" : ""
+                }${isDisabled ? " shipping-option--disabled" : ""}`}
+              >
+                <input
+                  type="radio"
+                  name="shippingOption"
+                  value={option.id}
+                  checked={shippingOptionId === option.id}
+                  disabled={isDisabled}
+                  onChange={handleShippingOptionChange}
+                  onBlur={() =>
+                    setTouchedFields((prev) => ({ ...prev, shippingOption: true }))
+                  }
+                />
+                <span className="shipping-option__body">
+                  <span className="shipping-option__topline">
+                    <strong>{option.label}</strong>
+                    <span>{formatCurrency(option.amountCents)}</span>
+                  </span>
+                  <span className="shipping-option__meta">
+                    {option.transitLabel}
+                    {option.note ? ` | ${option.note}` : ""}
+                  </span>
+                </span>
+              </label>
+            );
+          })}
+        </div>
+        {hasFieldError("shippingOption") ? (
+          <span id="shipping-option-error" className="form-field__error" role="alert">
+            {getFieldError("shippingOption")}
+          </span>
+        ) : null}
+      </fieldset>
+    );
+  };
 
   const summarizeValue = (value, fallback = "Not provided") => {
     const text = String(value || "").trim();
@@ -2128,13 +2322,22 @@ export default function Storefront({ products, inventory = null, pickupDetails =
     { label: "Phone", value: summarizeValue(formValues.phone) },
     {
       label: "Fulfillment",
-      value: MARKET_PICKUP_LABEL
+      value:
+        fulfillment === "ship"
+          ? "Ship or deliver"
+          : MARKET_PICKUP_LABEL
     },
     ...(fulfillment === "ship"
       ? [
           {
             label: "Address",
             value: shippingAddressLines
+          },
+          {
+            label: "Shipping method",
+            value: `${selectedShippingOption.label} | ${selectedShippingOption.transitLabel} | ${formatCurrency(
+              selectedShippingOption.amountCents
+            )}`
           }
         ]
       : []),
@@ -2215,14 +2418,17 @@ export default function Storefront({ products, inventory = null, pickupDetails =
                       : "At pickup, give the name or email used at checkout at the Vida Verde booth."}
                 </p>
               </div>
-            ) : orderSuccessContext?.fulfillment === "shipping" ? (
+            ) : orderSuccessContext?.fulfillment === "ship" ? (
               <div className="order-success-popup__summary" aria-label="Shipping details">
                 <div className="order-success-popup__summary-header">
                   <span>Shipping</span>
-                  <strong>Tracking By Email</strong>
+                  <strong>{orderSuccessContext.shippingOptionLabel || "Tracking By Email"}</strong>
                 </div>
                 <p className="order-success-popup__instruction">
-                  We will email tracking once your order ships. Open and inspect the package when it arrives, and refrigerate after opening.
+                  {orderSuccessContext.shippingTransitLabel
+                    ? `Estimated delivery window: ${orderSuccessContext.shippingTransitLabel}. `
+                    : ""}
+                  We will email tracking or delivery updates when available. Open and inspect the package when it arrives, and refrigerate after opening.
                 </p>
               </div>
             ) : null}
@@ -2289,7 +2495,7 @@ export default function Storefront({ products, inventory = null, pickupDetails =
               <span className="cart-drawer-toggle__items">{cartCountLabel}</span>
             </span>
           </span>
-          <strong className="cart-drawer-toggle__subtotal">{formatCurrency(subtotal)}</strong>
+          <strong className="cart-drawer-toggle__subtotal">{formatCurrency(orderTotal)}</strong>
         </button>
       ) : null}
 
@@ -2499,11 +2705,6 @@ export default function Storefront({ products, inventory = null, pickupDetails =
                         </span>
                       </div>
                     ) : null}
-                    {wouldPreorder ? (
-                      <p className="product-card__preorder-note">
-                        {PRODUCT_PREORDER_NOTICE}
-                      </p>
-                    ) : null}
                   </div>
                 </div>
               </article>
@@ -2634,13 +2835,43 @@ export default function Storefront({ products, inventory = null, pickupDetails =
                   </label>
                   <label className="form-field form-field--select">
                     Fulfillment *
-                    <div
-                      ref={setFieldRef("fulfillment")}
-                      className="form-field__readonly"
-                    >
-                      {MARKET_PICKUP_LABEL}
-                    </div>
-                    <span className="form-field__hint">Shipping option coming soon.</span>
+                    {SHIPPING_CHECKOUT_VISIBLE ? (
+                      <>
+                        <div className="select-wrap">
+                          <select
+                            ref={setFieldRef("fulfillment")}
+                            name="fulfillment"
+                            value={fulfillment}
+                            onChange={handleFulfillmentChange}
+                            required
+                          >
+                            <option value="market">{MARKET_PICKUP_LABEL}</option>
+                            <option value="ship">Ship or deliver</option>
+                          </select>
+                          <span className="select-wrap__icon" aria-hidden="true">
+                            <svg viewBox="0 0 24 24" fill="none">
+                              <path
+                                d="M7 10l5 5 5-5"
+                                stroke="currentColor"
+                                strokeWidth="1.8"
+                                strokeLinecap="round"
+                                strokeLinejoin="round"
+                              />
+                            </svg>
+                          </span>
+                        </div>
+                        <span className="form-field__hint">
+                          Choose market pickup or shipping before payment.
+                        </span>
+                      </>
+                    ) : (
+                      <div
+                        ref={setFieldRef("fulfillment")}
+                        className="form-field__readonly"
+                      >
+                        {MARKET_PICKUP_LABEL}
+                      </div>
+                    )}
                   </label>
                 </div>
 
@@ -2780,6 +3011,7 @@ export default function Storefront({ products, inventory = null, pickupDetails =
                         </span>
                       ) : null}
                     </label>
+                    {renderShippingOptions()}
                   </>
                 ) : (
                   <div className="form__row form__row--note-market">
@@ -2886,11 +3118,11 @@ export default function Storefront({ products, inventory = null, pickupDetails =
                   <p>
                     {isOrderFinalizing
                       ? "Stripe has accepted your payment. We are now finalizing the order on the server before confirming completion."
-                      : `Card details are entered in Stripe secure fields and never stored on our servers. Your card will be charged ${formatCurrency(subtotal)} today for this market pickup order.`}
+                      : `Card details are entered in Stripe secure fields and never stored on our servers. Your card will be charged ${formatCurrency(orderTotal)} today for this ${fulfillment === "ship" ? "shipping" : "market pickup"} order.`}
                   </p>
                   <StripePaymentPanel
                     onPaymentState={handlePaymentState}
-                    grossTotalCents={subtotal}
+                    grossTotalCents={orderTotal}
                     createPaymentIntent={createPaymentIntent}
                     isLocked={isOrderFinalizing}
                     billingDetails={{
@@ -3031,8 +3263,11 @@ export default function Storefront({ products, inventory = null, pickupDetails =
                       </strong>
                     </article>
                     <article>
-                      <span>Next Step</span>
-                      <strong>Tracking will be emailed when available.</strong>
+                      <span>Method</span>
+                      <strong>
+                        {selectedShippingOption.label}
+                        <span>{selectedShippingOption.transitLabel}</span>
+                      </strong>
                     </article>
                   </>
                 ) : (
@@ -3067,7 +3302,7 @@ export default function Storefront({ products, inventory = null, pickupDetails =
                 {fulfillment === "ship" ? (
                   <ul className="pickup-policy-modal__steps">
                     <li>Orders ship after packing or production is complete.</li>
-                    <li>Tracking will be emailed when available.</li>
+                    <li>Tracking or delivery updates will be emailed when available.</li>
                     <li>Open and inspect the package when it arrives.</li>
                     <li>Refrigerate after opening.</li>
                   </ul>
@@ -3121,11 +3356,23 @@ export default function Storefront({ products, inventory = null, pickupDetails =
                   </div>
                   <div>
                     <dt>Shipping</dt>
-                    <dd>$0.00</dd>
+                    <dd>{formatCurrency(shippingCents)}</dd>
                   </div>
+                  {fulfillment === "ship" ? (
+                    <div>
+                      <dt>Method</dt>
+                      <dd>{selectedShippingOption.label}</dd>
+                    </div>
+                  ) : null}
+                  {fulfillment === "ship" ? (
+                    <div>
+                      <dt>Delivery window</dt>
+                      <dd>{selectedShippingOption.transitLabel}</dd>
+                    </div>
+                  ) : null}
                   <div>
                     <dt>Total charged today</dt>
-                    <dd>{formatCurrency(subtotal)}</dd>
+                    <dd>{formatCurrency(orderTotal)}</dd>
                   </div>
                 </dl>
                 <p>

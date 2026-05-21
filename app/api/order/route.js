@@ -1,6 +1,7 @@
 import { securePublicRoute } from "@/lib/apiSecurity";
 import {
   checkoutPayloadSchema,
+  getShippingOptionById,
   mapCheckoutIssuesToFieldErrors
 } from "@/lib/checkoutSchema";
 import { MARKET_PICKUP_POLICY_VERSION } from "@/lib/pickupDetails";
@@ -194,6 +195,7 @@ export async function POST(request) {
     consents,
     items: normalizedItems,
     fulfillment: normalizedFulfillment,
+    shippingOption: normalizedShippingOption,
     inventorySnapshot
   } = parsedPayload.data;
   const { name, email } = customer;
@@ -297,9 +299,25 @@ export async function POST(request) {
   const orderSummary = buildOrderSummary(lineItems);
   const skuSummary = buildSkuSummary(lineItems);
   const totalUnits = lineItems.reduce((sum, item) => sum + item.quantity, 0);
+  const selectedShippingOption = getShippingOptionById(normalizedShippingOption);
+  const shippingAmount = isPickup ? 0 : Number(selectedShippingOption?.amountCents || 0);
+  const total = subtotal + shippingAmount;
+
+  if (!Number.isFinite(total) || total <= 0) {
+    return respond.json(
+      { error: "Your order total looks off. Please refresh your cart and try again." },
+      { status: 400 }
+    );
+  }
 
   const metadata = {
     fulfillment: asMetadataValue(normalizedFulfillment, 32),
+    shipping_option: asMetadataValue(isPickup ? "" : selectedShippingOption?.id, 64),
+    shipping_option_label: asMetadataValue(isPickup ? "" : selectedShippingOption?.label, 120),
+    shipping_estimate: asMetadataValue(isPickup ? "" : selectedShippingOption?.transitLabel, 64),
+    amount_subtotal: asMetadataValue(subtotal, 32),
+    amount_shipping: asMetadataValue(shippingAmount, 32),
+    amount_total: asMetadataValue(total, 32),
     customer_name: asMetadataValue(name, 120),
     customer_email: asMetadataValue(email, 254),
     customer_phone: asMetadataValue(customer.phone, 64),
@@ -339,7 +357,7 @@ export async function POST(request) {
 
   try {
     const stripePayload = {
-      amount: subtotal,
+      amount: total,
       currency: "usd",
       automatic_payment_methods: {
         enabled: true

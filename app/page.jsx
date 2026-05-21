@@ -244,7 +244,7 @@ export default async function Home() {
     },
     {
       q: "Do you offer shipping?",
-      a: "Not yet. We currently offer pickup only. Shipping is coming soon."
+      a: "Not yet. We currently offer market pickup only. Shipping options are being prepared for a future checkout update."
     }
   ];
 

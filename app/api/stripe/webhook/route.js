@@ -108,6 +108,11 @@ const getChargePaymentMethodLabel = (charge) => {
 const getChargeReceiptNumber = (charge) =>
   toText(charge?.receipt_number || charge?.id, 255);
 
+const toNonNegativeInteger = (value) => {
+  const count = Number(value);
+  return Number.isFinite(count) && count > 0 ? Math.floor(count) : 0;
+};
+
 const recordPaidOrder = async ({
   paymentSessionId,
   paymentReference,
@@ -355,10 +360,14 @@ const handlePaymentIntentSucceeded = async (intent, eventPlacedAt = "") => {
     note: toText(metadata.note, 500)
   };
 
-  const total = Number(intent?.amount_received || intent?.amount || 0);
-  const subtotal = Number(intent?.amount || 0);
+  const total = toNonNegativeInteger(intent?.amount_received || intent?.amount || 0);
+  const shipping = toNonNegativeInteger(metadata.amount_shipping);
+  const subtotalFromMetadata = toNonNegativeInteger(metadata.amount_subtotal);
+  const subtotal =
+    subtotalFromMetadata > 0
+      ? subtotalFromMetadata
+      : Math.max(total - shipping, 0);
   const tax = 0;
-  const shipping = 0;
   const paymentSessionId = toText(intent?.id, 255);
   const paymentReference = toText(intent?.latest_charge, 255);
   const placedAt =

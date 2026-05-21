@@ -28,10 +28,10 @@ This file is a practical map of the most important customer flows, operations fl
 - Payment API: `app/api/order/route.js`
 - Payment provider wrapper: `lib/stripe.js`
 - Behavior:
-  - The current UI is effectively pickup-first. Fulfillment is locked to market pickup in the visible form, even though backend structures still support shipping.
+  - The current customer-facing UI is pickup-only. Shipping support remains staged in code behind `SHIPPING_CHECKOUT_VISIBLE` in `app/components/Storefront.jsx`.
   - Customer details are validated before payment.
   - Stripe Elements collects card data in-browser.
-  - `POST /api/order` creates a Stripe PaymentIntent and stores order context in Stripe metadata.
+  - `POST /api/order` creates a Stripe PaymentIntent and stores order context, selected shipping option, subtotal, shipping, and total in Stripe metadata when shipping is enabled.
   - Successful payment is finalized later by the Stripe webhook, not by the browser alone.
 
 ### 4. Paid Order Recording And Fulfillment Side Effects
