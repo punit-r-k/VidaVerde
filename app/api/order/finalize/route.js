@@ -2,6 +2,11 @@ import { securePublicRoute } from "@/lib/apiSecurity";
 import { maybeSendCustomerConfirmationEmail } from "@/lib/orderConfirmationDispatch";
 import { getAssignedPickupDateKey } from "@/lib/pickupDetails";
 import { getRouteRateLimitConfig } from "@/lib/rateLimit";
+import {
+  getShippingOptionsForCart,
+  inferSelectedShippingOption,
+  normalizeProductType
+} from "@/lib/shippingPricing";
 import { stripeConfig, stripeRequest } from "@/lib/stripe";
 import { supabaseAdmin } from "@/lib/supabaseAdmin";
 import { z } from "zod";
@@ -11,16 +16,36 @@ const ORDER_FINALIZE_RATE_LIMIT = getRouteRateLimitConfig("ORDER_FINALIZE_POST",
   ipMax: 30
 });
 
+const optionalStripeIdSchema = ({ pattern, message }) =>
+  z.preprocess(
+    (value) => String(value || "").trim(),
+    z
+      .string()
+      .max(255, message)
+      .refine((value) => !value || pattern.test(value), message)
+  );
+
 const payloadSchema = z
   .object({
-    paymentIntentId: z
-      .string()
-      .trim()
-      .min(1, "We couldn't find that payment. Please try checking out again.")
-      .max(255, "That payment link looks invalid. Please try checking out again.")
-      .regex(/^pi_[A-Za-z0-9_]+$/, "That payment link looks invalid. Please try checking out again.")
+    paymentIntentId: optionalStripeIdSchema({
+      pattern: /^pi_[A-Za-z0-9_]+$/,
+      message: "That payment link looks invalid. Please try checking out again."
+    }),
+    sessionId: optionalStripeIdSchema({
+      pattern: /^cs_[A-Za-z0-9_]+$/,
+      message: "That checkout session looks invalid. Please try checking out again."
+    })
   })
-  .strict();
+  .strict()
+  .superRefine((payload, context) => {
+    if (payload.paymentIntentId || payload.sessionId) return;
+
+    context.addIssue({
+      code: z.ZodIssueCode.custom,
+      path: ["sessionId"],
+      message: "We couldn't find that payment. Please try checking out again."
+    });
+  });
 
 const parseItemsFromMetadata = (source) => {
   const raw = source?.metadata?.items;
@@ -34,13 +59,38 @@ const parseItemsFromMetadata = (source) => {
       .map((item) => ({
         sku: String(item?.sku || "").trim().toUpperCase(),
         quantity: Number.parseInt(item?.quantity, 10) || 0,
-        price_cents: Number.parseInt(item?.price_cents, 10) || 0
+        price_cents: Number.parseInt(item?.price_cents, 10) || 0,
+        product_type: normalizeProductType(item?.product_type, item?.sku)
       }))
       .filter((item) => item.sku && item.quantity > 0);
   } catch {
     return [];
   }
 };
+
+const parseItemsFromStripeLineItems = (lineItems) =>
+  (lineItems || [])
+    .map((item) => {
+      const quantity = Number.parseInt(item?.quantity, 10) || 0;
+      const product = item?.price?.product;
+      const sku =
+        (typeof product === "object" && String(product?.metadata?.sku || "").trim()) ||
+        String(item?.price?.metadata?.sku || "").trim();
+      const unitAmount = Number(item?.price?.unit_amount || 0);
+      const inferredUnitAmount =
+        quantity > 0 ? Math.round(Number(item?.amount_subtotal || 0) / quantity) : 0;
+
+      return {
+        sku: sku.toUpperCase(),
+        quantity,
+        price_cents: unitAmount > 0 ? unitAmount : inferredUnitAmount,
+        product_type: normalizeProductType(
+          typeof product === "object" ? product?.metadata?.product_type : "",
+          sku
+        )
+      };
+    })
+    .filter((item) => item.sku && item.quantity > 0);
 
 const toText = (value, max = 500) => String(value || "").trim().slice(0, max);
 
@@ -104,6 +154,82 @@ const toNonNegativeInteger = (value) => {
   return Number.isFinite(count) && count > 0 ? Math.floor(count) : 0;
 };
 
+const getStripeShippingRateMetadata = async (shippingRateId) => {
+  const normalizedId = toText(shippingRateId, 255);
+  if (!normalizedId) return {};
+
+  const { ok, data, error } = await stripeRequest(
+    `/v1/shipping_rates/${encodeURIComponent(normalizedId)}`,
+    { method: "GET" }
+  );
+
+  if (!ok) {
+    console.error("stripe shipping rate fetch error:", error);
+    return {};
+  }
+
+  return data?.metadata && typeof data.metadata === "object" ? data.metadata : {};
+};
+
+const buildShippingRecordDetails = ({
+  fulfillment,
+  metadata,
+  items,
+  subtotal,
+  shippingAmount,
+  shippingRateMetadata = {}
+}) => {
+  if (toFulfillment(fulfillment) !== "ship") {
+    return {
+      shipping_tier: "",
+      shipping_option: "",
+      shipping_option_label: "",
+      shipping_estimate: "",
+      sauerkraut_count: 0,
+      hot_sauce_count: 0
+    };
+  }
+
+  const shipping = getShippingOptionsForCart({
+    items,
+    subtotalCents: subtotal
+  });
+  const selectedOption = inferSelectedShippingOption({
+    shipping,
+    amountCents: shippingAmount,
+    shippingRateMetadata
+  });
+
+  return {
+    shipping_tier: toText(
+      shippingRateMetadata.shipping_tier || metadata?.shipping_tier || selectedOption.tier || shipping.tier,
+      64
+    ),
+    shipping_option: toText(
+      shippingRateMetadata.shipping_option || metadata?.shipping_option || selectedOption.id,
+      64
+    ),
+    shipping_option_label: toText(
+      shippingRateMetadata.shipping_option_label ||
+        metadata?.shipping_option_label ||
+        selectedOption.label,
+      120
+    ),
+    shipping_estimate: toText(
+      shippingRateMetadata.shipping_estimate ||
+        metadata?.shipping_estimate ||
+        selectedOption.transitLabel,
+      180
+    ),
+    sauerkraut_count: toNonNegativeInteger(
+      metadata?.sauerkraut_count || shipping.sauerkrautCount
+    ),
+    hot_sauce_count: toNonNegativeInteger(
+      metadata?.hot_sauce_count || shipping.hotSauceCount
+    )
+  };
+};
+
 const parseExpectedPreorderMap = (source) => {
   const raw = toText(source?.metadata?.expected_preorder, 500);
   if (!raw) {
@@ -144,7 +270,7 @@ const getRecordedOrderItems = async (orderId) => {
   return Array.isArray(data) ? data : [];
 };
 
-const buildInventoryShiftWarning = (orderItems, expectedPreorderMap) => {
+const buildInventoryShiftWarning = (orderItems, expectedPreorderMap, fulfillment) => {
   if (!(expectedPreorderMap instanceof Map) || expectedPreorderMap.size === 0) {
     return null;
   }
@@ -185,10 +311,14 @@ const buildInventoryShiftWarning = (orderItems, expectedPreorderMap) => {
     )
     .join(", ");
   const hasMoreItems = shiftedItems.length > 3;
+  const timingContext =
+    toFulfillment(fulfillment) === "ship"
+      ? "shipping and preorder timing"
+      : "pickup and preorder split";
 
   return {
     code: "inventory_shifted_to_preorder",
-    customerMessage: `Your payment was received and the order is confirmed. While payment was processing, live inventory changed and some items moved to preorder: ${itemSummary}${hasMoreItems ? ", plus additional items" : ""}. Your confirmation reflects the updated pickup and preorder split.`,
+    customerMessage: `Your payment was received and the order is confirmed. While payment was processing, live inventory changed and some items moved to preorder: ${itemSummary}${hasMoreItems ? ", plus additional items" : ""}. Your confirmation reflects the updated ${timingContext}.`,
     popupMessage:
       "Order confirmed. Some items moved to preorder while payment was processing."
   };
@@ -203,6 +333,7 @@ const recordPaidOrder = async ({
   tax,
   shipping,
   total,
+  shippingRecordDetails,
   customer,
   items,
   placedAt
@@ -213,6 +344,7 @@ const recordPaidOrder = async ({
   });
   const customerPayload = {
     ...(customer || {}),
+    ...(shippingRecordDetails || {}),
     placed_at: toText(placedAt, 64),
     pickup_date: pickupDate
   };
@@ -318,6 +450,15 @@ const finalizePaymentIntent = async (intent) => {
   }
 
   const metadata = intent?.metadata || {};
+  if (metadata.checkout_flow === "checkout_session") {
+    return {
+      ok: true,
+      recorded: false,
+      paymentStatus,
+      status: 202
+    };
+  }
+
   const items = parseItemsFromMetadata(intent);
 
   if (!Array.isArray(items) || items.length === 0) {
@@ -374,6 +515,14 @@ const finalizePaymentIntent = async (intent) => {
     typeof intent?.created === "number"
       ? new Date(intent.created * 1000).toISOString()
       : "";
+  const shippingRecordDetails = buildShippingRecordDetails({
+    fulfillment: toFulfillment(metadata.fulfillment),
+    metadata,
+    items,
+    subtotal,
+    shippingAmount: shipping,
+    shippingRateMetadata: {}
+  });
 
   const recordResult = await recordPaidOrder({
     paymentSessionId,
@@ -384,6 +533,7 @@ const finalizePaymentIntent = async (intent) => {
     tax,
     shipping,
     total,
+    shippingRecordDetails,
     customer,
     items,
     placedAt
@@ -402,7 +552,8 @@ const finalizePaymentIntent = async (intent) => {
   const recordedOrderItems = await getRecordedOrderItems(recordResult.orderId);
   const inventoryShiftWarning = buildInventoryShiftWarning(
     recordedOrderItems,
-    expectedPreorderMap
+    expectedPreorderMap,
+    metadata.fulfillment
   );
 
   const sideEffectsResult = await runOrderSideEffects({
@@ -416,7 +567,10 @@ const finalizePaymentIntent = async (intent) => {
     placedAt,
     receiptNumber,
     paymentMethodLabel,
-    customer,
+    customer: {
+      ...customer,
+      ...shippingRecordDetails
+    },
     items,
     strictConfirmationEmailAutomation: false
   });
@@ -430,6 +584,194 @@ const finalizePaymentIntent = async (intent) => {
     recorded: true,
     paymentStatus,
     orderId: recordResult.orderId,
+    fulfillment: toFulfillment(metadata.fulfillment),
+    customerEmail: customer.email,
+    shippingOptionLabel: shippingRecordDetails.shipping_option_label,
+    shippingEstimate: shippingRecordDetails.shipping_estimate,
+    automationWarnings: [
+      ...(inventoryShiftWarning ? [inventoryShiftWarning] : []),
+      ...(Array.isArray(sideEffectsResult?.automationWarnings)
+        ? sideEffectsResult.automationWarnings
+        : [])
+    ]
+  };
+};
+
+const finalizeCheckoutSession = async (session) => {
+  if (!session || session.object !== "checkout.session") {
+    return {
+      ok: false,
+      error: "That checkout session looks invalid. Please try checking out again.",
+      status: 400
+    };
+  }
+
+  const paymentStatus = toText(session?.payment_status, 64).toLowerCase();
+  if (paymentStatus !== "paid") {
+    return {
+      ok: true,
+      recorded: false,
+      paymentStatus,
+      status: 202
+    };
+  }
+
+  let items = parseItemsFromMetadata(session);
+  if (items.length === 0) {
+    const { ok, data, error } = await stripeRequest(
+      `/v1/checkout/sessions/${session.id}/line_items?limit=100&expand[]=data.price.product`,
+      { method: "GET" }
+    );
+
+    if (!ok) {
+      console.error("stripe line items fetch error:", error);
+      return {
+        ok: false,
+        error: "We couldn't read the order items from Stripe.",
+        status: 500
+      };
+    }
+
+    items = parseItemsFromStripeLineItems(data?.data || []);
+  }
+
+  if (!Array.isArray(items) || items.length === 0) {
+    console.error("Missing line items for Stripe session:", session?.id);
+    return { ok: false, error: "Missing line items.", status: 400 };
+  }
+
+  const metadata = session?.metadata || {};
+  const customerDetails = session?.customer_details || {};
+  const shippingDetails = session?.shipping_details || {};
+  const customerAddress = shippingDetails?.address || customerDetails?.address || {};
+  const paymentIntent =
+    typeof session?.payment_intent === "object" ? session.payment_intent : {};
+  const latestCharge =
+    typeof paymentIntent?.latest_charge === "object"
+      ? paymentIntent.latest_charge
+      : {};
+  const receiptNumber = getChargeReceiptNumber(latestCharge);
+  const paymentMethodLabel =
+    getChargePaymentMethodLabel(latestCharge) || getFallbackPaymentMethodLabel(session);
+
+  const customer = {
+    name: toText(shippingDetails?.name || metadata.customer_name || customerDetails?.name, 120),
+    email: toText(metadata.customer_email || customerDetails?.email, 254),
+    phone: toText(shippingDetails?.phone || metadata.customer_phone || customerDetails?.phone, 64),
+    address1: toText(customerAddress?.line1 || metadata.address1, 120),
+    address2: toText(customerAddress?.line2 || metadata.address2, 120),
+    city: toText(customerAddress?.city || metadata.city, 120),
+    state: toText(customerAddress?.state || metadata.state, 64),
+    postal_code: toText(customerAddress?.postal_code || metadata.postal_code, 32),
+    note: toText(metadata.note, 500)
+  };
+
+  const totalFromSession = toNonNegativeInteger(session?.amount_total || 0);
+  const totalFromMetadata = toNonNegativeInteger(metadata.amount_total);
+  const total = totalFromSession > 0 ? totalFromSession : totalFromMetadata;
+  const hasStripeShippingCost =
+    Boolean(session?.shipping_cost) ||
+    session?.total_details?.amount_shipping !== undefined;
+  const shippingFromSession = toNonNegativeInteger(
+    session?.shipping_cost?.amount_total ?? session?.total_details?.amount_shipping ?? 0
+  );
+  const shippingFromMetadata = toNonNegativeInteger(metadata.amount_shipping);
+  const shipping = hasStripeShippingCost ? shippingFromSession : shippingFromMetadata;
+  const subtotalFromMetadata = toNonNegativeInteger(metadata.amount_subtotal);
+  const subtotal =
+    subtotalFromMetadata > 0 && !hasStripeShippingCost
+      ? subtotalFromMetadata
+      : toNonNegativeInteger(session?.amount_subtotal || 0);
+  const tax = toNonNegativeInteger(session?.total_details?.amount_tax || 0);
+  const shippingRateId =
+    typeof session?.shipping_cost?.shipping_rate === "string"
+      ? session.shipping_cost.shipping_rate
+      : "";
+  const shippingRateMetadata = await getStripeShippingRateMetadata(shippingRateId);
+  const shippingRecordDetails = buildShippingRecordDetails({
+    fulfillment: toFulfillment(metadata.fulfillment),
+    metadata,
+    items,
+    subtotal,
+    shippingAmount: shipping,
+    shippingRateMetadata
+  });
+  const paymentSessionId = toText(session?.id, 255);
+  const paymentReference = toText(
+    typeof session?.payment_intent === "string"
+      ? session.payment_intent
+      : paymentIntent?.id,
+    255
+  );
+  const placedAt =
+    typeof session?.created === "number"
+      ? new Date(session.created * 1000).toISOString()
+      : "";
+
+  const recordResult = await recordPaidOrder({
+    paymentSessionId,
+    paymentReference,
+    fulfillment: toFulfillment(metadata.fulfillment),
+    currency: String(session?.currency || "usd").toUpperCase(),
+    subtotal,
+    tax,
+    shipping,
+    total,
+    shippingRecordDetails,
+    customer,
+    items,
+    placedAt
+  });
+
+  if (recordResult.error) {
+    console.error("record_paid_order error:", recordResult.error);
+    return {
+      ok: false,
+      error: "We couldn't save your order after payment.",
+      status: 500
+    };
+  }
+
+  const expectedPreorderMap = parseExpectedPreorderMap(session);
+  const recordedOrderItems = await getRecordedOrderItems(recordResult.orderId);
+  const inventoryShiftWarning = buildInventoryShiftWarning(
+    recordedOrderItems,
+    expectedPreorderMap,
+    metadata.fulfillment
+  );
+
+  const sideEffectsResult = await runOrderSideEffects({
+    orderId: recordResult.orderId,
+    fulfillment: toFulfillment(metadata.fulfillment),
+    currency: String(session?.currency || "usd").toUpperCase(),
+    subtotal,
+    tax,
+    shipping,
+    total,
+    placedAt,
+    receiptNumber,
+    paymentMethodLabel,
+    customer: {
+      ...customer,
+      ...shippingRecordDetails
+    },
+    items,
+    strictConfirmationEmailAutomation: false
+  });
+
+  if (!sideEffectsResult.ok) {
+    return sideEffectsResult;
+  }
+
+  return {
+    ok: true,
+    recorded: true,
+    paymentStatus,
+    orderId: recordResult.orderId,
+    fulfillment: toFulfillment(metadata.fulfillment),
+    customerEmail: customer.email,
+    shippingOptionLabel: shippingRecordDetails.shipping_option_label,
+    shippingEstimate: shippingRecordDetails.shipping_estimate,
     automationWarnings: [
       ...(inventoryShiftWarning ? [inventoryShiftWarning] : []),
       ...(Array.isArray(sideEffectsResult?.automationWarnings)
@@ -490,22 +832,30 @@ export async function POST(request) {
   }
 
   const paymentIntentId = parsedPayload.data.paymentIntentId;
-  const stripePath =
-    `/v1/payment_intents/${encodeURIComponent(paymentIntentId)}` +
-    "?expand[]=latest_charge&expand[]=charges.data";
+  const sessionId = parsedPayload.data.sessionId;
+  const stripePath = sessionId
+    ? `/v1/checkout/sessions/${encodeURIComponent(sessionId)}` +
+      "?expand[]=payment_intent.latest_charge"
+    : `/v1/payment_intents/${encodeURIComponent(paymentIntentId)}` +
+      "?expand[]=latest_charge&expand[]=charges.data";
   const { ok, data, error } = await stripeRequest(stripePath, {
     method: "GET"
   });
 
   if (!ok) {
-    console.error("stripe payment_intent verify error:", error);
+    console.error(
+      sessionId ? "stripe checkout_session verify error:" : "stripe payment_intent verify error:",
+      error
+    );
     return respond.json(
       { error: "We couldn't confirm the payment yet. Please wait a moment and try again." },
       { status: 502 }
     );
   }
 
-  const result = await finalizePaymentIntent(data);
+  const result = sessionId
+    ? await finalizeCheckoutSession(data)
+    : await finalizePaymentIntent(data);
   if (!result.ok) {
     return respond.json(
       { error: result.error || "We couldn't finish confirming your order. Please try again." },
@@ -528,6 +878,10 @@ export async function POST(request) {
     ok: true,
     recorded: true,
     orderId: result.orderId || "",
+    fulfillment: result.fulfillment || "",
+    customerEmail: result.customerEmail || "",
+    shippingOptionLabel: result.shippingOptionLabel || "",
+    shippingEstimate: result.shippingEstimate || "",
     automationWarnings: Array.isArray(result.automationWarnings)
       ? result.automationWarnings
       : []

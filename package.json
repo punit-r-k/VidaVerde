@@ -11,6 +11,7 @@
     "analytics:report": "node scripts/analytics-report.mjs",
     "sync:fallback": "node scripts/sync-fallback-products.js",
     "security:repo": "node scripts/repo-security-checks.mjs",
+    "test:shipping": "node --test tests/shippingPricing.test.mjs",
     "test:pickup": "node --test tests/pickupDetails.test.mjs",
     "test:security": "node --test --test-concurrency=1 tests/security/security.test.mjs"
   },

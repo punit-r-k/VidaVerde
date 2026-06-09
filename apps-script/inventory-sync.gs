@@ -56,12 +56,10 @@ function onOpen() {
 
   SpreadsheetApp.getUi()
     .createMenu("Vida Verde")
-    .addItem("Master Sync", "masterSync")
-    .addItem("Setup Edit Trigger", "setupEditTrigger")
-    .addItem("Send Pickup Reminders Now", "sendPickupReminders")
-    .addItem("Process Email Queue", "processEmailQueue")
-    .addItem("Sync Health Check", "syncHealthCheck")
-    .addItem("Setup Friday Reminder Trigger", "setupFridayReminderTrigger")
+    .addItem("Sync All", "masterSync")
+    .addItem("Pickup Reminders", "sendPickupReminders")
+    .addItem("Email Queue", "processEmailQueue")
+    .addItem("Setup Triggers", "setupTriggers")
     .addToUi();
 }
 
@@ -110,6 +108,11 @@ function handleInventoryEdit_(e) {
 }
 
 function setupEditTrigger() {
+  resetEditTrigger_();
+  SpreadsheetApp.getUi().alert("Installable edit trigger reset.");
+}
+
+function resetEditTrigger_() {
   const triggers = ScriptApp.getProjectTriggers().filter((trigger) => {
     return (
       trigger.getHandlerFunction() === "onInventoryEdit" &&
@@ -125,11 +128,16 @@ function setupEditTrigger() {
     .forSpreadsheet(SpreadsheetApp.getActive())
     .onEdit()
     .create();
-
-  SpreadsheetApp.getUi().alert("Installable edit trigger reset.");
 }
 
 function setupFridayReminderTrigger() {
+  resetFridayReminderTrigger_();
+  SpreadsheetApp.getUi().alert(
+    "Friday pickup reminder trigger reset for 12pm America/Chicago."
+  );
+}
+
+function resetFridayReminderTrigger_() {
   const triggers = ScriptApp.getProjectTriggers().filter((trigger) => {
     return (
       trigger.getHandlerFunction() === "sendPickupReminders" &&
@@ -147,9 +155,13 @@ function setupFridayReminderTrigger() {
     .atHour(12)
     .inTimezone("America/Chicago")
     .create();
+}
 
+function setupTriggers() {
+  resetEditTrigger_();
+  resetFridayReminderTrigger_();
   SpreadsheetApp.getUi().alert(
-    "Friday pickup reminder trigger reset for 12pm America/Chicago."
+    "Triggers reset: inventory edits and Friday pickup reminders."
   );
 }
 
@@ -643,6 +655,10 @@ function syncOrders() {
     "Subtotal",
     "Tax",
     "Shipping",
+    "Shipping Method",
+    "Shipping Tier",
+    "Sauerkraut Units",
+    "Hot Sauce Units",
     "Total",
     "Order Note",
     "Status",
@@ -679,6 +695,10 @@ function syncOrders() {
         Number(order?.amount_subtotal || 0) / 100,
         Number(order?.amount_tax || 0) / 100,
         Number(order?.amount_shipping || 0) / 100,
+        String(order?.shipping_option_label || ""),
+        String(order?.shipping_tier || ""),
+        Number(order?.sauerkraut_count || 0),
+        Number(order?.hot_sauce_count || 0),
         Number(order?.amount_total || 0) / 100,
         String(order?.note || ""),
         String(order?.status || ""),
@@ -700,15 +720,21 @@ function syncOrders() {
       .getRange(CONFIG.ORDERS.START_ROW, 10, rows.length, 1)
       .setNumberFormat("0");
     sheet
-      .getRange(CONFIG.ORDERS.START_ROW, 11, rows.length, 4)
+      .getRange(CONFIG.ORDERS.START_ROW, 11, rows.length, 3)
+      .setNumberFormat("$#,##0.00");
+    sheet
+      .getRange(CONFIG.ORDERS.START_ROW, 16, rows.length, 2)
+      .setNumberFormat("0");
+    sheet
+      .getRange(CONFIG.ORDERS.START_ROW, 18, rows.length, 1)
       .setNumberFormat("$#,##0.00");
   }
 
   sheet
-    .getRange(CONFIG.ORDERS.HEADER_ROW, 1, 1, 17)
+    .getRange(CONFIG.ORDERS.HEADER_ROW, 1, 1, headerValues[0].length)
     .setFontWeight("bold");
   sheet.setFrozenRows(1);
-  sheet.autoResizeColumns(1, 17);
+  sheet.autoResizeColumns(1, headerValues[0].length);
 }
 
 function syncShipments() {
@@ -735,6 +761,10 @@ function syncShipments() {
     "Items",
     "Units",
     "Order Total",
+    "Shipping Method",
+    "Shipping Tier",
+    "Sauerkraut Units",
+    "Hot Sauce Units",
     "Order Note",
     "Status",
     "Carrier",
@@ -769,6 +799,10 @@ function syncShipments() {
         formatShipmentItems_(shipment),
         Number(shipment?.item_count || 0),
         amountDollars,
+        String(shipment?.shipping_option_label || ""),
+        String(shipment?.shipping_tier || ""),
+        Number(shipment?.sauerkraut_count || 0),
+        Number(shipment?.hot_sauce_count || 0),
         String(shipment?.notes || ""),
         String(shipment?.status || ""),
         String(shipment?.carrier || ""),
@@ -791,13 +825,16 @@ function syncShipments() {
     sheet
       .getRange(CONFIG.SHIPMENTS.START_ROW, 10, rows.length, 1)
       .setNumberFormat("$#,##0.00");
+    sheet
+      .getRange(CONFIG.SHIPMENTS.START_ROW, 13, rows.length, 2)
+      .setNumberFormat("0");
   }
 
   sheet
-    .getRange(CONFIG.SHIPMENTS.HEADER_ROW, 1, 1, 16)
+    .getRange(CONFIG.SHIPMENTS.HEADER_ROW, 1, 1, headerValues[0].length)
     .setFontWeight("bold");
   sheet.setFrozenRows(1);
-  sheet.autoResizeColumns(1, 16);
+  sheet.autoResizeColumns(1, headerValues[0].length);
 }
 
 function syncEmailSignups() {
@@ -907,7 +944,9 @@ function handleRestockEdit_(sheet, row) {
     }
 
     const preorderReadyEmailCount = Number(
-      response?.preorder_ready_pickup_emails_sent || 0
+      response?.preorder_ready_emails_sent ??
+        response?.preorder_ready_pickup_emails_sent ??
+        0
     );
     if (Number.isFinite(preorderReadyEmailCount) && preorderReadyEmailCount > 0) {
       SpreadsheetApp.getActive().toast(

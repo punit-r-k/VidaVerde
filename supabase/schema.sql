@@ -15,6 +15,8 @@ create table if not exists products (
   specs text[] not null default '{}',
   image_url text not null,
   price_cents integer not null check (price_cents >= 0),
+  product_type text not null default 'sauerkraut'
+    check (product_type in ('sauerkraut', 'hot_sauce')),
   size_oz integer not null check (size_oz > 0),
   sort_order integer not null default 0,
   active boolean not null default true,
@@ -60,6 +62,12 @@ create table if not exists orders (
   amount_tax integer not null default 0,
   amount_shipping integer not null default 0,
   amount_total integer not null default 0,
+  shipping_tier text,
+  shipping_option text,
+  shipping_option_label text,
+  shipping_estimate text,
+  sauerkraut_count integer not null default 0 check (sauerkraut_count >= 0),
+  hot_sauce_count integer not null default 0 check (hot_sauce_count >= 0),
   customer_confirmation_email_sent_at timestamptz,
   customer_confirmation_email_claimed_at timestamptz,
   pickup_reminder_email_sent_at timestamptz,
@@ -93,6 +101,12 @@ create table if not exists shipments (
   item_count integer not null default 0 check (item_count >= 0),
   amount_total integer not null default 0 check (amount_total >= 0),
   currency text not null default 'USD',
+  shipping_tier text,
+  shipping_option text,
+  shipping_option_label text,
+  shipping_estimate text,
+  sauerkraut_count integer not null default 0 check (sauerkraut_count >= 0),
+  hot_sauce_count integer not null default 0 check (hot_sauce_count >= 0),
   notes text,
   label_purchased_at timestamptz,
   shipped_at timestamptz,
@@ -165,6 +179,20 @@ create unique index if not exists email_jobs_order_confirmation_active_idx
   where type = 'order_confirmation'
     and status in ('pending', 'processing', 'failed');
 
+alter table products
+  add column if not exists product_type text not null default 'sauerkraut';
+
+do $$
+begin
+  if not exists (
+    select 1 from pg_constraint where conname = 'products_product_type_check'
+  ) then
+    alter table products
+      add constraint products_product_type_check
+      check (product_type in ('sauerkraut', 'hot_sauce'));
+  end if;
+end $$;
+
 do $$
 begin
   if exists (
@@ -224,6 +252,20 @@ begin
   ) then
     alter table orders add column pickup_date date;
   end if;
+
+  alter table orders add column if not exists shipping_tier text;
+  alter table orders add column if not exists shipping_option text;
+  alter table orders add column if not exists shipping_option_label text;
+  alter table orders add column if not exists shipping_estimate text;
+  alter table orders add column if not exists sauerkraut_count integer not null default 0 check (sauerkraut_count >= 0);
+  alter table orders add column if not exists hot_sauce_count integer not null default 0 check (hot_sauce_count >= 0);
+
+  alter table shipments add column if not exists shipping_tier text;
+  alter table shipments add column if not exists shipping_option text;
+  alter table shipments add column if not exists shipping_option_label text;
+  alter table shipments add column if not exists shipping_estimate text;
+  alter table shipments add column if not exists sauerkraut_count integer not null default 0 check (sauerkraut_count >= 0);
+  alter table shipments add column if not exists hot_sauce_count integer not null default 0 check (hot_sauce_count >= 0);
 end $$;
 
 create index if not exists orders_pickup_date_status_idx
@@ -528,6 +570,12 @@ begin
     amount_tax,
     amount_shipping,
     amount_total,
+    shipping_tier,
+    shipping_option,
+    shipping_option_label,
+    shipping_estimate,
+    sauerkraut_count,
+    hot_sauce_count,
     pickup_date,
     created_at
   ) values (
@@ -550,6 +598,12 @@ begin
     coalesce(p_amount_tax, 0),
     coalesce(p_amount_shipping, 0),
     coalesce(p_amount_total, 0),
+    nullif(p_customer->>'shipping_tier', ''),
+    nullif(p_customer->>'shipping_option', ''),
+    nullif(p_customer->>'shipping_option_label', ''),
+    nullif(p_customer->>'shipping_estimate', ''),
+    coalesce(nullif(p_customer->>'sauerkraut_count', '')::integer, 0),
+    coalesce(nullif(p_customer->>'hot_sauce_count', '')::integer, 0),
     null,
     v_order_created_at
   )
@@ -680,7 +734,13 @@ begin
     items_json,
     item_count,
     amount_total,
-    currency
+    currency,
+    shipping_tier,
+    shipping_option,
+    shipping_option_label,
+    shipping_estimate,
+    sauerkraut_count,
+    hot_sauce_count
   ) values (
     v_order.id,
     v_order.payment_session_id,
@@ -699,7 +759,13 @@ begin
     v_items_json,
     v_item_count,
     coalesce(v_order.amount_total, 0),
-    upper(coalesce(v_order.currency, 'USD'))
+    upper(coalesce(v_order.currency, 'USD')),
+    nullif(v_order.shipping_tier, ''),
+    nullif(v_order.shipping_option, ''),
+    nullif(v_order.shipping_option_label, ''),
+    nullif(v_order.shipping_estimate, ''),
+    coalesce(v_order.sauerkraut_count, 0),
+    coalesce(v_order.hot_sauce_count, 0)
   )
   on conflict (order_id) do update set
     payment_session_id = excluded.payment_session_id,
@@ -718,6 +784,12 @@ begin
     item_count = excluded.item_count,
     amount_total = excluded.amount_total,
     currency = excluded.currency,
+    shipping_tier = excluded.shipping_tier,
+    shipping_option = excluded.shipping_option,
+    shipping_option_label = excluded.shipping_option_label,
+    shipping_estimate = excluded.shipping_estimate,
+    sauerkraut_count = excluded.sauerkraut_count,
+    hot_sauce_count = excluded.hot_sauce_count,
     updated_at = now()
   returning id into v_shipment_id;
 
@@ -1198,6 +1270,7 @@ insert into products (
   specs,
   image_url,
   price_cents,
+  product_type,
   size_oz,
   sort_order,
   active
@@ -1216,6 +1289,7 @@ insert into products (
     ],
     '/product-photos/Red-Coral.webp',
     1199,
+    'sauerkraut',
     12,
     1,
     true
@@ -1234,6 +1308,7 @@ insert into products (
     ],
     '/product-photos/Sunset.webp',
     1199,
+    'sauerkraut',
     12,
     2,
     true
@@ -1252,6 +1327,7 @@ insert into products (
     ],
     '/product-photos/Caribbean-Heat.webp',
     1199,
+    'sauerkraut',
     12,
     3,
     true
@@ -1270,6 +1346,7 @@ insert into products (
     ],
     '/product-photos/Endless-Summer.webp',
     1199,
+    'sauerkraut',
     12,
     4,
     true
@@ -1288,6 +1365,7 @@ insert into products (
     ],
     '/product-photos/Green-Kick.webp',
     999,
+    'hot_sauce',
     5,
     5,
     true
@@ -1306,6 +1384,7 @@ insert into products (
     ],
     '/product-photos/Hell-Yeah.webp',
     999,
+    'hot_sauce',
     5,
     6,
     true
@@ -1318,6 +1397,7 @@ on conflict (sku) do update set
   specs = excluded.specs,
   image_url = excluded.image_url,
   price_cents = excluded.price_cents,
+  product_type = excluded.product_type,
   size_oz = excluded.size_oz,
   sort_order = excluded.sort_order,
   active = excluded.active,

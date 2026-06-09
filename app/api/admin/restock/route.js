@@ -1,6 +1,6 @@
 import { restockPayloadSchema } from "@/lib/adminSchemas";
 import { secureAdminRoute } from "@/lib/apiSecurity";
-import { sendPreorderReadyPickupEmails } from "@/lib/preorderReadyEmail";
+import { sendPreorderReadyEmails } from "@/lib/preorderReadyEmail";
 import { getRouteRateLimitConfig } from "@/lib/rateLimit";
 import { supabaseAdmin } from "@/lib/supabaseAdmin";
 
@@ -75,13 +75,13 @@ export async function POST(request) {
   let preorderReadyEmailResult = null;
 
   if (qty > 0) {
-    preorderReadyEmailResult = await sendPreorderReadyPickupEmails({
+    preorderReadyEmailResult = await sendPreorderReadyEmails({
       sku: cleanSku
     });
 
     if (!preorderReadyEmailResult.ok) {
       console.error(
-        "preorder ready pickup email error:",
+        "preorder ready email error:",
         preorderReadyEmailResult.errors || preorderReadyEmailResult.error
       );
     }
@@ -90,6 +90,10 @@ export async function POST(request) {
   return respond.json({
     ok: true,
     inventory: data?.[0] || null,
-    preorder_ready_pickup_emails_sent: preorderReadyEmailResult?.sentCount || 0
+    preorder_ready_emails_sent: preorderReadyEmailResult?.sentCount || 0,
+    preorder_ready_pickup_emails_sent:
+      preorderReadyEmailResult?.pickupSentCount || 0,
+    preorder_ready_shipping_emails_sent:
+      preorderReadyEmailResult?.shippingSentCount || 0
   });
 }

@@ -1,6 +1,11 @@
 import { securePublicRoute } from "@/lib/apiSecurity";
 import { maybeSendCustomerConfirmationEmail } from "@/lib/orderConfirmationDispatch";
 import { getAssignedPickupDateKey } from "@/lib/pickupDetails";
+import {
+  getShippingOptionsForCart,
+  inferSelectedShippingOption,
+  normalizeProductType
+} from "@/lib/shippingPricing";
 import { getRouteRateLimitConfig } from "@/lib/rateLimit";
 import {
   stripeConfig,
@@ -28,7 +33,8 @@ const parseItemsFromMetadata = (source) => {
       .map((item) => ({
         sku: String(item?.sku || "").trim().toUpperCase(),
         quantity: Number.parseInt(item?.quantity, 10) || 0,
-        price_cents: Number.parseInt(item?.price_cents, 10) || 0
+        price_cents: Number.parseInt(item?.price_cents, 10) || 0,
+        product_type: normalizeProductType(item?.product_type, item?.sku)
       }))
       .filter((item) => item.sku && item.quantity > 0);
   } catch {
@@ -51,7 +57,11 @@ const parseItemsFromStripeLineItems = (lineItems) =>
       return {
         sku: sku.toUpperCase(),
         quantity,
-        price_cents: unitAmount > 0 ? unitAmount : inferredUnitAmount
+        price_cents: unitAmount > 0 ? unitAmount : inferredUnitAmount,
+        product_type: normalizeProductType(
+          typeof product === "object" ? product?.metadata?.product_type : "",
+          sku
+        )
       };
     })
     .filter((item) => item.sku && item.quantity > 0);
@@ -113,6 +123,82 @@ const toNonNegativeInteger = (value) => {
   return Number.isFinite(count) && count > 0 ? Math.floor(count) : 0;
 };
 
+const getStripeShippingRateMetadata = async (shippingRateId) => {
+  const normalizedId = toText(shippingRateId, 255);
+  if (!normalizedId) return {};
+
+  const { ok, data, error } = await stripeRequest(
+    `/v1/shipping_rates/${encodeURIComponent(normalizedId)}`,
+    { method: "GET" }
+  );
+
+  if (!ok) {
+    console.error("stripe shipping rate fetch error:", error);
+    return {};
+  }
+
+  return data?.metadata && typeof data.metadata === "object" ? data.metadata : {};
+};
+
+const buildShippingRecordDetails = ({
+  fulfillment,
+  metadata,
+  items,
+  subtotal,
+  shippingAmount,
+  shippingRateMetadata = {}
+}) => {
+  if (toFulfillment(fulfillment) !== "ship") {
+    return {
+      shipping_tier: "",
+      shipping_option: "",
+      shipping_option_label: "",
+      shipping_estimate: "",
+      sauerkraut_count: 0,
+      hot_sauce_count: 0
+    };
+  }
+
+  const shipping = getShippingOptionsForCart({
+    items,
+    subtotalCents: subtotal
+  });
+  const selectedOption = inferSelectedShippingOption({
+    shipping,
+    amountCents: shippingAmount,
+    shippingRateMetadata
+  });
+
+  return {
+    shipping_tier: toText(
+      shippingRateMetadata.shipping_tier || metadata?.shipping_tier || selectedOption.tier || shipping.tier,
+      64
+    ),
+    shipping_option: toText(
+      shippingRateMetadata.shipping_option || metadata?.shipping_option || selectedOption.id,
+      64
+    ),
+    shipping_option_label: toText(
+      shippingRateMetadata.shipping_option_label ||
+        metadata?.shipping_option_label ||
+        selectedOption.label,
+      120
+    ),
+    shipping_estimate: toText(
+      shippingRateMetadata.shipping_estimate ||
+        metadata?.shipping_estimate ||
+        selectedOption.transitLabel,
+      180
+    ),
+    sauerkraut_count: toNonNegativeInteger(
+      metadata?.sauerkraut_count || shipping.sauerkrautCount
+    ),
+    hot_sauce_count: toNonNegativeInteger(
+      metadata?.hot_sauce_count || shipping.hotSauceCount
+    )
+  };
+};
+
 const recordPaidOrder = async ({
   paymentSessionId,
   paymentReference,
@@ -122,6 +208,7 @@ const recordPaidOrder = async ({
   tax,
   shipping,
   total,
+  shippingRecordDetails,
   customer,
   items,
   placedAt
@@ -132,6 +219,7 @@ const recordPaidOrder = async ({
   });
   const customerPayload = {
     ...(customer || {}),
+    ...(shippingRecordDetails || {}),
     placed_at: toText(placedAt, 64),
     pickup_date: pickupDate
   };
@@ -251,24 +339,51 @@ const handleCheckoutSessionEvent = async (session, eventType, eventPlacedAt = ""
 
   const metadata = session?.metadata || {};
   const customerDetails = session?.customer_details || {};
-  const customerAddress = customerDetails?.address || {};
+  const shippingDetails = session?.shipping_details || {};
+  const customerAddress = shippingDetails?.address || customerDetails?.address || {};
 
   const customer = {
-    name: toText(metadata.customer_name || customerDetails?.name, 120),
+    name: toText(shippingDetails?.name || metadata.customer_name || customerDetails?.name, 120),
     email: toText(metadata.customer_email || customerDetails?.email, 254),
-    phone: toText(metadata.customer_phone || customerDetails?.phone, 64),
-    address1: toText(metadata.address1 || customerAddress?.line1, 120),
-    address2: toText(metadata.address2 || customerAddress?.line2, 120),
-    city: toText(metadata.city || customerAddress?.city, 120),
-    state: toText(metadata.state || customerAddress?.state, 64),
-    postal_code: toText(metadata.postal_code || customerAddress?.postal_code, 32),
+    phone: toText(shippingDetails?.phone || metadata.customer_phone || customerDetails?.phone, 64),
+    address1: toText(customerAddress?.line1 || metadata.address1, 120),
+    address2: toText(customerAddress?.line2 || metadata.address2, 120),
+    city: toText(customerAddress?.city || metadata.city, 120),
+    state: toText(customerAddress?.state || metadata.state, 64),
+    postal_code: toText(customerAddress?.postal_code || metadata.postal_code, 32),
     note: toText(metadata.note, 500)
   };
 
-  const total = Number(session?.amount_total || 0);
-  const subtotal = Number(session?.amount_subtotal || 0);
-  const tax = Number(session?.total_details?.amount_tax || 0);
-  const shipping = Number(session?.total_details?.amount_shipping || 0);
+  const totalFromSession = toNonNegativeInteger(session?.amount_total || 0);
+  const totalFromMetadata = toNonNegativeInteger(metadata.amount_total);
+  const total = totalFromSession > 0 ? totalFromSession : totalFromMetadata;
+  const hasStripeShippingCost =
+    Boolean(session?.shipping_cost) ||
+    session?.total_details?.amount_shipping !== undefined;
+  const shippingFromSession = toNonNegativeInteger(
+    session?.shipping_cost?.amount_total ?? session?.total_details?.amount_shipping ?? 0
+  );
+  const shippingFromMetadata = toNonNegativeInteger(metadata.amount_shipping);
+  const shipping = hasStripeShippingCost ? shippingFromSession : shippingFromMetadata;
+  const subtotalFromMetadata = toNonNegativeInteger(metadata.amount_subtotal);
+  const subtotal =
+    subtotalFromMetadata > 0 && !hasStripeShippingCost
+      ? subtotalFromMetadata
+      : toNonNegativeInteger(session?.amount_subtotal || 0);
+  const tax = toNonNegativeInteger(session?.total_details?.amount_tax || 0);
+  const shippingRateId =
+    typeof session?.shipping_cost?.shipping_rate === "string"
+      ? session.shipping_cost.shipping_rate
+      : "";
+  const shippingRateMetadata = await getStripeShippingRateMetadata(shippingRateId);
+  const shippingRecordDetails = buildShippingRecordDetails({
+    fulfillment: toFulfillment(metadata.fulfillment),
+    metadata,
+    items,
+    subtotal,
+    shippingAmount: shipping,
+    shippingRateMetadata
+  });
   const receiptNumber = "";
   const paymentMethodLabel = getFallbackPaymentMethodLabel(session);
   const paymentSessionId = toText(session?.id, 255);
@@ -289,6 +404,7 @@ const handleCheckoutSessionEvent = async (session, eventType, eventPlacedAt = ""
     tax,
     shipping,
     total,
+    shippingRecordDetails,
     customer,
     items,
     placedAt
@@ -314,7 +430,10 @@ const handleCheckoutSessionEvent = async (session, eventType, eventPlacedAt = ""
     placedAt,
     receiptNumber,
     paymentMethodLabel,
-    customer,
+    customer: {
+      ...customer,
+      ...shippingRecordDetails
+    },
     items,
     strictConfirmationEmailAutomation: true
   });
@@ -326,6 +445,10 @@ const handlePaymentIntentSucceeded = async (intent, eventPlacedAt = "") => {
   }
 
   const metadata = intent?.metadata || {};
+  if (metadata.checkout_flow === "checkout_session") {
+    return { ok: true };
+  }
+
   const items = parseItemsFromMetadata(intent);
 
   if (!Array.isArray(items) || items.length === 0) {
@@ -375,6 +498,14 @@ const handlePaymentIntentSucceeded = async (intent, eventPlacedAt = "") => {
     (typeof intent?.created === "number"
       ? new Date(intent.created * 1000).toISOString()
       : "");
+  const shippingRecordDetails = buildShippingRecordDetails({
+    fulfillment: toFulfillment(metadata.fulfillment),
+    metadata,
+    items,
+    subtotal,
+    shippingAmount: shipping,
+    shippingRateMetadata: {}
+  });
 
   const recordResult = await recordPaidOrder({
     paymentSessionId,
@@ -385,6 +516,7 @@ const handlePaymentIntentSucceeded = async (intent, eventPlacedAt = "") => {
     tax,
     shipping,
     total,
+    shippingRecordDetails,
     customer,
     items,
     placedAt
@@ -410,7 +542,10 @@ const handlePaymentIntentSucceeded = async (intent, eventPlacedAt = "") => {
     placedAt,
     receiptNumber,
     paymentMethodLabel,
-    customer,
+    customer: {
+      ...customer,
+      ...shippingRecordDetails
+    },
     items,
     strictConfirmationEmailAutomation: true
   });

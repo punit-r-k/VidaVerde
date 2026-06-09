@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { useSearchParams } from "next/navigation";
 import dynamic from "next/dynamic";
 import Image from "next/image";
@@ -16,18 +16,31 @@ import {
   DEFAULT_SHIPPING_OPTION_ID,
   FORM_FIELD_ORDER,
   INITIAL_FORM_VALUES,
-  OWNER_DELIVERY_SHIPPING_OPTION_ID,
+  LOCAL_SHIPPING_AREA_LABEL,
   SHIPPING_FIELDS,
-  SHIPPING_OPTIONS,
+  SHIPPING_COUNTRY_CODE,
+  SHIPPING_COUNTRY_LABEL,
   US_CITY_OPTIONS,
   US_STATE_OPTIONS,
   formatCheckoutInputValue,
-  getShippingOptionById,
   getCheckoutFieldErrors,
   isOwnerDeliveryAddressEligible,
   normalizeShippingOptionId,
   normalizeFulfillment
 } from "@/lib/checkoutSchema";
+import {
+  getCustomerShippingOptions,
+  getEstimatedShipDate,
+  getCartUpsellMessage,
+  getLatestExpectedDeliveryDate,
+  getShippingOptionsForCart,
+  SHIPPING_SCHEDULE_EXPEDITED_LINE,
+  SHIPPING_SCHEDULE_EXPEDITED_NOTE,
+  SHIPPING_SCHEDULE_INTRO,
+  SHIPPING_SCHEDULE_STANDARD_LINE,
+  SHIPPING_SCHEDULE_TIME_ZONE,
+  SHIPPING_SCHEDULE_TITLE
+} from "@/lib/shippingPricing";
 import {
   MARKET_ADDRESS,
   MARKET_NAME,
@@ -55,18 +68,58 @@ const formatCurrency = (amountInCents) => {
   return `$${(n / 100).toFixed(2)}`;
 };
 
+const formatExpectedDeliveryDate = (date, orderDate = new Date()) => {
+  if (!(date instanceof Date) || Number.isNaN(date.getTime())) return "";
+
+  const options = {
+    weekday: "short",
+    month: "short",
+    day: "numeric",
+    timeZone: SHIPPING_SCHEDULE_TIME_ZONE
+  };
+
+  const yearFormatter = new Intl.DateTimeFormat("en-US", {
+    year: "numeric",
+    timeZone: SHIPPING_SCHEDULE_TIME_ZONE
+  });
+
+  if (yearFormatter.format(date) !== yearFormatter.format(orderDate)) {
+    options.year = "numeric";
+  }
+
+  return new Intl.DateTimeFormat("en-US", options).format(date);
+};
+
+const getExpectedDeliveryText = ({
+  shippingOption,
+  hasPreorderItems = false,
+  orderDate = new Date()
+} = {}) => {
+  const latestDate = getLatestExpectedDeliveryDate({
+    orderDate,
+    shippingOption,
+    hasPreorderItems
+  });
+  const formattedDate = formatExpectedDeliveryDate(latestDate, orderDate);
+  return formattedDate ? `Expected by ${formattedDate}` : "";
+};
+
 const INVENTORY_POLL_MS = 30000;
 const ORDER_FINALIZE_POLL_MS = 1500;
 const ORDER_FINALIZE_MAX_ATTEMPTS = 8;
 const CART_STORAGE_KEY = "vidaverde-cart-v1";
-const PREORDER_TIMING_NOTICE =
+const PICKUP_PREORDER_TIMING_NOTICE =
   `Pre-orders are estimates only. Fermentation timelines vary, and preorder items may take up to 15 days before pickup is available. The next ${MARKET_NAME} date is not guaranteed for preorder items.`;
+const SHIPPING_PREORDER_TIMING_NOTICE =
+  "Pre-orders are estimates only. Fermentation timelines vary, and preorder items may take up to 15 days before they are ready to ship. The selected shipping timeline starts after the product is ready, not from the order date.";
 const CART_CHANGE_NOTICE_SUMMARY =
   "Stock changed while you were shopping. Review the updated cart before continuing.";
 const CART_CHANGE_ACKNOWLEDGEMENT_BUTTON_LABEL =
   "Acknowledge And Review Updated Cart";
-const PREORDER_ACKNOWLEDGEMENT_LABEL =
+const PICKUP_PREORDER_ACKNOWLEDGEMENT_LABEL =
   "I understand preorder timing is estimated and not guaranteed for the next market.";
+const SHIPPING_PREORDER_ACKNOWLEDGEMENT_LABEL =
+  "I understand preorder items ship only after they are ready, which can take up to 15 days before the shipping timeline starts.";
 const ORDER_FINALIZE_MESSAGE =
   "Payment received. Finalizing your order...";
 const ORDER_FINALIZE_PENDING_NOTICE =
@@ -79,7 +132,8 @@ const ORDER_SUCCESS_POPUP_MESSAGE =
   "Your payment was received. Watch your email for your receipt and pickup details.";
 const ORDER_SHIPPING_SUCCESS_POPUP_MESSAGE =
   "Your payment was received. Watch your email for your receipt and shipping updates.";
-const SHIPPING_CHECKOUT_VISIBLE = false;
+const SHIPPING_CHECKOUT_VISIBLE = true;
+const DEFAULT_FULFILLMENT = "ship";
 const PREORDER_NOTICE_MESSAGES = new Set([
   "Please acknowledge the pre-order notice before proceeding to payment.",
   "Please acknowledge the pre-order notice before payment."
@@ -243,8 +297,9 @@ export default function Storefront({ products, inventory = null, pickupDetails =
   const [status, setStatus] = useState("idle");
   const [notice, setNotice] = useState("");
   const [checkoutStep, setCheckoutStep] = useState("details");
-  const [fulfillment, setFulfillment] = useState("market");
+  const [fulfillment, setFulfillment] = useState(DEFAULT_FULFILLMENT);
   const [shippingOptionId, setShippingOptionId] = useState(DEFAULT_SHIPPING_OPTION_ID);
+  const [shippingScheduleNow, setShippingScheduleNow] = useState(() => new Date());
   const [liveInventory, setLiveInventory] = useState(() =>
     isInventorySnapshot(inventory) ? inventory : null
   );
@@ -270,17 +325,23 @@ export default function Storefront({ products, inventory = null, pickupDetails =
   const [showPickupPolicyModal, setShowPickupPolicyModal] = useState(false);
   const [openPairings, setOpenPairings] = useState({});
   const [pairingsHeights, setPairingsHeights] = useState({});
+  const [openShippingSchedules, setOpenShippingSchedules] = useState({});
+  const [shippingScheduleHeights, setShippingScheduleHeights] = useState({});
   const fieldRefs = useRef({});
   const pairingsPanelRefs = useRef({});
+  const shippingSchedulePanelRefs = useRef({});
   const addPulseTimeoutsRef = useRef({});
   const orderSuccessDialogRef = useRef(null);
   const orderSuccessLastFocusedRef = useRef(null);
   const cartSummaryRef = useRef(null);
+  const checkoutFormRef = useRef(null);
   const checkoutStartedRef = useRef(false);
   const previousCheckoutStepRef = useRef("details");
+  const checkoutStepScrollPositionRef = useRef(null);
+  const checkoutStepPreviousFormHeightRef = useRef(0);
   const cartSummarySeenRef = useRef(false);
   const cartChangeSequenceRef = useRef(0);
-  const finalizingPaymentIntentRef = useRef("");
+  const finalizingPaymentRef = useRef("");
   const cartChangeDialogRef = useRef(null);
   const cartChangeLastFocusedRef = useRef(null);
   const pickupPolicyDialogRef = useRef(null);
@@ -324,6 +385,8 @@ export default function Storefront({ products, inventory = null, pickupDetails =
   const resetPaymentState = useCallback((options = {}) => {
     const keepPaymentStep = options.keepPaymentStep === true;
     if (!keepPaymentStep) {
+      checkoutStepScrollPositionRef.current = null;
+      checkoutStepPreviousFormHeightRef.current = 0;
       setCheckoutStep("details");
     }
   }, []);
@@ -357,7 +420,7 @@ export default function Storefront({ products, inventory = null, pickupDetails =
 
   const resetCheckoutAfterSuccess = useCallback(() => {
     setCart({});
-    setFulfillment("market");
+    setFulfillment(DEFAULT_FULFILLMENT);
     setShippingOptionId(DEFAULT_SHIPPING_OPTION_ID);
     setFormValues(INITIAL_FORM_VALUES);
     setFieldErrors({});
@@ -368,9 +431,10 @@ export default function Storefront({ products, inventory = null, pickupDetails =
     setPreorderAcknowledged(false);
     setPreorderTouched(false);
     resetCartChangeTracking();
+    checkoutStepPreviousFormHeightRef.current = 0;
     setCheckoutStep("details");
     checkoutStartedRef.current = false;
-    finalizingPaymentIntentRef.current = "";
+    finalizingPaymentRef.current = "";
   }, [resetCartChangeTracking]);
 
   const closeOrderSuccessPopup = useCallback((reason = "close_button") => {
@@ -401,10 +465,12 @@ export default function Storefront({ products, inventory = null, pickupDetails =
   }, []);
 
   const finalizePaidOrder = useCallback(
-    async (paymentIntentId) => {
+    async ({ paymentIntentId = "", sessionId = "" } = {}) => {
       const normalizedPaymentIntentId = String(paymentIntentId || "").trim();
+      const normalizedSessionId = String(sessionId || "").trim();
+      const paymentReference = normalizedSessionId || normalizedPaymentIntentId;
 
-      if (!normalizedPaymentIntentId) {
+      if (!paymentReference) {
         trackAnalyticsEvent({
           name: "payment_result",
           sectionId: "shop",
@@ -412,16 +478,16 @@ export default function Storefront({ products, inventory = null, pickupDetails =
           checkoutStep: "payment",
           metadata: {
             result: "pending",
-            errorCode: "missing_payment_intent"
+            errorCode: "missing_payment_reference"
           }
         });
         setStatus("pending_confirmation");
         setNotice(ORDER_FINALIZE_PENDING_NOTICE);
-        finalizingPaymentIntentRef.current = "";
+        finalizingPaymentRef.current = "";
         return;
       }
 
-      finalizingPaymentIntentRef.current = normalizedPaymentIntentId;
+      finalizingPaymentRef.current = paymentReference;
 
       for (let attempt = 0; attempt < ORDER_FINALIZE_MAX_ATTEMPTS; attempt += 1) {
         let response = null;
@@ -433,9 +499,11 @@ export default function Storefront({ products, inventory = null, pickupDetails =
             headers: {
               "Content-Type": "application/json"
             },
-            body: JSON.stringify({
-              paymentIntentId: normalizedPaymentIntentId
-            })
+            body: JSON.stringify(
+              normalizedSessionId
+                ? { sessionId: normalizedSessionId }
+                : { paymentIntentId: normalizedPaymentIntentId }
+            )
           });
           payload = await response.json().catch(() => ({}));
         } catch {
@@ -463,7 +531,23 @@ export default function Storefront({ products, inventory = null, pickupDetails =
               automationWarningCode: String(firstAutomationWarning?.code || "")
             }
           });
-          const successContext = checkoutSuccessContextRef.current;
+          const currentSuccessContext = checkoutSuccessContextRef.current || {};
+          const returnedFulfillment =
+            payload?.fulfillment === "ship" || payload?.fulfillment === "market"
+              ? payload.fulfillment
+              : currentSuccessContext.fulfillment;
+          const successContext = {
+            ...currentSuccessContext,
+            fulfillment: returnedFulfillment,
+            shippingOptionLabel:
+              payload?.shippingOptionLabel ||
+              currentSuccessContext.shippingOptionLabel ||
+              "",
+            shippingTransitLabel:
+              payload?.shippingEstimate ||
+              currentSuccessContext.shippingTransitLabel ||
+              ""
+          };
           const successNotice =
             successContext?.fulfillment === "ship"
               ? ORDER_SHIPPING_SUCCESS_NOTICE
@@ -476,7 +560,7 @@ export default function Storefront({ products, inventory = null, pickupDetails =
           setNotice(firstAutomationWarning?.customerMessage || successNotice);
           triggerOrderSuccessPopup(
             firstAutomationWarning?.popupMessage || successPopupMessage,
-            formValues.email,
+            payload?.customerEmail || formValues.email,
             successContext
           );
           resetCheckoutAfterSuccess();
@@ -510,7 +594,7 @@ export default function Storefront({ products, inventory = null, pickupDetails =
       });
       setStatus("pending_confirmation");
       setNotice(ORDER_FINALIZE_PENDING_NOTICE);
-      finalizingPaymentIntentRef.current = "";
+      finalizingPaymentRef.current = "";
     },
     [formValues.email, resetCheckoutAfterSuccess, triggerOrderSuccessPopup]
   );
@@ -1029,14 +1113,19 @@ export default function Storefront({ products, inventory = null, pickupDetails =
   useEffect(() => {
     const checkoutStatus = searchParams?.get("checkout");
     const paymentIntentId = searchParams?.get("payment_intent");
+    const sessionId = searchParams?.get("session_id");
 
     if (!checkoutStatus) return;
 
     if (checkoutStatus === "success") {
-      if (paymentIntentId) {
+      if (sessionId) {
         setStatus("finalizing");
         setNotice(ORDER_FINALIZE_MESSAGE);
-        void finalizePaidOrder(paymentIntentId);
+        void finalizePaidOrder({ sessionId });
+      } else if (paymentIntentId) {
+        setStatus("finalizing");
+        setNotice(ORDER_FINALIZE_MESSAGE);
+        void finalizePaidOrder({ paymentIntentId });
       } else {
         setStatus("pending_confirmation");
         setNotice(ORDER_FINALIZE_PENDING_NOTICE);
@@ -1059,6 +1148,7 @@ export default function Storefront({ products, inventory = null, pickupDetails =
     if (typeof window !== "undefined") {
       const url = new URL(window.location.href);
       url.searchParams.delete("checkout");
+      url.searchParams.delete("session_id");
       url.searchParams.delete("payment_intent");
       url.searchParams.delete("payment_intent_client_secret");
       url.searchParams.delete("redirect_status");
@@ -1117,11 +1207,43 @@ export default function Storefront({ products, inventory = null, pickupDetails =
 
   const itemCount = cartItems.reduce((sum, item) => sum + item.quantity, 0);
   const subtotal = cartItems.reduce((sum, item) => sum + item.lineTotal, 0);
-  const selectedShippingOption = useMemo(
-    () => getShippingOptionById(shippingOptionId),
-    [shippingOptionId]
+  const cartUpsellMessage = useMemo(() => {
+    if (fulfillment !== "ship" || itemCount <= 0) return null;
+    return getCartUpsellMessage({ items: cartItems });
+  }, [cartItems, fulfillment, itemCount]);
+  const shippingQuote = useMemo(
+    () =>
+      getShippingOptionsForCart({
+        items: cartItems.map((item) => ({
+          sku: item.sku,
+          quantity: item.quantity,
+          productType: item.productType
+        })),
+        subtotalCents: subtotal
+      }),
+    [cartItems, subtotal]
   );
   const ownerDeliveryEligible = isOwnerDeliveryAddressEligible(formValues);
+  const customerShippingOptions = useMemo(
+    () =>
+      getCustomerShippingOptions({
+        shipping: shippingQuote,
+        includeOwnerDelivery: ownerDeliveryEligible
+      }),
+    [ownerDeliveryEligible, shippingQuote]
+  );
+  const selectedShippingOption = useMemo(() => {
+    const normalizedShippingOptionId = normalizeShippingOptionId(shippingOptionId);
+    return (
+      customerShippingOptions.find(
+        (option) => option.id === normalizedShippingOptionId
+      ) ||
+      customerShippingOptions.find(
+        (option) => option.id === DEFAULT_SHIPPING_OPTION_ID
+      ) ||
+      shippingQuote.standardOption
+    );
+  }, [customerShippingOptions, shippingOptionId, shippingQuote.standardOption]);
   const shippingCents =
     SHIPPING_CHECKOUT_VISIBLE && fulfillment === "ship" && itemCount > 0
       ? Number(selectedShippingOption?.amountCents || 0)
@@ -1129,6 +1251,19 @@ export default function Storefront({ products, inventory = null, pickupDetails =
   const orderTotal = subtotal + shippingCents;
   const preorderUnitsInCart = cartItems.reduce((sum, item) => sum + item.preorderUnits, 0);
   const hasPreorderItems = preorderUnitsInCart > 0;
+  const estimatedShipDate = getEstimatedShipDate({
+    orderDate: shippingScheduleNow,
+    hasPreorderItems
+  });
+  const selectedExpectedDeliveryText = getExpectedDeliveryText({
+    shippingOption: selectedShippingOption,
+    hasPreorderItems,
+    orderDate: shippingScheduleNow
+  });
+  const estimatedShipDateText = formatExpectedDeliveryDate(
+    estimatedShipDate,
+    shippingScheduleNow
+  );
   const pickupAcknowledgementError = fulfillment === "market" &&
     !pickupAcknowledged &&
     (submitAttempted || pickupTouched);
@@ -1187,6 +1322,12 @@ export default function Storefront({ products, inventory = null, pickupDetails =
           : "mixed"
         : "standard"
       : "shipping";
+  const preorderTimingNotice =
+    fulfillment === "ship" ? SHIPPING_PREORDER_TIMING_NOTICE : PICKUP_PREORDER_TIMING_NOTICE;
+  const preorderAcknowledgementLabel =
+    fulfillment === "ship"
+      ? SHIPPING_PREORDER_ACKNOWLEDGEMENT_LABEL
+      : PICKUP_PREORDER_ACKNOWLEDGEMENT_LABEL;
 
   checkoutSuccessContextRef.current = {
     fulfillment,
@@ -1195,11 +1336,21 @@ export default function Storefront({ products, inventory = null, pickupDetails =
     pickupWindow: checkoutPickupDetails.pickup_window,
     marketName: checkoutPickupDetails.market_name,
     marketAddress: checkoutPickupDetails.market_address,
-    shippingOptionLabel: selectedShippingOption?.label || "",
-    shippingTransitLabel: selectedShippingOption?.transitLabel || "",
+    shippingOptionLabel: fulfillment === "ship" ? selectedShippingOption?.label || "" : "",
+    shippingTransitLabel: fulfillment === "ship" ? selectedShippingOption?.transitLabel || "" : "",
+    shippingShipDateLabel: fulfillment === "ship" ? estimatedShipDateText : "",
     preorderUnits: preorderUnitsInCart,
     totalCents: orderTotal
   };
+
+  useEffect(() => {
+    const intervalId = window.setInterval(() => {
+      setShippingScheduleNow(new Date());
+    }, 60000);
+
+    return () => window.clearInterval(intervalId);
+  }, []);
+
   const cityOptions = useMemo(() => {
     const selectedCity = String(formValues.city || "").trim();
     if (!selectedCity) return US_CITY_OPTIONS;
@@ -1211,19 +1362,30 @@ export default function Storefront({ products, inventory = null, pickupDetails =
   }, [formValues.city]);
 
   useEffect(() => {
-    if (
-      shippingOptionId === OWNER_DELIVERY_SHIPPING_OPTION_ID &&
-      !ownerDeliveryEligible
-    ) {
+    if (!requiresAddress) return;
+    const normalizedShippingOptionId = normalizeShippingOptionId(shippingOptionId);
+    const hasSelectedOption = customerShippingOptions.some(
+      (option) => option.id === normalizedShippingOptionId
+    );
+
+    if (!hasSelectedOption) {
       setShippingOptionId(DEFAULT_SHIPPING_OPTION_ID);
-      setFieldErrors((prev) => {
-        if (!prev.shippingOption) return prev;
-        const next = { ...prev };
-        delete next.shippingOption;
-        return next;
-      });
+      if (submitAttempted || touchedFields.shippingOption) {
+        setFieldErrors(
+          validateCheckoutForm(formValues, fulfillment, DEFAULT_SHIPPING_OPTION_ID)
+        );
+      }
     }
-  }, [ownerDeliveryEligible, shippingOptionId]);
+  }, [
+    customerShippingOptions,
+    formValues,
+    fulfillment,
+    requiresAddress,
+    shippingOptionId,
+    submitAttempted,
+    touchedFields.shippingOption,
+    validateCheckoutForm
+  ]);
 
   useEffect(() => {
     if (fulfillment === "market") return;
@@ -1265,6 +1427,45 @@ export default function Storefront({ products, inventory = null, pickupDetails =
       }
     });
   }, [checkoutStep, itemCount, orderTotal, shippingCents, subtotal]);
+
+  useLayoutEffect(() => {
+    const scrollPosition = checkoutStepScrollPositionRef.current;
+    if (!scrollPosition || typeof window === "undefined") return;
+    let restoredScrollY = scrollPosition.y;
+
+    if (checkoutStep === "payment") {
+      const currentFormHeight = Math.ceil(
+        checkoutFormRef.current?.getBoundingClientRect().height || 0
+      );
+      const previousFormHeight = checkoutStepPreviousFormHeightRef.current;
+      if (previousFormHeight > 0 && currentFormHeight > 0) {
+        const removedHeight = Math.max(previousFormHeight - currentFormHeight, 0);
+        restoredScrollY = Math.max(scrollPosition.y - removedHeight, 0);
+      }
+    }
+
+    const restoreScrollPosition = () => {
+      window.scrollTo(scrollPosition.x, restoredScrollY);
+    };
+    const frameIds = [];
+
+    restoreScrollPosition();
+    frameIds.push(
+      window.requestAnimationFrame(() => {
+        restoreScrollPosition();
+        frameIds.push(
+          window.requestAnimationFrame(() => {
+            restoreScrollPosition();
+            checkoutStepScrollPositionRef.current = null;
+          })
+        );
+      })
+    );
+
+    return () => {
+      frameIds.forEach((frameId) => window.cancelAnimationFrame(frameId));
+    };
+  }, [checkoutStep]);
 
   useEffect(() => {
     if (itemCount <= 0) {
@@ -1347,6 +1548,13 @@ export default function Storefront({ products, inventory = null, pickupDetails =
     }));
   }, []);
 
+  const handleShippingScheduleToggle = useCallback((id) => {
+    setOpenShippingSchedules((prev) => ({
+      ...prev,
+      [id]: !prev[id]
+    }));
+  }, []);
+
   const measurePairingsPanels = useCallback(() => {
     setPairingsHeights((prev) => {
       let changed = false;
@@ -1365,13 +1573,33 @@ export default function Storefront({ products, inventory = null, pickupDetails =
     });
   }, []);
 
+  const measureShippingSchedulePanels = useCallback(() => {
+    setShippingScheduleHeights((prev) => {
+      let changed = false;
+      const next = { ...prev };
+
+      Object.entries(shippingSchedulePanelRefs.current).forEach(([id, node]) => {
+        if (!(node instanceof HTMLElement)) return;
+        const height = Math.ceil(node.scrollHeight);
+        if (next[id] !== height) {
+          next[id] = height;
+          changed = true;
+        }
+      });
+
+      return changed ? next : prev;
+    });
+  }, []);
+
   useEffect(() => {
     const frameId = window.requestAnimationFrame(() => {
       measurePairingsPanels();
+      measureShippingSchedulePanels();
     });
 
     const handleResize = () => {
       measurePairingsPanels();
+      measureShippingSchedulePanels();
     };
 
     window.addEventListener("resize", handleResize);
@@ -1380,7 +1608,15 @@ export default function Storefront({ products, inventory = null, pickupDetails =
       window.cancelAnimationFrame(frameId);
       window.removeEventListener("resize", handleResize);
     };
-  }, [measurePairingsPanels, products, openPairings]);
+  }, [
+    measurePairingsPanels,
+    measureShippingSchedulePanels,
+    products,
+    openPairings,
+    openShippingSchedules,
+    estimatedShipDateText,
+    hasPreorderItems
+  ]);
 
   const buildOrderPayload = useCallback(() => {
     const hasCompleteInventorySnapshot =
@@ -1388,7 +1624,9 @@ export default function Storefront({ products, inventory = null, pickupDetails =
 
     return {
       fulfillment: normalizeFulfillment(fulfillment),
-      shippingOption: normalizeShippingOptionId(shippingOptionId),
+      shippingOption: normalizeShippingOptionId(
+        selectedShippingOption?.id || shippingOptionId
+      ),
       customer: {
         name: String(formValues.name || "").trim(),
         email: String(formValues.email || "").trim(),
@@ -1398,6 +1636,7 @@ export default function Storefront({ products, inventory = null, pickupDetails =
         city: String(formValues.city || "").trim(),
         state: String(formValues.state || "").trim(),
         postalCode: String(formValues.postalCode || "").trim(),
+        country: SHIPPING_COUNTRY_CODE,
         note: String(formValues.note || "").trim()
       },
       consents: {
@@ -1420,7 +1659,14 @@ export default function Storefront({ products, inventory = null, pickupDetails =
           }
         : undefined
     };
-  }, [cartItems, formValues, fulfillment, pickupAcknowledged, shippingOptionId]);
+  }, [
+    cartItems,
+    formValues,
+    fulfillment,
+    pickupAcknowledged,
+    selectedShippingOption?.id,
+    shippingOptionId
+  ]);
 
   const handleAdd = (product) => {
     if (isOrderFinalizing) return;
@@ -1610,6 +1856,49 @@ export default function Storefront({ products, inventory = null, pickupDetails =
     }
   };
 
+  const handleShippingOptionChange = (event) => {
+    const nextShippingOptionId = normalizeShippingOptionId(event.currentTarget.value);
+    if (nextShippingOptionId === normalizeShippingOptionId(shippingOptionId)) return;
+
+    const nextShippingOption =
+      customerShippingOptions.find((option) => option.id === nextShippingOptionId) ||
+      selectedShippingOption;
+
+    setShippingOptionId(nextShippingOptionId);
+    setTouchedFields((prev) => ({
+      ...prev,
+      shippingOption: true
+    }));
+    resetPaymentState();
+
+    if (status !== "idle") {
+      setStatus("idle");
+      setNotice("");
+    }
+
+    if (submitAttempted || touchedFields.shippingOption) {
+      setFieldErrors(validateCheckoutForm(formValues, fulfillment, nextShippingOptionId));
+    } else if (fieldErrors.shippingOption) {
+      setFieldErrors((prev) => {
+        const nextErrors = { ...prev };
+        delete nextErrors.shippingOption;
+        return nextErrors;
+      });
+    }
+
+    trackAnalyticsEvent({
+      name: "checkout_shipping_option_selected",
+      sectionId: "shop",
+      elementId: "checkout_shipping_option",
+      checkoutStep,
+      metadata: {
+        optionId: nextShippingOptionId,
+        optionLabel: nextShippingOption?.label || "",
+        amountCents: Number(nextShippingOption?.amountCents || 0)
+      }
+    });
+  };
+
   const handleFulfillmentChange = (event) => {
     const nextFulfillment = normalizeFulfillment(event.currentTarget.value);
     if (nextFulfillment === fulfillment) return;
@@ -1632,42 +1921,6 @@ export default function Storefront({ products, inventory = null, pickupDetails =
       metadata: {
         source: fulfillment,
         destination: nextFulfillment
-      }
-    });
-  };
-
-  const handleShippingOptionChange = (event) => {
-    const nextShippingOptionId = normalizeShippingOptionId(event.currentTarget.value);
-    const nextOption = getShippingOptionById(nextShippingOptionId);
-
-    if (
-      nextShippingOptionId === OWNER_DELIVERY_SHIPPING_OPTION_ID &&
-      !ownerDeliveryEligible
-    ) {
-      setTouchedFields((prev) => ({ ...prev, shippingOption: true }));
-      setFieldErrors(validateCheckoutForm(formValues, fulfillment, nextShippingOptionId));
-      return;
-    }
-
-    setShippingOptionId(nextShippingOptionId);
-    setTouchedFields((prev) => ({ ...prev, shippingOption: true }));
-    setFieldErrors(validateCheckoutForm(formValues, fulfillment, nextShippingOptionId));
-    resetPaymentState();
-
-    if (status !== "idle") {
-      setStatus("idle");
-      setNotice("");
-    }
-
-    trackAnalyticsEvent({
-      name: "checkout_field_blur",
-      sectionId: "shop",
-      elementId: "checkout_field_shipping_option",
-      checkoutStep,
-      metadata: {
-        fieldName: "shipping_option",
-        shippingOption: nextShippingOptionId,
-        shippingCents: Number(nextOption?.amountCents || 0)
       }
     });
   };
@@ -1810,7 +2063,10 @@ export default function Storefront({ products, inventory = null, pickupDetails =
       body: JSON.stringify(buildOrderPayload())
     });
 
-    const result = await response.json();
+    const responseContentType = response.headers.get("content-type") || "";
+    const result = responseContentType.includes("application/json")
+      ? await response.json().catch(() => ({}))
+      : {};
 
     if (!response.ok) {
       if (
@@ -1831,11 +2087,15 @@ export default function Storefront({ products, inventory = null, pickupDetails =
       throw new Error(result?.error || "We couldn't start payment. Please try again.");
     }
 
-    if (!result?.clientSecret) {
+    if (!result?.clientSecret || !result?.paymentIntentId) {
       throw new Error("We couldn't start payment. Please try again.");
     }
 
-    return result.clientSecret;
+    return {
+      clientSecret: result.clientSecret,
+      paymentIntentId: result.paymentIntentId,
+      returnUrl: result.returnUrl
+    };
   }, [
     applyInventory,
     buildOrderPayload,
@@ -1849,28 +2109,46 @@ export default function Storefront({ products, inventory = null, pickupDetails =
   ]);
 
   const handlePaymentState = useCallback(
-    ({ status: nextStatus, message, paymentIntentId }) => {
+    ({ status: nextStatus, message, paymentIntentId, sessionId }) => {
       if (nextStatus === "processing") {
         setStatus("submitting");
         setNotice(message || "Processing payment securely...");
         return;
       }
 
+      if (nextStatus === "redirecting") {
+        setStatus("submitting");
+        setNotice(message || "Finishing secure payment...");
+        return;
+      }
+
+      if (nextStatus === "ready") {
+        setStatus("idle");
+        setNotice(message || "");
+        return;
+      }
+
       if (nextStatus === "finalizing") {
         const normalizedPaymentIntentId = String(paymentIntentId || "").trim();
-        if (!normalizedPaymentIntentId) {
+        const normalizedSessionId = String(sessionId || "").trim();
+        const paymentReference = normalizedSessionId || normalizedPaymentIntentId;
+        if (!paymentReference) {
           setStatus("pending_confirmation");
           setNotice(ORDER_FINALIZE_PENDING_NOTICE);
           return;
         }
 
-        if (finalizingPaymentIntentRef.current === normalizedPaymentIntentId) {
+        if (finalizingPaymentRef.current === paymentReference) {
           return;
         }
 
         setStatus("finalizing");
         setNotice(message || ORDER_FINALIZE_MESSAGE);
-        void finalizePaidOrder(normalizedPaymentIntentId);
+        void finalizePaidOrder(
+          normalizedSessionId
+            ? { sessionId: normalizedSessionId }
+            : { paymentIntentId: normalizedPaymentIntentId }
+        );
         return;
       }
 
@@ -1914,7 +2192,11 @@ export default function Storefront({ products, inventory = null, pickupDetails =
     }
 
     setSubmitAttempted(true);
-    const nextErrors = validateCheckoutForm(formValues, fulfillment);
+    const nextErrors = validateCheckoutForm(
+      formValues,
+      fulfillment,
+      selectedShippingOption?.id || shippingOptionId
+    );
     setFieldErrors(nextErrors);
 
     if (Object.keys(nextErrors).length > 0) {
@@ -1983,6 +2265,14 @@ export default function Storefront({ products, inventory = null, pickupDetails =
         preorderUnits: preorderUnitsInCart
       }
     });
+    if (typeof window !== "undefined") {
+      const formHeight = Math.ceil(event.currentTarget.getBoundingClientRect().height);
+      checkoutStepPreviousFormHeightRef.current = formHeight;
+      checkoutStepScrollPositionRef.current = {
+        x: window.scrollX,
+        y: window.scrollY
+      };
+    }
     setCheckoutStep("payment");
     setStatus("idle");
     setNotice("");
@@ -2068,9 +2358,9 @@ export default function Storefront({ products, inventory = null, pickupDetails =
             }
             required
           />
-          <span>{PREORDER_ACKNOWLEDGEMENT_LABEL}</span>
+          <span>{preorderAcknowledgementLabel}</span>
         </label>
-        <p className="preorder-acknowledgement__notice">{PREORDER_TIMING_NOTICE}</p>
+        <p className="preorder-acknowledgement__notice">{preorderTimingNotice}</p>
         {preorderAcknowledgementError ? (
           <span
             id="preorder-acknowledgement-error"
@@ -2118,6 +2408,68 @@ export default function Storefront({ products, inventory = null, pickupDetails =
           : ""
       }`}>
         {acknowledgements}
+      </div>
+    );
+  };
+
+  const renderShippingScheduleNotice = ({ id = "cart", showShipDate = false } = {}) => {
+    if (fulfillment !== "ship") return null;
+    const safeId = sanitizeFieldName(id);
+    const scheduleId = `shipping-schedule-${safeId}`;
+    const scheduleButtonId = `${scheduleId}-toggle`;
+    const isScheduleOpen = Boolean(openShippingSchedules[safeId]);
+
+    return (
+      <div className={`shipping-schedule${
+        isScheduleOpen ? " shipping-schedule--open" : ""
+      }`}>
+        <button
+          type="button"
+          id={scheduleButtonId}
+          className="shipping-schedule__toggle"
+          aria-expanded={isScheduleOpen}
+          aria-controls={scheduleId}
+          onClick={() => handleShippingScheduleToggle(safeId)}
+        >
+          <span>{SHIPPING_SCHEDULE_TITLE}</span>
+        </button>
+        <div
+          id={scheduleId}
+          className="shipping-schedule__panel"
+          role="region"
+          aria-labelledby={scheduleButtonId}
+          aria-hidden={!isScheduleOpen}
+          ref={(node) => {
+            if (node instanceof HTMLElement) {
+              shippingSchedulePanelRefs.current[safeId] = node;
+              return;
+            }
+
+            delete shippingSchedulePanelRefs.current[safeId];
+          }}
+          style={{
+            maxHeight: isScheduleOpen
+              ? `${shippingScheduleHeights[safeId] ?? 0}px`
+              : "0px"
+          }}
+        >
+          <div className="shipping-schedule__content">
+            <p>{SHIPPING_SCHEDULE_INTRO}</p>
+            <p>{SHIPPING_SCHEDULE_STANDARD_LINE}</p>
+            <p>{SHIPPING_SCHEDULE_EXPEDITED_LINE}</p>
+            <p>{SHIPPING_SCHEDULE_EXPEDITED_NOTE}</p>
+            {showShipDate && estimatedShipDateText ? (
+              <p className="shipping-schedule__ship-date">
+                <span>
+                  {hasPreorderItems
+                    ? "Estimated ship date after preorder window"
+                    : "Estimated ship date"}
+                </span>
+                <strong>{estimatedShipDateText}</strong>
+              </p>
+            ) : null}
+          </div>
+        </div>
       </div>
     );
   };
@@ -2181,7 +2533,7 @@ export default function Storefront({ products, inventory = null, pickupDetails =
         <div className="preorder-disclaimer">
           <strong>Pre-order notice:</strong>
           {" "}
-          {PREORDER_TIMING_NOTICE}
+          {preorderTimingNotice}
         </div>
       ) : null}
 
@@ -2205,18 +2557,23 @@ export default function Storefront({ products, inventory = null, pickupDetails =
           <span>Subtotal</span>
           <strong>{formatCurrency(subtotal)}</strong>
         </div>
+        {cartUpsellMessage ? (
+          <p className="cart-upsell" role="note" aria-live="polite">
+            {cartUpsellMessage.message}
+          </p>
+        ) : null}
         <div>
           <span>Tax</span>
           <strong>$0.00</strong>
         </div>
         <div>
-          <span>{fulfillment === "ship" ? selectedShippingOption.label : "Shipping"}</span>
+          <span>Shipping</span>
           <strong>{formatCurrency(shippingCents)}</strong>
         </div>
-        {fulfillment === "ship" ? (
+        {fulfillment === "ship" && selectedExpectedDeliveryText ? (
           <div>
-            <span>Delivery window</span>
-            <strong>{selectedShippingOption.transitLabel}</strong>
+            <span>Latest delivery estimate</span>
+            <strong>{selectedExpectedDeliveryText.replace(/^Expected by\s+/i, "")}</strong>
           </div>
         ) : null}
         <div>
@@ -2229,46 +2586,54 @@ export default function Storefront({ products, inventory = null, pickupDetails =
 
   const renderShippingOptions = () => {
     if (!SHIPPING_CHECKOUT_VISIBLE || !requiresAddress) return null;
+    const normalizedShippingOptionId = normalizeShippingOptionId(shippingOptionId);
+    const shippingOptionError = getFieldError("shippingOption");
+    const shippingOptionsDescribedBy = [
+      "shipping-option-hint",
+      shippingOptionError ? "shippingOption-error" : ""
+    ].filter(Boolean).join(" ");
 
     return (
       <fieldset
         ref={setFieldRef("shippingOption")}
         className={`shipping-options${
-          hasFieldError("shippingOption") ? " shipping-options--error" : ""
+          shippingOptionError ? " shipping-options--error" : ""
         }`}
-        aria-describedby={
-          hasFieldError("shippingOption")
-            ? "shipping-option-error"
-            : "shipping-option-hint"
-        }
+        aria-describedby={shippingOptionsDescribedBy}
         tabIndex={-1}
       >
-        <legend>Shipping method *</legend>
+        <legend>Shipping</legend>
         <p id="shipping-option-hint" className="shipping-options__hint">
-          Personal owner delivery is available only for Greater Houston-area TX ZIP codes.
+          Shipping is currently limited to the {LOCAL_SHIPPING_AREA_LABEL} in Texas.
+          We carefully pack all glass jars and bottles with protective materials so they
+          arrive safely. Choose a shipping method before payment.
         </p>
+        {renderShippingScheduleNotice({ id: "checkout", showShipDate: true })}
         <div className="shipping-options__list">
-          {SHIPPING_OPTIONS.map((option) => {
-            const isOwnerDelivery = option.id === OWNER_DELIVERY_SHIPPING_OPTION_ID;
-            const isDisabled = isOwnerDelivery && !ownerDeliveryEligible;
+          {customerShippingOptions.map((option) => {
+            const isSelected = option.id === normalizedShippingOptionId;
+            const inputId = `shipping-option-${option.id}`;
+            const expectedDeliveryText = getExpectedDeliveryText({
+              shippingOption: option,
+              hasPreorderItems,
+              orderDate: shippingScheduleNow
+            });
 
             return (
               <label
                 key={option.id}
+                htmlFor={inputId}
                 className={`shipping-option${
-                  shippingOptionId === option.id ? " shipping-option--selected" : ""
-                }${isDisabled ? " shipping-option--disabled" : ""}`}
+                  isSelected ? " shipping-option--selected" : ""
+                }`}
               >
                 <input
+                  id={inputId}
                   type="radio"
                   name="shippingOption"
                   value={option.id}
-                  checked={shippingOptionId === option.id}
-                  disabled={isDisabled}
+                  checked={isSelected}
                   onChange={handleShippingOptionChange}
-                  onBlur={() =>
-                    setTouchedFields((prev) => ({ ...prev, shippingOption: true }))
-                  }
                 />
                 <span className="shipping-option__body">
                   <span className="shipping-option__topline">
@@ -2276,24 +2641,27 @@ export default function Storefront({ products, inventory = null, pickupDetails =
                     <span>{formatCurrency(option.amountCents)}</span>
                   </span>
                   <span className="shipping-option__meta">
-                    {option.transitLabel}
-                    {option.note ? ` | ${option.note}` : ""}
+                    <span>
+                      {option.transitLabel}
+                      {option.note ? ` | ${option.note}` : ""}
+                    </span>
+                    {expectedDeliveryText ? <span>{expectedDeliveryText}</span> : null}
                   </span>
                 </span>
               </label>
             );
           })}
         </div>
-        {hasFieldError("shippingOption") ? (
-          <span id="shipping-option-error" className="form-field__error" role="alert">
-            {getFieldError("shippingOption")}
+        {shippingOptionError ? (
+          <span id="shippingOption-error" className="form-field__error" role="alert">
+            {shippingOptionError}
           </span>
         ) : null}
       </fieldset>
     );
   };
 
-  const summarizeValue = (value, fallback = "Not provided") => {
+  const summarizeValue = (value, fallback = "N/A") => {
     const text = String(value || "").trim();
     return text || fallback;
   };
@@ -2312,8 +2680,8 @@ export default function Storefront({ products, inventory = null, pickupDetails =
       .filter(Boolean)
       .join(", ");
 
-    const lines = [lineOne, lineTwo].filter(Boolean);
-    return lines.length > 0 ? lines : ["Not provided"];
+    const lines = [lineOne, lineTwo, SHIPPING_COUNTRY_LABEL].filter(Boolean);
+    return lines.length > 0 ? lines : ["N/A"];
   }, [formValues.address1, formValues.address2, formValues.city, formValues.postalCode, formValues.state]);
 
   const reviewFields = [
@@ -2335,10 +2703,22 @@ export default function Storefront({ products, inventory = null, pickupDetails =
           },
           {
             label: "Shipping method",
-            value: `${selectedShippingOption.label} | ${selectedShippingOption.transitLabel} | ${formatCurrency(
-              selectedShippingOption.amountCents
-            )}`
-          }
+            value: selectedShippingOption.label
+          },
+          {
+            label: "Shipping timing",
+            value: estimatedShipDateText
+              ? `Packed and shipped on ${estimatedShipDateText}`
+              : selectedShippingOption.transitLabel
+          },
+          ...(selectedExpectedDeliveryText
+            ? [
+                {
+                  label: "Latest delivery estimate",
+                  value: selectedExpectedDeliveryText.replace(/^Expected by\s+/i, "")
+                }
+              ]
+            : [])
         ]
       : []),
     { label: "Order note", value: summarizeValue(formValues.note) }
@@ -2388,11 +2768,9 @@ export default function Storefront({ products, inventory = null, pickupDetails =
                         ? "Pickup And Preorder"
                         : "Pickup Details"}
                   </span>
-                  <strong>
-                    {orderSuccessContext.pickupScenario === "preorder_only"
-                      ? "Email Follow-up"
-                      : orderSuccessContext.pickupDateLabel || "Next Market"}
-                  </strong>
+                  {orderSuccessContext.pickupScenario !== "preorder_only" ? (
+                    <strong>{orderSuccessContext.pickupDateLabel || "Next Market"}</strong>
+                  ) : null}
                 </div>
                 <dl className="order-success-popup__details">
                   {orderSuccessContext.pickupScenario !== "preorder_only" ? (
@@ -2425,9 +2803,16 @@ export default function Storefront({ products, inventory = null, pickupDetails =
                   <strong>{orderSuccessContext.shippingOptionLabel || "Tracking By Email"}</strong>
                 </div>
                 <p className="order-success-popup__instruction">
-                  {orderSuccessContext.shippingTransitLabel
-                    ? `Estimated delivery window: ${orderSuccessContext.shippingTransitLabel}. `
-                    : ""}
+                  {orderSuccessContext.preorderUnits > 0
+                    ? "Preorder items ship after they are ready, which may take up to 15 days. The selected shipping timing starts after that ready date. "
+                    : orderSuccessContext.shippingShipDateLabel
+                      ? `Estimated ship date: ${orderSuccessContext.shippingShipDateLabel}. `
+                      : ""}
+                  {orderSuccessContext.preorderUnits <= 0 && orderSuccessContext.shippingTransitLabel
+                    ? `${orderSuccessContext.shippingTransitLabel} `
+                    : orderSuccessContext.shippingTransitLabel
+                      ? `${orderSuccessContext.shippingTransitLabel} `
+                      : ""}
                   We will email tracking or delivery updates when available. Open and inspect the package when it arrives, and refrigerate after opening.
                 </p>
               </div>
@@ -2701,7 +3086,7 @@ export default function Storefront({ products, inventory = null, pickupDetails =
                           aria-live="polite"
                         >
                           In cart: {cartQty}
-                          {cartPreorderUnits > 0 ? ` (${cartPreorderUnits} preorder)` : ""}
+                          {cartPreorderUnits > 0 ? ` (preorder)` : ""}
                         </span>
                       </div>
                     ) : null}
@@ -2744,6 +3129,7 @@ export default function Storefront({ products, inventory = null, pickupDetails =
 
           <form
             id="checkout-form"
+            ref={checkoutFormRef}
             className="order-form store__checkout"
             onSubmit={handleSubmit}
             onFocusCapture={handleAnalyticsFieldFocus}
@@ -2752,7 +3138,7 @@ export default function Storefront({ products, inventory = null, pickupDetails =
             <h3>{isPaymentStep ? "Review & Pay" : "Complete Your Order"}</h3>
             <p>
               {hasPreorderItems
-                ? `Pre-order notice: ${PREORDER_TIMING_NOTICE}`
+                ? `Pre-order notice: ${preorderTimingNotice}`
                 : "Preorders apply when demand exceeds current batch availability."}
             </p>
             <p className="order-form__assist">
@@ -2845,8 +3231,8 @@ export default function Storefront({ products, inventory = null, pickupDetails =
                             onChange={handleFulfillmentChange}
                             required
                           >
-                            <option value="market">{MARKET_PICKUP_LABEL}</option>
                             <option value="ship">Ship or deliver</option>
+                            <option value="market">{MARKET_PICKUP_LABEL}</option>
                           </select>
                           <span className="select-wrap__icon" aria-hidden="true">
                             <svg viewBox="0 0 24 24" fill="none">
@@ -2860,9 +3246,6 @@ export default function Storefront({ products, inventory = null, pickupDetails =
                             </svg>
                           </span>
                         </div>
-                        <span className="form-field__hint">
-                          Choose market pickup or shipping before payment.
-                        </span>
                       </>
                     ) : (
                       <div
@@ -3083,7 +3466,10 @@ export default function Storefront({ products, inventory = null, pickupDetails =
                     <div className="checkout-dropdown__content">
                       <dl className="checkout-review__fields">
                         {reviewFields.map((field) => (
-                          <div key={`review-field-${field.label}`}>
+                          <div
+                            key={`review-field-${field.label}`}
+                            className={`checkout-review__field checkout-review__field--${sanitizeFieldName(field.label)}`}
+                          >
                             <dt>{field.label}</dt>
                             <dd>
                               {Array.isArray(field.value)
@@ -3118,23 +3504,16 @@ export default function Storefront({ products, inventory = null, pickupDetails =
                   <p>
                     {isOrderFinalizing
                       ? "Stripe has accepted your payment. We are now finalizing the order on the server before confirming completion."
-                      : `Card details are entered in Stripe secure fields and never stored on our servers. Your card will be charged ${formatCurrency(orderTotal)} today for this ${fulfillment === "ship" ? "shipping" : "market pickup"} order.`}
+                      : fulfillment === "ship"
+                        ? `Card details are entered in Stripe secure fields and never stored on our servers. Your card will be charged ${formatCurrency(orderTotal)} today for this shipping order.`
+                        : `Card details are entered in Stripe secure fields and never stored on our servers. Your card will be charged ${formatCurrency(orderTotal)} today for this market pickup order.`}
                   </p>
                   <StripePaymentPanel
                     onPaymentState={handlePaymentState}
                     grossTotalCents={orderTotal}
+                    billingDetails={formValues}
                     createPaymentIntent={createPaymentIntent}
                     isLocked={isOrderFinalizing}
-                    billingDetails={{
-                      name: formValues.name,
-                      email: formValues.email,
-                      phone: formValues.phone,
-                      address1: formValues.address1,
-                      address2: formValues.address2,
-                      city: formValues.city,
-                      state: formValues.state,
-                      postalCode: formValues.postalCode
-                    }}
                   />
                 </div>
               </>
@@ -3266,9 +3645,19 @@ export default function Storefront({ products, inventory = null, pickupDetails =
                       <span>Method</span>
                       <strong>
                         {selectedShippingOption.label}
-                        <span>{selectedShippingOption.transitLabel}</span>
+                        <span>{formatCurrency(shippingCents)}</span>
                       </strong>
                     </article>
+                    {estimatedShipDateText ? (
+                      <article>
+                        <span>
+                          {hasPreorderItems
+                            ? "Estimated Ship Date After Preorder Window"
+                            : "Estimated Ship Date"}
+                        </span>
+                        <strong>{estimatedShipDateText}</strong>
+                      </article>
+                    ) : null}
                   </>
                 ) : (
                   <>
@@ -3301,7 +3690,8 @@ export default function Storefront({ products, inventory = null, pickupDetails =
                 </div>
                 {fulfillment === "ship" ? (
                   <ul className="pickup-policy-modal__steps">
-                    <li>Orders ship after packing or production is complete.</li>
+                    <li>Orders are packed and shipped on Tuesdays and Saturdays after packing or production is complete.</li>
+                    <li>Expedited shipping speeds up carrier transit, but it does not skip the packing schedule.</li>
                     <li>Tracking or delivery updates will be emailed when available.</li>
                     <li>Open and inspect the package when it arrives.</li>
                     <li>Refrigerate after opening.</li>
@@ -3328,13 +3718,17 @@ export default function Storefront({ products, inventory = null, pickupDetails =
                 <section className="pickup-policy-modal__section pickup-policy-modal__section--notice">
                   <div className="pickup-policy-modal__section-heading">
                     <span>
-                      {pickupScenario === "mixed"
+                      {fulfillment === "ship"
+                        ? "Preorder Shipping Timing"
+                        : pickupScenario === "mixed"
                         ? "Ready Items And Preorders"
                         : "Preorder Timing"}
                     </span>
                   </div>
                   <p>
-                    {pickupScenario === "mixed"
+                    {fulfillment === "ship"
+                      ? "Preorder items cannot be shipped until they are ready, which can take up to 15 days. Your selected shipping window starts after that ready date."
+                      : pickupScenario === "mixed"
                       ? "Ready items can be picked up on the date above. Preorder items will be scheduled separately when restocked, and we will email you before that pickup."
                       : "This order contains preorder items. We will email you when they are ready and confirm the pickup date before you come to market."}
                   </p>
@@ -3366,8 +3760,18 @@ export default function Storefront({ products, inventory = null, pickupDetails =
                   ) : null}
                   {fulfillment === "ship" ? (
                     <div>
-                      <dt>Delivery window</dt>
+                      <dt>Shipping timing</dt>
                       <dd>{selectedShippingOption.transitLabel}</dd>
+                    </div>
+                  ) : null}
+                  {fulfillment === "ship" && estimatedShipDateText ? (
+                    <div>
+                      <dt>
+                        {hasPreorderItems
+                          ? "Estimated ship date after preorder window"
+                          : "Estimated ship date"}
+                      </dt>
+                      <dd>{estimatedShipDateText}</dd>
                     </div>
                   ) : null}
                   <div>
@@ -3377,7 +3781,7 @@ export default function Storefront({ products, inventory = null, pickupDetails =
                 </dl>
                 <p>
                   {fulfillment === "ship"
-                    ? "Your card will be charged today after you confirm payment."
+                    ? "Payment stays on this page with this shipping method selected before payment."
                     : "Pickup orders have no shipping charge. Your card will be charged today to reserve available inventory and preorder items."}
                 </p>
               </section>

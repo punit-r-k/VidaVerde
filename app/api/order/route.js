@@ -1,12 +1,19 @@
 import { securePublicRoute } from "@/lib/apiSecurity";
 import {
   checkoutPayloadSchema,
-  getShippingOptionById,
-  mapCheckoutIssuesToFieldErrors
+  isOwnerDeliveryAddressEligible,
+  mapCheckoutIssuesToFieldErrors,
+  SHIPPING_COUNTRY_CODE
 } from "@/lib/checkoutSchema";
 import { MARKET_PICKUP_POLICY_VERSION } from "@/lib/pickupDetails";
 import { getProductMap } from "@/lib/products";
 import { getRouteRateLimitConfig } from "@/lib/rateLimit";
+import {
+  DEFAULT_SHIPPING_OPTION_ID,
+  getCustomerShippingOptions,
+  getShippingOptionsForCart,
+  normalizeProductType
+} from "@/lib/shippingPricing";
 import { getInventoryMap } from "@/lib/stock";
 import { stripeConfig, stripeRequest } from "@/lib/stripe";
 
@@ -32,6 +39,11 @@ const getCheckoutValidationMessage = (issues) => {
 
 const asMetadataValue = (value, maxLength = 500) =>
   String(value || "").trim().slice(0, maxLength);
+
+const asOptionalStripeValue = (value, maxLength = 500) => {
+  const text = asMetadataValue(value, maxLength);
+  return text || undefined;
+};
 
 const buildOrderSummary = (lineItems) =>
   lineItems.map((item) => `${item.name} x${item.quantity}`).join(", ");
@@ -145,6 +157,19 @@ const buildInventoryConflictMessage = (conflicts) => {
   return "Inventory changed while you were checking out. Review the updated in-stock and preorder quantities before continuing to payment.";
 };
 
+const buildStripeShippingDetails = (customer) => ({
+  name: asMetadataValue(customer?.name, 120),
+  phone: asOptionalStripeValue(customer?.phone, 64),
+  address: {
+    line1: asMetadataValue(customer?.address1, 120),
+    line2: asOptionalStripeValue(customer?.address2, 120),
+    city: asMetadataValue(customer?.city, 120),
+    state: asMetadataValue(customer?.state, 64),
+    postal_code: asMetadataValue(customer?.postalCode, 32),
+    country: SHIPPING_COUNTRY_CODE
+  }
+});
+
 export const runtime = "nodejs";
 
 export async function POST(request) {
@@ -195,7 +220,7 @@ export async function POST(request) {
     consents,
     items: normalizedItems,
     fulfillment: normalizedFulfillment,
-    shippingOption: normalizedShippingOption,
+    shippingOption: requestedShippingOption,
     inventorySnapshot
   } = parsedPayload.data;
   const { name, email } = customer;
@@ -225,13 +250,17 @@ export async function POST(request) {
     .map((item) => {
       const product = productMap.get(item.sku);
       const unitAmount = Number(product?.price_cents);
-      if (!product || !Number.isFinite(unitAmount) || unitAmount < 0) return null;
+      const productType = normalizeProductType(product?.product_type, item.sku);
+      if (!product || !Number.isFinite(unitAmount) || unitAmount < 0 || !productType) {
+        return null;
+      }
 
       return {
         sku: item.sku,
         quantity: item.quantity,
         unitAmount,
-        name: String(product.name || item.sku).trim()
+        name: String(product.name || item.sku).trim(),
+        productType
       };
     })
     .filter(Boolean);
@@ -292,18 +321,34 @@ export async function POST(request) {
     return {
       sku: item.sku,
       quantity: item.quantity,
-      price_cents: product?.price_cents ?? 0
+      price_cents: product?.price_cents ?? 0,
+      product_type: normalizeProductType(product?.product_type, item.sku)
     };
   });
 
   const orderSummary = buildOrderSummary(lineItems);
   const skuSummary = buildSkuSummary(lineItems);
   const totalUnits = lineItems.reduce((sum, item) => sum + item.quantity, 0);
-  const selectedShippingOption = getShippingOptionById(normalizedShippingOption);
-  const shippingAmount = isPickup ? 0 : Number(selectedShippingOption?.amountCents || 0);
-  const total = subtotal + shippingAmount;
+  const shipping = getShippingOptionsForCart({
+    items: lineItems,
+    subtotalCents: subtotal
+  });
+  const includeOwnerDelivery =
+    !isPickup && isOwnerDeliveryAddressEligible(customer);
+  const customerShippingOptions = isPickup
+    ? []
+    : getCustomerShippingOptions({ shipping, includeOwnerDelivery });
+  const selectedShippingOption = isPickup
+    ? null
+    : customerShippingOptions.find((option) => option.id === requestedShippingOption) ||
+      customerShippingOptions.find((option) => option.id === DEFAULT_SHIPPING_OPTION_ID) ||
+      shipping.standardOption;
+  const defaultShippingAmount = isPickup
+    ? 0
+    : Number(selectedShippingOption?.amountCents || 0);
+  const estimatedTotal = subtotal + defaultShippingAmount;
 
-  if (!Number.isFinite(total) || total <= 0) {
+  if (!Number.isFinite(estimatedTotal) || estimatedTotal <= 0) {
     return respond.json(
       { error: "Your order total looks off. Please refresh your cart and try again." },
       { status: 400 }
@@ -311,13 +356,23 @@ export async function POST(request) {
   }
 
   const metadata = {
+    checkout_flow: "payment_intent",
     fulfillment: asMetadataValue(normalizedFulfillment, 32),
+    shipping_tier: asMetadataValue(isPickup ? "" : shipping.tier, 64),
     shipping_option: asMetadataValue(isPickup ? "" : selectedShippingOption?.id, 64),
-    shipping_option_label: asMetadataValue(isPickup ? "" : selectedShippingOption?.label, 120),
-    shipping_estimate: asMetadataValue(isPickup ? "" : selectedShippingOption?.transitLabel, 64),
+    shipping_option_label: asMetadataValue(
+      isPickup ? "" : selectedShippingOption?.label,
+      120
+    ),
+    shipping_estimate: asMetadataValue(
+      isPickup ? "" : selectedShippingOption?.transitLabel,
+      180
+    ),
+    sauerkraut_count: asMetadataValue(shipping.sauerkrautCount, 32),
+    hot_sauce_count: asMetadataValue(shipping.hotSauceCount, 32),
     amount_subtotal: asMetadataValue(subtotal, 32),
-    amount_shipping: asMetadataValue(shippingAmount, 32),
-    amount_total: asMetadataValue(total, 32),
+    amount_shipping: asMetadataValue(defaultShippingAmount, 32),
+    amount_total: asMetadataValue(estimatedTotal, 32),
     customer_name: asMetadataValue(name, 120),
     customer_email: asMetadataValue(email, 254),
     customer_phone: asMetadataValue(customer.phone, 64),
@@ -326,6 +381,7 @@ export async function POST(request) {
     city: asMetadataValue(customer.city, 120),
     state: asMetadataValue(customer.state, 64),
     postal_code: asMetadataValue(customer.postalCode, 32),
+    country: asMetadataValue(isPickup ? "" : SHIPPING_COUNTRY_CODE, 2),
     note: asMetadataValue(customer.note, 500),
     order_summary: asMetadataValue(orderSummary, 500),
     order_skus: asMetadataValue(skuSummary, 500),
@@ -357,31 +413,22 @@ export async function POST(request) {
 
   try {
     const stripePayload = {
-      amount: total,
+      amount: estimatedTotal,
       currency: "usd",
       automatic_payment_methods: {
-        enabled: true
+        enabled: true,
+        allow_redirects: "never"
       },
       description: asMetadataValue(
         `Vida Verde ${isPickup ? "pickup" : "shipping"} order: ${orderSummary}`,
         500
       ),
-      metadata
+      metadata,
+      receipt_email: asMetadataValue(email, 254)
     };
 
     if (!isPickup) {
-      stripePayload.shipping = {
-        name: asMetadataValue(name, 120),
-        phone: asMetadataValue(customer.phone, 64) || undefined,
-        address: {
-          line1: asMetadataValue(customer.address1, 120),
-          line2: asMetadataValue(customer.address2, 120) || undefined,
-          city: asMetadataValue(customer.city, 120),
-          state: asMetadataValue(customer.state, 64),
-          postal_code: asMetadataValue(customer.postalCode, 32),
-          country: "US"
-        }
-      };
+      stripePayload.shipping = buildStripeShippingDetails(customer);
     }
 
     const { ok, data, error } = await stripeRequest("/v1/payment_intents", {

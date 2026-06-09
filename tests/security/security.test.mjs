@@ -436,6 +436,20 @@ test("security regression suite", { timeout: 300_000 }, async (t) => {
 
     assert.equal(response.status, 400);
     assert.match(JSON.stringify(json), /invalid/i);
+
+    const sessionAttempt = await requestJson("/api/order/finalize", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        Origin: baseUrl
+      },
+      body: JSON.stringify({
+        sessionId: "cs_123'; DROP TABLE orders;--"
+      })
+    });
+
+    assert.equal(sessionAttempt.response.status, 400);
+    assert.match(JSON.stringify(sessionAttempt.json), /invalid/i);
   });
 
   await t.test("public inventory route reports backend unavailability instead of empty stock", async () => {

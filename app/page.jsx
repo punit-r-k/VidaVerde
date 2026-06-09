@@ -244,7 +244,7 @@ export default async function Home() {
     },
     {
       q: "Do you offer shipping?",
-      a: "Not yet. We currently offer market pickup only. Shipping options are being prepared for a future checkout update."
+      a: "Yes. Shipping is available within the United States, and market pickup is still available for local customers."
     }
   ];
 

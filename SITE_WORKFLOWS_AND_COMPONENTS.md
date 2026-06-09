@@ -28,18 +28,19 @@ This file is a practical map of the most important customer flows, operations fl
 - Payment API: `app/api/order/route.js`
 - Payment provider wrapper: `lib/stripe.js`
 - Behavior:
-  - The current customer-facing UI is pickup-only. Shipping support remains staged in code behind `SHIPPING_CHECKOUT_VISIBLE` in `app/components/Storefront.jsx`.
+  - Customers can choose market pickup or shipping/delivery.
   - Customer details are validated before payment.
-  - Stripe Elements collects card data in-browser.
-  - `POST /api/order` creates a Stripe PaymentIntent and stores order context, selected shipping option, subtotal, shipping, and total in Stripe metadata when shipping is enabled.
-  - Successful payment is finalized later by the Stripe webhook, not by the browser alone.
+  - `POST /api/order` creates a Stripe Checkout Session and redirects the customer to Stripe-hosted Checkout.
+  - Shipping orders send fixed Standard and Expedited shipping options through `shipping_rate_data`; owner delivery is added as a third option only for eligible local addresses.
+  - Successful payment is finalized by the Stripe webhook, with browser finalization as an idempotent backup after Stripe redirects back.
 
 ### 4. Paid Order Recording And Fulfillment Side Effects
 - Webhook: `app/api/stripe/webhook/route.js`
 - Email composition: `lib/orderConfirmationEmail.js`
 - Email transport: `lib/email.js`
 - Behavior:
-  - Stripe webhook verifies signatures and processes `payment_intent.succeeded`.
+  - Stripe webhook verifies signatures and processes `checkout.session.completed` and `checkout.session.async_payment_succeeded`.
+  - Legacy `payment_intent.succeeded` handling remains for older in-flight payments.
   - Paid orders are written into Supabase through the `record_paid_order` RPC.
   - Order items can contain a mix of ready reservation units and preorder units for the same customer.
   - Shipment sync side effects run after order creation.
@@ -184,7 +185,7 @@ This file is a practical map of the most important customer flows, operations fl
 | `lib/stock.js` | Server-side inventory map generation for the storefront. |
 | `lib/pickupDetails.js` | Market schedule, cutoff rules, policy copy, and week-window calculations. |
 | `lib/preorderReadyEmail.js` | Preorder release email composition, grouping, and delivery for market pickup orders. |
-| `app/api/order/route.js` | Checkout validation and Stripe PaymentIntent creation. |
+| `app/api/order/route.js` | Checkout validation and Stripe Checkout Session creation. |
 | `app/api/stripe/webhook/route.js` | Source of truth for turning paid Stripe events into recorded orders. |
 | `app/api/inventory/route.js` | Public inventory feed used by the storefront. |
 | `app/api/email-signups/route.js` | Public email capture endpoint. |

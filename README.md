@@ -24,9 +24,10 @@ Inventory is stored in Supabase and synced to the `Inventory` sheet via Apps Scr
 Column C is a restock delta; it is cleared after a successful sync to prevent double-counting.
 The same Apps Script also syncs the weekly prep, orders, shipments, email
 signup, and health-check tabs used by operations.
-When a positive restock releases market-pickup preorder units, the backend can also
-send preorder-ready pickup emails, refresh the prep sheet, and return a count that
-the sheet shows as a toast.
+When a positive restock releases preorder units, the backend can also send
+preorder-ready emails for market-pickup or shipping orders, refresh the prep
+sheet, sync shipment rows for shipping orders, and return a count that the sheet
+shows as a toast.
 
 Apps Script file: `apps-script/inventory-sync.gs`
 
@@ -86,7 +87,7 @@ analytics data.
 Preorder-specific data model:
 - `preorder_queue` stores the remaining preorder backlog by order and SKU.
 - `preorder_release_events` stores each quantity released by incoming stock so prep
-  generation and preorder-ready pickup emails can react to newly available units.
+  generation and preorder-ready customer emails can react to newly available units.
 - New paid orders stamp `orders`, `order_items`, and `preorder_queue` with the Stripe
   payment success time so restocks can fulfill preorders in true order sequence.
 - Ready market pickup orders store `orders.pickup_date`, so prep sheets and
@@ -102,18 +103,26 @@ RPC functions:
 
 ## Stripe Payments
 
-PaymentIntents are created in `app/api/order/route.js`.
-The storefront renders Stripe Elements on your domain, so card details are collected by Stripe and never stored by this app.
+Stripe PaymentIntents are created in `app/api/order/route.js`.
+The storefront uses Stripe secure card fields on the page, so card details are
+collected by Stripe and never stored by this app.
 Stripe webhooks are handled in `app/api/stripe/webhook/route.js`.
-Configure your Stripe webhook endpoint to listen to `payment_intent.succeeded` (and optionally keep `checkout.session.*` only if you still use hosted checkout).
+Configure your Stripe webhook endpoint to listen to `payment_intent.succeeded`.
+The webhook still accepts `checkout.session.completed` and
+`checkout.session.async_payment_succeeded` for legacy in-flight payments created
+before the PaymentIntent migration.
+
+Shipping orders pass the selected shipping method and customer address into the
+PaymentIntent metadata and Stripe shipping details.
+The customer sees Standard Shipping, Expedited Shipping, and Personal delivery by the owner only when their entered address is eligible for the existing Greater Houston TX ZIP-prefix rule.
+Carrier selection remains internal after checkout.
 
 Required environment variables:
 - `STRIPE_SECRET_KEY`
-- `NEXT_PUBLIC_STRIPE_PUBLISHABLE_KEY`
 - `STRIPE_WEBHOOK_SECRET`
 - `SITE_URL`
 
-Optional for customer order confirmation and preorder-ready pickup emails:
+Optional for customer order confirmation and preorder-ready emails:
 - `SMTP_HOST`
 - `SMTP_PORT`
 - `SMTP_SECURE`
@@ -135,11 +144,12 @@ The default banner image is bundled at `public/email/order-confirmation-banner.p
 When `ORDER_CONFIRMATION_EMAIL_MODE=queue` is enabled, confirmations are written
 to `email_jobs` and processed through `POST /api/admin/email-jobs`.
 
-Preorder-ready pickup emails are sent separately from `lib/preorderReadyEmail.js`
-when a restock releases market-pickup preorder units. Those emails use the same
-banner image as the order confirmation email, include the current pickup date
-details, and tell customers to text `(713) 478-1878` if they cannot make
-the market and need another arrangement.
+Preorder-ready emails are sent separately from `lib/preorderReadyEmail.js` when
+a restock releases preorder units. Market-pickup emails include the current
+pickup date details and calendar attachment; shipping emails include the shipping
+method, ship-to address, and tracking/delivery follow-up language. Shipping
+orders also have their shipment rows synced when preorder release emails are
+processed.
 
 Friday pickup reminder emails are sent from `lib/pickupReminderEmail.js` through
 `POST /api/admin/pickup-reminders`. They reuse the same banner image as the order
