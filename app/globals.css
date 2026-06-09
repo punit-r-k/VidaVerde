@@ -2082,6 +2082,29 @@ label {
   line-height: 1.35;
 }
 
+.form-field__suggestion {
+  font-size: 0.75rem;
+  color: rgba(41, 54, 47, 0.72);
+  line-height: 1.35;
+}
+
+.form-field__suggestion-button {
+  border: 0;
+  padding: 0;
+  background: transparent;
+  color: var(--green-900);
+  cursor: pointer;
+  font: inherit;
+  font-weight: 800;
+  text-decoration: underline;
+  text-underline-offset: 2px;
+}
+
+.form-field__suggestion-button:hover,
+.form-field__suggestion-button:focus-visible {
+  color: var(--leaf);
+}
+
 .form-field__readonly {
   width: 100%;
   min-width: 0;

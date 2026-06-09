@@ -20,10 +20,10 @@ import {
   SHIPPING_FIELDS,
   SHIPPING_COUNTRY_CODE,
   SHIPPING_COUNTRY_LABEL,
-  US_CITY_OPTIONS,
-  US_STATE_OPTIONS,
   formatCheckoutInputValue,
+  getCitySpellingSuggestion,
   getCheckoutFieldErrors,
+  getStateSpellingSuggestion,
   isOwnerDeliveryAddressEligible,
   normalizeShippingOptionId,
   normalizeFulfillment
@@ -134,6 +134,11 @@ const ORDER_SHIPPING_SUCCESS_POPUP_MESSAGE =
   "Your payment was received. Watch your email for your receipt and shipping updates.";
 const SHIPPING_CHECKOUT_VISIBLE = true;
 const DEFAULT_FULFILLMENT = "ship";
+const formatFinalCheckoutValues = (values) =>
+  Object.keys(INITIAL_FORM_VALUES).reduce((nextValues, name) => {
+    nextValues[name] = formatCheckoutInputValue(name, values?.[name], { final: true });
+    return nextValues;
+  }, {});
 const PREORDER_NOTICE_MESSAGES = new Set([
   "Please acknowledge the pre-order notice before proceeding to payment.",
   "Please acknowledge the pre-order notice before payment."
@@ -1351,15 +1356,14 @@ export default function Storefront({ products, inventory = null, pickupDetails =
     return () => window.clearInterval(intervalId);
   }, []);
 
-  const cityOptions = useMemo(() => {
-    const selectedCity = String(formValues.city || "").trim();
-    if (!selectedCity) return US_CITY_OPTIONS;
-
-    const hasMatch = US_CITY_OPTIONS.some(
-      (city) => city.toLowerCase() === selectedCity.toLowerCase()
-    );
-    return hasMatch ? US_CITY_OPTIONS : [selectedCity, ...US_CITY_OPTIONS];
-  }, [formValues.city]);
+  const citySpellingSuggestion = useMemo(
+    () => getCitySpellingSuggestion(formValues.city),
+    [formValues.city]
+  );
+  const stateSpellingSuggestion = useMemo(
+    () => getStateSpellingSuggestion(formValues.state),
+    [formValues.state]
+  );
 
   useEffect(() => {
     if (!requiresAddress) return;
@@ -1927,7 +1931,7 @@ export default function Storefront({ products, inventory = null, pickupDetails =
 
   const handleFieldBlur = (event) => {
     const { name, value } = event.currentTarget;
-    const formatted = formatCheckoutInputValue(name, value);
+    const formatted = formatCheckoutInputValue(name, value, { final: true });
     const nextValues = formatted === formValues[name]
       ? formValues
       : {
@@ -1968,6 +1972,31 @@ export default function Storefront({ products, inventory = null, pickupDetails =
       });
     }
   };
+
+  const handleSpellingSuggestion = useCallback(
+    (name, suggestedValue) => {
+      const formatted = formatCheckoutInputValue(name, suggestedValue, { final: true });
+      const nextValues = {
+        ...formValues,
+        [name]: formatted
+      };
+
+      setFormValues(nextValues);
+      setTouchedFields((prev) => ({
+        ...prev,
+        [name]: true
+      }));
+      resetPaymentState();
+
+      if (status !== "idle") {
+        setStatus("idle");
+        setNotice("");
+      }
+
+      setFieldErrors(validateCheckoutForm(nextValues, fulfillment));
+    },
+    [formValues, fulfillment, resetPaymentState, status, validateCheckoutForm]
+  );
 
   const handleBackToEdit = useCallback(() => {
     if (isOrderFinalizing) return;
@@ -2192,8 +2221,17 @@ export default function Storefront({ products, inventory = null, pickupDetails =
     }
 
     setSubmitAttempted(true);
+    const finalFormValues = formatFinalCheckoutValues(formValues);
+    const hasFinalFormChanges = Object.keys(INITIAL_FORM_VALUES).some(
+      (name) => finalFormValues[name] !== formValues[name]
+    );
+
+    if (hasFinalFormChanges) {
+      setFormValues(finalFormValues);
+    }
+
     const nextErrors = validateCheckoutForm(
-      formValues,
+      finalFormValues,
       fulfillment,
       selectedShippingOption?.id || shippingOptionId
     );
@@ -3295,79 +3333,81 @@ export default function Storefront({ products, inventory = null, pickupDetails =
                       />
                     </label>
                     <div className="form__row form__row--city-state">
-                      <label className={`form-field form-field--select${hasFieldError("city") ? " form-field--error" : ""}`}>
+                      <label className={`form-field${hasFieldError("city") ? " form-field--error" : ""}`}>
                         City *
-                        <div className="select-wrap">
-                          <select
-                            ref={setFieldRef("city")}
-                            name="city"
-                            value={formValues.city}
-                            onChange={handleFieldChange}
-                            onBlur={handleFieldBlur}
-                            aria-invalid={hasFieldError("city")}
-                            aria-describedby={hasFieldError("city") ? "city-error" : undefined}
-                            required
-                          >
-                            <option value="">Select city</option>
-                            {cityOptions.map((city) => (
-                              <option key={city} value={city}>
-                                {city}
-                              </option>
-                            ))}
-                          </select>
-                          <span className="select-wrap__icon" aria-hidden="true">
-                            <svg viewBox="0 0 24 24" fill="none">
-                              <path
-                                d="M7 10l5 5 5-5"
-                                stroke="currentColor"
-                                strokeWidth="1.8"
-                                strokeLinecap="round"
-                                strokeLinejoin="round"
-                              />
-                            </svg>
-                          </span>
-                        </div>
+                        <input
+                          ref={setFieldRef("city")}
+                          type="text"
+                          name="city"
+                          value={formValues.city}
+                          placeholder="Enter city"
+                          autoComplete="address-level2"
+                          autoCapitalize="words"
+                          maxLength={120}
+                          onChange={handleFieldChange}
+                          onBlur={handleFieldBlur}
+                          aria-invalid={hasFieldError("city")}
+                          aria-describedby={[
+                            hasFieldError("city") ? "city-error" : "",
+                            citySpellingSuggestion ? "city-suggestion" : ""
+                          ].filter(Boolean).join(" ") || undefined}
+                          required
+                        />
                         {hasFieldError("city") ? (
                           <span id="city-error" className="form-field__error" role="alert">
                             {getFieldError("city")}
                           </span>
                         ) : null}
-                      </label>
-                      <label className={`form-field form-field--select${hasFieldError("state") ? " form-field--error" : ""}`}>
-                        State *
-                        <div className="select-wrap">
-                          <select
-                            ref={setFieldRef("state")}
-                            name="state"
-                            value={formValues.state}
-                            onChange={handleFieldChange}
-                            onBlur={handleFieldBlur}
-                            aria-invalid={hasFieldError("state")}
-                            aria-describedby={hasFieldError("state") ? "state-error" : undefined}
-                            required
-                          >
-                            <option value="">Select state</option>
-                            {US_STATE_OPTIONS.map((stateOption) => (
-                              <option key={stateOption.code} value={stateOption.code}>
-                                {stateOption.name}
-                              </option>
-                            ))}
-                          </select>
-                          <span className="select-wrap__icon" aria-hidden="true">
-                            <svg viewBox="0 0 24 24" fill="none">
-                              <path
-                                d="M7 10l5 5 5-5"
-                                stroke="currentColor"
-                                strokeWidth="1.8"
-                                strokeLinecap="round"
-                                strokeLinejoin="round"
-                              />
-                            </svg>
+                        {citySpellingSuggestion ? (
+                          <span id="city-suggestion" className="form-field__suggestion">
+                            Did you mean{" "}
+                            <button
+                              type="button"
+                              className="form-field__suggestion-button"
+                              onClick={() => handleSpellingSuggestion("city", citySpellingSuggestion)}
+                            >
+                              {citySpellingSuggestion}
+                            </button>
+                            ?
                           </span>
-                        </div>
+                        ) : null}
+                      </label>
+                      <label className={`form-field${hasFieldError("state") ? " form-field--error" : ""}`}>
+                        State *
+                        <input
+                          ref={setFieldRef("state")}
+                          type="text"
+                          name="state"
+                          value={formValues.state}
+                          placeholder="Enter state"
+                          autoComplete="address-level1"
+                          autoCapitalize="words"
+                          maxLength={32}
+                          onChange={handleFieldChange}
+                          onBlur={handleFieldBlur}
+                          aria-invalid={hasFieldError("state")}
+                          aria-describedby={[
+                            hasFieldError("state") ? "state-error" : "",
+                            stateSpellingSuggestion ? "state-suggestion" : ""
+                          ].filter(Boolean).join(" ") || undefined}
+                          required
+                        />
                         {hasFieldError("state") ? (
                           <span id="state-error" className="form-field__error" role="alert">
                             {getFieldError("state")}
+                          </span>
+                        ) : null}
+                        {stateSpellingSuggestion ? (
+                          <span id="state-suggestion" className="form-field__suggestion">
+                            Did you mean{" "}
+                            <button
+                              type="button"
+                              className="form-field__suggestion-button"
+                              onClick={() => handleSpellingSuggestion("state", stateSpellingSuggestion)}
+                            >
+                              {stateSpellingSuggestion}
+                            </button>
+                            ?
                           </span>
                         ) : null}
                       </label>
