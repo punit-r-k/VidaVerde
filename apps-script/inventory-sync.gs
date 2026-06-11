@@ -166,7 +166,6 @@ function setupTriggers() {
 }
 
 function masterSync() {
-  const ui = SpreadsheetApp.getUi();
   const steps = [
     { name: "Inventory", run: syncInventory },
     { name: "Weekly Prep", run: syncWeeklyPrep },
@@ -188,15 +187,31 @@ function masterSync() {
   }
 
   if (failed.length > 0) {
-    ui.alert(`Master sync completed with errors:\n\n${failed.join("\n")}`);
+    Logger.log("Master sync completed with errors:\n\n%s", failed.join("\n"));
+    toastIfAvailable_(
+      "Master sync completed with errors. Check Apps Script logs.",
+      "Vida Verde",
+      5
+    );
     return;
   }
 
-  SpreadsheetApp.getActive().toast(
+  toastIfAvailable_(
     "Inventory, prep, orders, shipments, email signups, and health synced.",
     "Vida Verde",
     5
   );
+}
+
+function toastIfAvailable_(message, title, timeoutSeconds) {
+  try {
+    const spreadsheet = SpreadsheetApp.getActive();
+    if (spreadsheet) {
+      spreadsheet.toast(message, title, timeoutSeconds);
+    }
+  } catch (error) {
+    Logger.log("Toast skipped: %s", error && error.message ? error.message : error);
+  }
 }
 
 function sendPickupReminders() {
@@ -215,7 +230,7 @@ function sendPickupReminders() {
       response?.status ?? "unknown",
       response?.error || response?.message || response?.raw || "unknown"
     );
-    SpreadsheetApp.getActive().toast(
+    toastIfAvailable_(
       "Pickup reminder send failed. Check Apps Script logs.",
       "Vida Verde",
       5
@@ -228,7 +243,7 @@ function sendPickupReminders() {
   const targetLabel = pickupDate || "the next pickup day";
 
   if (response?.skipped) {
-    SpreadsheetApp.getActive().toast(
+    toastIfAvailable_(
       `Pickup reminders skipped for ${targetLabel}: ${response?.reason || "email is not configured."}`,
       "Vida Verde",
       5
@@ -236,7 +251,7 @@ function sendPickupReminders() {
     return;
   }
 
-  SpreadsheetApp.getActive().toast(
+  toastIfAvailable_(
     sentCount > 0
       ? `${sentCount} pickup reminder email(s) sent for ${targetLabel}.`
       : `No pickup reminder emails needed for ${targetLabel}.`,
@@ -261,7 +276,7 @@ function processEmailQueue() {
       response?.status ?? "unknown",
       response?.error || response?.message || response?.raw || "unknown"
     );
-    SpreadsheetApp.getActive().toast(
+    toastIfAvailable_(
       "Email queue processing failed. Check Apps Script logs.",
       "Vida Verde",
       5
@@ -270,7 +285,7 @@ function processEmailQueue() {
     return;
   }
 
-  SpreadsheetApp.getActive().toast(
+  toastIfAvailable_(
     `${Number(response?.sentCount || 0)} email(s) sent, ${Number(response?.failedCount || 0)} failed.`,
     "Vida Verde",
     5
@@ -949,7 +964,7 @@ function handleRestockEdit_(sheet, row) {
         0
     );
     if (Number.isFinite(preorderReadyEmailCount) && preorderReadyEmailCount > 0) {
-      SpreadsheetApp.getActive().toast(
+      toastIfAvailable_(
         `${preorderReadyEmailCount} preorder ready email(s) sent for ${sku}.`,
         "Vida Verde",
         5
@@ -1013,7 +1028,7 @@ function handlePreordersEdit_(sheet, row) {
   if (!sku) return;
 
   const settings = getSettings_();
-  SpreadsheetApp.getActive().toast(
+  toastIfAvailable_(
     `Preorders for ${sku} are managed automatically from paid orders and cannot be edited manually.`,
     "Vida Verde",
     5

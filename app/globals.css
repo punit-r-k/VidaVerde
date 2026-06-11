@@ -1325,78 +1325,14 @@ img {
 .order-success-popup__aftercare {
   margin-top: 14px;
   display: grid;
-  grid-template-columns: minmax(0, 0.58fr) minmax(280px, 0.42fr);
+  grid-template-columns: minmax(0, 1fr);
   align-items: center;
-  gap: 18px;
-}
-
-.order-success-popup__followup {
-  padding: 14px 16px 16px;
-  border: 1px solid rgba(217, 138, 98, 0.36);
-  border-radius: 18px;
-  background: rgba(217, 138, 98, 0.08);
-  display: grid;
-  gap: 10px;
-}
-
-.order-success-popup__followup p {
-  margin: 0;
-  font-size: 0.94rem;
-  line-height: 1.32;
-}
-
-.order-success-popup__followup .order-success-popup__email-list-label {
-  color: var(--accent);
-  font-size: 0.78rem;
-  font-weight: 800;
-  letter-spacing: 0.18em;
-  text-transform: uppercase;
+  gap: 12px;
 }
 
 .order-success-popup__contact a:focus-visible {
   outline: 2px solid var(--brand);
   outline-offset: 3px;
-}
-
-.order-success-popup__signup {
-  margin-top: 0;
-  width: 100%;
-}
-
-.order-success-popup__signup .email-signup-form__label {
-  position: absolute;
-  width: 1px;
-  height: 1px;
-  padding: 0;
-  margin: -1px;
-  overflow: hidden;
-  clip: rect(0, 0, 0, 0);
-  white-space: nowrap;
-  border: 0;
-}
-
-.order-success-popup__signup .email-signup-form__controls {
-  align-items: stretch;
-}
-
-.order-success-popup__signup .email-signup-form__controls input {
-  min-height: 46px;
-}
-
-.order-success-popup__signup .email-signup-form__controls .button {
-  min-width: 128px;
-  padding-inline: 18px;
-  white-space: nowrap;
-  border-color: var(--accent);
-  background: var(--accent);
-  color: var(--brand-dark);
-  font-weight: 900;
-}
-
-.order-success-popup__signup .email-signup-form__controls .button:hover {
-  border-color: var(--accent-strong);
-  background: var(--accent-strong);
-  color: var(--white);
 }
 
 .order-success-popup__contact {
@@ -1556,24 +1492,6 @@ img {
   .order-success-popup__aftercare {
     grid-template-columns: minmax(0, 1fr);
     gap: 10px;
-  }
-
-  .order-success-popup__followup {
-    grid-template-columns: minmax(190px, 0.48fr) minmax(280px, 0.52fr);
-    align-items: center;
-    gap: 6px 18px;
-    padding: 14px;
-    text-align: left;
-  }
-
-  .order-success-popup__followup .order-success-popup__email-list-label,
-  .order-success-popup__followup > p:not(.order-success-popup__email-list-label) {
-    grid-column: 1;
-  }
-
-  .order-success-popup__signup {
-    grid-column: 2;
-    grid-row: 1 / span 2;
   }
 
   .order-success-popup__contact {
@@ -1970,6 +1888,33 @@ img {
   box-shadow: 0 0 0 3px rgba(21, 89, 63, 0.22);
 }
 
+.checkout-email-opt-in {
+  display: grid;
+  grid-template-columns: auto 1fr;
+  align-items: start;
+  gap: 10px;
+  margin-top: 2px;
+  padding: 10px 12px;
+  border: 1px solid rgba(21, 89, 63, 0.14);
+  border-radius: calc(var(--radius) - 6px);
+  background: rgba(54, 103, 62, 0.06);
+  color: rgba(41, 54, 47, 0.82);
+  font-size: 0.82rem;
+  line-height: 1.38;
+}
+
+.checkout-email-opt-in input[type="checkbox"] {
+  width: 18px;
+  height: 18px;
+  margin: 1px 0 0;
+  accent-color: var(--green-900);
+}
+
+.checkout-email-opt-in input[type="checkbox"]:focus-visible {
+  outline: none;
+  box-shadow: 0 0 0 3px rgba(21, 89, 63, 0.22);
+}
+
 @media (max-width: 900px) {
   .checkout-acknowledgements--double {
     grid-template-columns: 1fr;
@@ -1980,6 +1925,11 @@ img {
   display: flex;
   align-items: center;
   justify-content: space-between;
+}
+
+.cart__summary-total {
+  border-top: 1px solid var(--line);
+  padding-top: 10px;
 }
 
 .order-form {
@@ -6955,37 +6905,6 @@ select:focus {
     gap: 12px;
   }
 
-  .order-success-popup__followup {
-    padding: 12px;
-    border-radius: 14px;
-    gap: 8px;
-  }
-
-  .order-success-popup__followup .order-success-popup__email-list-label {
-    font-size: 0.68rem;
-    letter-spacing: 0.16em;
-  }
-
-  .order-success-popup__followup p {
-    font-size: 0.84rem;
-  }
-
-  .order-success-popup__signup .email-signup-form__controls {
-    gap: 8px;
-  }
-
-  .order-success-popup__signup .email-signup-form__controls input {
-    min-height: 44px;
-    padding: 10px 12px;
-    font-size: 0.92rem;
-  }
-
-  .order-success-popup__signup .email-signup-form__controls .button {
-    min-height: 46px;
-    padding: 10px 12px;
-    font-size: 0.7rem;
-  }
-
   .order-success-popup__contact {
     width: 100%;
     min-width: 0;
@@ -7113,7 +7032,6 @@ select:focus {
   .order-success-popup__summary-header strong,
   .order-success-popup__details div,
   .order-success-popup__instruction,
-  .order-success-popup__followup,
   .order-success-popup__contact,
   .shop-market-divider__reveal,
   .shop-market-divider__img,

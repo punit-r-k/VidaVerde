@@ -7,7 +7,7 @@ import { trackAnalyticsEvent } from "@/lib/analytics";
 import { lockPageScroll, unlockPageScroll } from "@/lib/scrollLock";
 
 const DISMISS_KEY = "vidaverde-email-popup-dismissed-v1";
-const OPEN_DELAY_MS = 1200;
+const OPEN_DELAY_MS = 3 * 60 * 1000;
 const DEFAULT_ERROR = "We couldn't save your email right now. Please try again.";
 const SUCCESS_MESSAGE = "Thank you. You are on the email list!";
 const EMAIL_REGEX = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;

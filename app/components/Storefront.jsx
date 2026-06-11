@@ -52,7 +52,6 @@ import {
   MARKET_PICKUP_WINDOW,
   getPickupDetails
 } from "@/lib/pickupDetails";
-import EmailSignupForm from "./EmailSignupForm";
 
 const StripePaymentPanel = dynamic(() => import("./StripePaymentPanel"), {
   loading: () => (
@@ -108,6 +107,7 @@ const INVENTORY_POLL_MS = 30000;
 const ORDER_FINALIZE_POLL_MS = 1500;
 const ORDER_FINALIZE_MAX_ATTEMPTS = 8;
 const CART_STORAGE_KEY = "vidaverde-cart-v1";
+const EMAIL_POPUP_DISMISS_KEY = "vidaverde-email-popup-dismissed-v1";
 const PICKUP_PREORDER_TIMING_NOTICE =
   `Pre-orders are estimates only. Fermentation timelines vary, and preorder items may take up to 15 days before pickup is available. The next ${MARKET_NAME} date is not guaranteed for preorder items.`;
 const SHIPPING_PREORDER_TIMING_NOTICE =
@@ -318,12 +318,12 @@ export default function Storefront({ products, inventory = null, pickupDetails =
   const [orderSuccessPopupMessage, setOrderSuccessPopupMessage] = useState(
     ORDER_SUCCESS_POPUP_MESSAGE
   );
-  const [orderSuccessEmail, setOrderSuccessEmail] = useState("");
   const [orderSuccessContext, setOrderSuccessContext] = useState(null);
   const [pickupAcknowledged, setPickupAcknowledged] = useState(false);
   const [pickupTouched, setPickupTouched] = useState(false);
   const [preorderAcknowledged, setPreorderAcknowledged] = useState(false);
   const [preorderTouched, setPreorderTouched] = useState(false);
+  const [emailOptIn, setEmailOptIn] = useState(true);
   const [cartChangeNotice, setCartChangeNotice] = useState(null);
   const [cartChangeHistory, setCartChangeHistory] = useState([]);
   const [showCartChangeModal, setShowCartChangeModal] = useState(false);
@@ -347,6 +347,7 @@ export default function Storefront({ products, inventory = null, pickupDetails =
   const cartSummarySeenRef = useRef(false);
   const cartChangeSequenceRef = useRef(0);
   const finalizingPaymentRef = useRef("");
+  const emailOptInSubmittedRef = useRef("");
   const cartChangeDialogRef = useRef(null);
   const cartChangeLastFocusedRef = useRef(null);
   const pickupPolicyDialogRef = useRef(null);
@@ -435,6 +436,8 @@ export default function Storefront({ products, inventory = null, pickupDetails =
     setPickupTouched(false);
     setPreorderAcknowledged(false);
     setPreorderTouched(false);
+    setEmailOptIn(true);
+    emailOptInSubmittedRef.current = "";
     resetCartChangeTracking();
     checkoutStepPreviousFormHeightRef.current = 0;
     setCheckoutStep("details");
@@ -461,12 +464,71 @@ export default function Storefront({ products, inventory = null, pickupDetails =
     });
   }, []);
 
-  const triggerOrderSuccessPopup = useCallback((message = ORDER_SUCCESS_POPUP_MESSAGE, email = "", context = null) => {
+  const triggerOrderSuccessPopup = useCallback((message = ORDER_SUCCESS_POPUP_MESSAGE, context = null) => {
     setOrderSuccessPopupMessage(message);
-    setOrderSuccessEmail(String(email || "").trim().toLowerCase());
     setOrderSuccessContext(context && typeof context === "object" ? context : null);
     setOrderSuccessPopupKey((prev) => prev + 1);
     setShowOrderSuccessPopup(true);
+  }, []);
+
+  const submitCheckoutEmailOptIn = useCallback(async (email) => {
+    const normalizedEmail = String(email || "").trim().toLowerCase();
+    if (!normalizedEmail || emailOptInSubmittedRef.current === normalizedEmail) return;
+
+    emailOptInSubmittedRef.current = normalizedEmail;
+    trackAnalyticsEvent({
+      name: "email_signup_submit",
+      sectionId: "shop",
+      elementId: "checkout_email_opt_in",
+      checkoutStep: "payment",
+      metadata: {
+        source: "checkout_opt_in"
+      }
+    });
+
+    try {
+      const response = await fetch("/api/email-signups", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json"
+        },
+        body: JSON.stringify({
+          email: normalizedEmail,
+          source: "checkout_opt_in"
+        })
+      });
+
+      if (!response.ok) {
+        const payload = await response.json().catch(() => ({}));
+        throw new Error(payload?.error || "Email opt-in failed.");
+      }
+
+      window.localStorage.setItem(EMAIL_POPUP_DISMISS_KEY, "1");
+      trackAnalyticsEvent({
+        name: "email_signup_result",
+        sectionId: "shop",
+        elementId: "checkout_email_opt_in",
+        checkoutStep: "payment",
+        metadata: {
+          source: "checkout_opt_in",
+          result: "success"
+        }
+      });
+    } catch (error) {
+      emailOptInSubmittedRef.current = "";
+      trackAnalyticsEvent({
+        name: "email_signup_result",
+        sectionId: "shop",
+        elementId: "checkout_email_opt_in",
+        checkoutStep: "payment",
+        metadata: {
+          source: "checkout_opt_in",
+          result: "error",
+          errorCode: "submission_failed"
+        }
+      });
+      console.error("checkout email opt-in error:", error);
+    }
   }, []);
 
   const finalizePaidOrder = useCallback(
@@ -565,9 +627,11 @@ export default function Storefront({ products, inventory = null, pickupDetails =
           setNotice(firstAutomationWarning?.customerMessage || successNotice);
           triggerOrderSuccessPopup(
             firstAutomationWarning?.popupMessage || successPopupMessage,
-            payload?.customerEmail || formValues.email,
             successContext
           );
+          if (emailOptIn) {
+            void submitCheckoutEmailOptIn(payload?.customerEmail || formValues.email);
+          }
           resetCheckoutAfterSuccess();
           return;
         }
@@ -601,7 +665,13 @@ export default function Storefront({ products, inventory = null, pickupDetails =
       setNotice(ORDER_FINALIZE_PENDING_NOTICE);
       finalizingPaymentRef.current = "";
     },
-    [formValues.email, resetCheckoutAfterSuccess, triggerOrderSuccessPopup]
+    [
+      emailOptIn,
+      formValues.email,
+      resetCheckoutAfterSuccess,
+      submitCheckoutEmailOptIn,
+      triggerOrderSuccessPopup
+    ]
   );
 
   const setFieldRef = useCallback((name) => {
@@ -2006,6 +2076,10 @@ export default function Storefront({ products, inventory = null, pickupDetails =
     setNotice("Review your details, then proceed to payment again.");
   }, [isOrderFinalizing, resetPaymentState]);
 
+  const handleEmailOptInChange = (event) => {
+    setEmailOptIn(Boolean(event.currentTarget.checked));
+  };
+
   const handlePickupAcknowledgementChange = (event) => {
     const isChecked = Boolean(event.currentTarget.checked);
     setPickupAcknowledged(isChecked);
@@ -2300,7 +2374,8 @@ export default function Storefront({ products, inventory = null, pickupDetails =
         subtotalCents: subtotal,
         shippingCents,
         totalCents: orderTotal,
-        preorderUnits: preorderUnitsInCart
+        preorderUnits: preorderUnitsInCart,
+        emailOptIn
       }
     });
     if (typeof window !== "undefined") {
@@ -2614,7 +2689,7 @@ export default function Storefront({ products, inventory = null, pickupDetails =
             <strong>{selectedExpectedDeliveryText.replace(/^Expected by\s+/i, "")}</strong>
           </div>
         ) : null}
-        <div>
+        <div className="cart__summary-total">
           <span>Total due today</span>
           <strong>{formatCurrency(orderTotal)}</strong>
         </div>
@@ -2856,20 +2931,6 @@ export default function Storefront({ products, inventory = null, pickupDetails =
               </div>
             ) : null}
             <div className="order-success-popup__aftercare">
-              <div className="order-success-popup__followup">
-                <p className="order-success-popup__email-list-label">
-                  Join the email list
-                </p>
-                <p>
-                  Get new product announcements, healthy eating notes, recipe ideas, and Vida Verde updates.
-                </p>
-                <EmailSignupForm
-                  source="order_success_popup"
-                  initialEmail={orderSuccessEmail}
-                  submitLabel="Join"
-                  className="order-success-popup__signup"
-                />
-              </div>
               <div className="order-success-popup__contact" aria-label="Order support">
                 <span className="order-success-popup__contact-title">
                   Need help with your order?
@@ -3478,6 +3539,19 @@ export default function Storefront({ products, inventory = null, pickupDetails =
                 ) : null}
 
                 {renderCheckoutAcknowledgements()}
+
+                <label className="checkout-email-opt-in">
+                  <input
+                    type="checkbox"
+                    checked={emailOptIn}
+                    onChange={handleEmailOptInChange}
+                    data-analytics-id="checkout_email_opt_in"
+                  />
+                  <span>
+                    Add me to the Vida Verde email list for exclusive offers,
+                    limited-time deals, and announcements.
+                  </span>
+                </label>
 
                 <button
                   className="button button--dark"
