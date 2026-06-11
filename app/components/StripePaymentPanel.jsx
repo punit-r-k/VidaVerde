@@ -113,6 +113,10 @@ function StripePaymentForm({
       : "Pay Now";
   const expressCheckoutOptions = useMemo(
     () => ({
+      business: {
+        name: "Vida Verde"
+      },
+      billingAddressRequired: true,
       buttonHeight: 46,
       buttonTheme: {
         applePay: "black"
@@ -125,16 +129,23 @@ function StripePaymentForm({
         maxRows: 1,
         overflow: "never"
       },
+      lineItems: [
+        {
+          name: "Vida Verde order",
+          amount: safeGrossTotalCents
+        }
+      ],
       paymentMethods: {
-        applePay: "auto",
+        applePay: "always",
         googlePay: "never",
         link: "never",
         paypal: "never",
         amazonPay: "never",
         klarna: "never"
-      }
+      },
+      paymentMethodOrder: ["applePay"]
     }),
-    []
+    [safeGrossTotalCents]
   );
 
   const handleExpressCheckoutReady = (event) => {
