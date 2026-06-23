@@ -67,7 +67,7 @@ const expectedRows = [
   [0, 5, "bundle", 1499, 1999],
   [0, 6, "bundle", 1499, 1999],
   [0, 7, "large_bundle", 1899, 2499],
-  [1, 0, "standard", 999, 1499],
+  [1, 0, "single_jar", 799, 1499],
   [1, 1, "standard", 999, 1499],
   [1, 2, "standard", 999, 1499],
   [1, 3, "bundle", 1499, 1999],
@@ -114,6 +114,15 @@ test("shipping pricing matches the master customer table", () => {
   }
 });
 
+test("one sauerkraut jar stays under twenty dollars with standard shipping", () => {
+  const shipping = getShippingOptionsForCart(
+    buildCart({ sauerkrautQty: 1, hotSauceQty: 0 })
+  );
+
+  assert.equal(shipping.standardOption.amountCents, 799);
+  assert.equal(shipping.subtotalCents + shipping.standardOption.amountCents, 1998);
+});
+
 test("cart upsell returns free standard shipping threshold messages", () => {
   assert.equal(
     getCartUpsellMessage(buildCart({ sauerkrautQty: 2, hotSauceQty: 3 }))?.message,
@@ -157,7 +166,7 @@ test("cart upsell only shows same-cost messages when the benefit is real", () =>
   const cases = [
     [0, 1, null],
     [0, 2, "You can add another hot sauce before shipping increases."],
-    [1, 0, "You can add one hot sauce without increasing shipping."],
+    [1, 0, null],
     [1, 1, "You can add another hot sauce before shipping increases."],
     [2, 0, "You can add one hot sauce without increasing shipping."],
     [2, 1, "You can add another hot sauce without increasing shipping."],
