@@ -37,6 +37,8 @@ const baseEnvironment = {
 const privilegedEndpoints = [
   { name: "admin orders", method: "GET", path: "/api/admin/orders" },
   { name: "admin shipments", method: "GET", path: "/api/admin/shipments" },
+  { name: "admin shipment rates", method: "POST", path: "/api/admin/shipments/00000000-0000-4000-8000-000000000000/rates", body: {} },
+  { name: "admin shipment labels", method: "POST", path: "/api/admin/shipments/00000000-0000-4000-8000-000000000000/labels", body: {} },
   { name: "admin prep", method: "GET", path: "/api/admin/prep" },
   { name: "admin health", method: "GET", path: "/api/admin/health" },
   { name: "admin pickup reminders", method: "POST", path: "/api/admin/pickup-reminders", body: {} },

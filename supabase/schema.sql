@@ -114,6 +114,39 @@ create table if not exists shipments (
   updated_at timestamptz not null default now()
 );
 
+create table if not exists shipment_quotes (
+  id uuid primary key default gen_random_uuid(),
+  shipment_id uuid not null references shipments(id) on delete cascade,
+  provider text not null default 'easypost',
+  plan_key text not null,
+  postage_cents integer not null check (postage_cents >= 0),
+  box_cost_cents integer not null check (box_cost_cents >= 0),
+  total_cost_cents integer not null check (total_cost_cents >= 0),
+  currency text not null default 'USD',
+  quote_json jsonb not null check (jsonb_typeof(quote_json) = 'object'),
+  expires_at timestamptz not null,
+  created_at timestamptz not null default now()
+);
+
+create table if not exists shipment_parcels (
+  id uuid primary key default gen_random_uuid(),
+  shipment_id uuid not null references shipments(id) on delete cascade,
+  quote_id uuid references shipment_quotes(id) on delete set null,
+  parcel_index integer not null check (parcel_index > 0),
+  product_family text not null check (product_family in ('sauerkraut', 'hot_sauce')),
+  package_code text not null, supplier text,
+  item_quantity integer not null check (item_quantity > 0),
+  length numeric(8,3) not null, width numeric(8,3) not null, height numeric(8,3) not null,
+  weight_oz numeric(9,3) not null, box_cost_cents integer not null default 0,
+  postage_cents integer not null default 0,
+  easypost_shipment_id text not null unique, easypost_rate_id text not null,
+  carrier text, service text, tracking_number text, label_url text, label_pdf_url text,
+  status text not null default 'label_purchased'
+    check (status in ('label_purchased', 'shipped', 'delivered', 'cancelled')),
+  purchased_at timestamptz, created_at timestamptz not null default now(), updated_at timestamptz not null default now(),
+  unique (shipment_id, parcel_index)
+);
+
 create table if not exists email_signups (
   id uuid primary key default gen_random_uuid(),
   email text not null,
@@ -168,6 +201,9 @@ create index if not exists analytics_events_product_created_at_idx on analytics_
 create index if not exists analytics_events_session_created_at_idx on analytics_events (session_id, created_at desc);
 create index if not exists shipments_status_created_at_idx on shipments (status, created_at desc);
 create index if not exists shipments_created_at_idx on shipments (created_at desc);
+create index if not exists shipment_quotes_shipment_created_idx on shipment_quotes (shipment_id, created_at desc);
+create index if not exists shipment_parcels_shipment_idx on shipment_parcels (shipment_id, parcel_index);
+create index if not exists shipment_parcels_tracking_idx on shipment_parcels (tracking_number);
 create index if not exists orders_status_created_fulfillment_idx
   on orders (status, created_at desc, fulfillment);
 create index if not exists email_jobs_status_available_idx
@@ -886,8 +922,8 @@ begin
     join orders o on o.id = pre.order_id
     left join products p on p.sku = pre.sku
     where o.status = 'paid'
-      and pre.created_at >= p_collection_start_at
-      and pre.created_at < p_collection_end_at
+      and coalesce(pre.ready_pickup_email_sent_at, pre.created_at) >= p_collection_start_at
+      and coalesce(pre.ready_pickup_email_sent_at, pre.created_at) < p_collection_end_at
   ),
   prep_rows as (
     select
@@ -946,7 +982,7 @@ begin
 
     select
       o.id as order_id,
-      pre.created_at,
+      coalesce(pre.ready_pickup_email_sent_at, pre.created_at) as created_at,
       o.customer_name,
       o.customer_email,
       o.customer_phone,
@@ -959,8 +995,8 @@ begin
     left join products p on p.sku = pre.sku
     where o.status = 'paid'
       and o.fulfillment = 'market'
-      and pre.created_at >= p_collection_start_at
-      and pre.created_at < p_collection_end_at
+      and coalesce(pre.ready_pickup_email_sent_at, pre.created_at) >= p_collection_start_at
+      and coalesce(pre.ready_pickup_email_sent_at, pre.created_at) < p_collection_end_at
   ),
   grouped_items as (
     select
@@ -1215,6 +1251,8 @@ begin
     'site_settings',
     'orders',
     'shipments',
+    'shipment_quotes',
+    'shipment_parcels',
     'email_signups',
     'analytics_events',
     'email_jobs',

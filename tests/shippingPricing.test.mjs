@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 
 import {
+  CONTINENTAL_US_SHIPPING_AREA_ERROR_MESSAGE,
   LOCAL_SHIPPING_AREA_ERROR_MESSAGE,
   OWNER_DELIVERY_OPTION,
   getCartUpsellMessage,
@@ -11,6 +12,7 @@ import {
   getNextPackingDate,
   getShippingOptionsForCart,
   inferSelectedShippingOption,
+  isContinentalUnitedStatesShippingAddressEligible,
   isGreaterHoustonShippingAddressEligible,
   SHIPPING_SCHEDULE_TIME_ZONE
 } from "../lib/shippingPricing.js";
@@ -236,7 +238,53 @@ test("shipping option transit labels include the packing schedule", () => {
   assert.match(shipping.expeditedOption.transitLabel, /1–3 business days/);
 });
 
-test("local shipping eligibility is limited to Greater Houston-area TX ZIP prefixes", () => {
+test("carrier shipping eligibility includes the continental United States", () => {
+  assert.equal(
+    isContinentalUnitedStatesShippingAddressEligible({
+      state: "CA",
+      postalCode: "90210"
+    }),
+    true
+  );
+  assert.equal(
+    isContinentalUnitedStatesShippingAddressEligible({
+      state: "tx",
+      postalCode: "78701"
+    }),
+    true
+  );
+  assert.equal(
+    isContinentalUnitedStatesShippingAddressEligible({
+      state: "DC",
+      postalCode: "20001"
+    }),
+    true
+  );
+  assert.equal(
+    isContinentalUnitedStatesShippingAddressEligible({
+      state: "AK",
+      postalCode: "99501"
+    }),
+    false
+  );
+  assert.equal(
+    isContinentalUnitedStatesShippingAddressEligible({
+      state: "HI",
+      postalCode: "96813"
+    }),
+    false
+  );
+  assert.equal(
+    isContinentalUnitedStatesShippingAddressEligible({
+      state: "ZZ",
+      postalCode: "12345"
+    }),
+    false
+  );
+  assert.match(CONTINENTAL_US_SHIPPING_AREA_ERROR_MESSAGE, /continental United States/i);
+});
+
+test("owner delivery eligibility is limited to Greater Houston-area TX ZIP prefixes", () => {
   assert.equal(
     isGreaterHoustonShippingAddressEligible({
       state: "TX",

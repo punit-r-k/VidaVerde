@@ -71,7 +71,7 @@ export async function GET(request) {
   let query = supabaseAdmin
     .from("shipments")
     .select(
-      "id, order_id, payment_session_id, payment_reference, status, label_provider, label_url, tracking_number, carrier, service, customer_name, customer_email, customer_phone, address1, address2, city, state, postal_code, country, items_summary, items_json, item_count, amount_total, currency, shipping_tier, shipping_option, shipping_option_label, shipping_estimate, sauerkraut_count, hot_sauce_count, notes, label_purchased_at, shipped_at, created_at, updated_at, orders(note)"
+      "id, order_id, payment_session_id, payment_reference, status, label_provider, label_url, tracking_number, carrier, service, customer_name, customer_email, customer_phone, address1, address2, city, state, postal_code, country, items_summary, items_json, item_count, amount_total, currency, shipping_tier, shipping_option, shipping_option_label, shipping_estimate, sauerkraut_count, hot_sauce_count, notes, label_purchased_at, shipped_at, created_at, updated_at, orders(note), shipment_parcels(parcel_index, package_code, product_family, postage_cents, box_cost_cents, carrier, service, tracking_number, label_url, label_pdf_url, status)"
     )
     .order("created_at", { ascending: false })
     .limit(limit);
@@ -127,6 +127,9 @@ export async function GET(request) {
     ),
     label_purchased_at: row.label_purchased_at || null,
     shipped_at: row.shipped_at || null,
+    parcels: Array.isArray(row.shipment_parcels)
+      ? row.shipment_parcels.sort((a, b) => a.parcel_index - b.parcel_index)
+      : [],
     created_at: row.created_at,
     updated_at: row.updated_at
   }));

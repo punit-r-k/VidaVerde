@@ -6,6 +6,14 @@ const CONFIG = {
   EMAIL_SIGNUPS_SHEET_NAME: "Email List",
   HEALTH_SHEET_NAME: "Health",
   SETTINGS_SHEET_NAME: "Settings",
+  FINANCIAL_DISTRIBUTIONS_SHEET_NAME: "Financial Distributions",
+  FINANCIAL_DISTRIBUTIONS_START_DATE: "2026-07-01",
+  PUNIT_PAYOUT_EMAIL_RECIPIENTS: [
+    "vidaverdemicrogreens@gmail.com",
+    "punit@peridotkonda.com"
+  ],
+  PUNIT_PAYOUT_TIMEZONE: "America/Chicago",
+  PUNIT_PAYOUT_LAST_SENT_PROPERTY: "PUNIT_PAYOUT_LAST_SENT_MONTH",
   HEADER_ROW: 1,
   START_ROW: 2,
   COLS: {
@@ -57,8 +65,14 @@ function onOpen() {
   SpreadsheetApp.getUi()
     .createMenu("Vida Verde")
     .addItem("Sync All", "masterSync")
+    .addSeparator()
+    .addItem("Get EasyPost Rates for Selected Shipment", "getEasyPostRatesForSelectedShipment")
+    .addItem("Buy Selected EasyPost Quote", "buySelectedEasyPostQuote")
+    .addSeparator()
     .addItem("Pickup Reminders", "sendPickupReminders")
     .addItem("Email Queue", "processEmailQueue")
+    .addItem("Send Previous Month Punit Payout", "sendMonthlyPunitPayoutReport")
+    .addItem("Setup Punit Payout Automation", "setupMonthlyPunitPayoutTrigger")
     .addItem("Setup Triggers", "setupTriggers")
     .addToUi();
 }
@@ -157,11 +171,39 @@ function resetFridayReminderTrigger_() {
     .create();
 }
 
+function setupMonthlyPunitPayoutTrigger() {
+  resetMonthlyPunitPayoutTrigger_();
+  SpreadsheetApp.getUi().alert(
+    "Punit payout email automation reset for 8am America/Chicago on the first day of each month."
+  );
+}
+
+function resetMonthlyPunitPayoutTrigger_() {
+  const triggers = ScriptApp.getProjectTriggers().filter((trigger) => {
+    return (
+      trigger.getHandlerFunction() === "sendMonthlyPunitPayoutReport" &&
+      trigger.getEventType() === ScriptApp.EventType.CLOCK
+    );
+  });
+
+  for (const trigger of triggers) {
+    ScriptApp.deleteTrigger(trigger);
+  }
+
+  ScriptApp.newTrigger("sendMonthlyPunitPayoutReport")
+    .timeBased()
+    .onMonthDay(1)
+    .atHour(8)
+    .inTimezone(CONFIG.PUNIT_PAYOUT_TIMEZONE)
+    .create();
+}
+
 function setupTriggers() {
   resetEditTrigger_();
   resetFridayReminderTrigger_();
+  resetMonthlyPunitPayoutTrigger_();
   SpreadsheetApp.getUi().alert(
-    "Triggers reset: inventory edits and Friday pickup reminders."
+    "Triggers reset: inventory edits, Friday pickup reminders, and monthly Punit payout emails."
   );
 }
 
@@ -291,6 +333,183 @@ function processEmailQueue() {
     5
   );
   syncHealthCheck();
+}
+
+function sendMonthlyPunitPayoutReport() {
+  syncOrders();
+
+  const period = getPreviousPunitPayoutPeriod_();
+  const scriptProperties = PropertiesService.getScriptProperties();
+  const lastSentMonth = scriptProperties.getProperty(
+    CONFIG.PUNIT_PAYOUT_LAST_SENT_PROPERTY
+  );
+
+  if (lastSentMonth === period.monthKey) {
+    Logger.log("Punit payout email already sent for %s.", period.monthKey);
+    toastIfAvailable_(
+      `Punit payout email already sent for ${period.monthLabel}.`,
+      "Vida Verde",
+      5
+    );
+    return;
+  }
+
+  const payout = getPunitPayoutForMonth_(period.monthKey);
+  const formattedPayout = `$${payout.toFixed(2)}`;
+  const distributionsSheet = ensureFinancialDistributionsSheet_();
+  const spreadsheetUrl = SpreadsheetApp.getActive().getUrl();
+  const reportUrl = `${spreadsheetUrl}#gid=${distributionsSheet.getSheetId()}`;
+  const subject = `Vida Verde - Punit payout for ${period.monthLabel}: ${formattedPayout}`;
+  const body = [
+    `Punit's 15% commission for ${period.monthLabel} is ${formattedPayout}.`,
+    "",
+    "Calculation: 15% of paid order totals after subtracting shipping.",
+    `Financial distributions report: ${reportUrl}`
+  ].join("\n");
+  const htmlBody = [
+    `<p>Punit's 15% commission for <strong>${period.monthLabel}</strong> is ` +
+      `<strong>${formattedPayout}</strong>.</p>`,
+    "<p>Calculation: 15% of paid order totals after subtracting shipping.</p>",
+    `<p><a href="${reportUrl}">Open the financial distributions report</a></p>`
+  ].join("");
+
+  MailApp.sendEmail({
+    to: CONFIG.PUNIT_PAYOUT_EMAIL_RECIPIENTS.join(","),
+    subject,
+    body,
+    htmlBody,
+    name: "Vida Verde"
+  });
+
+  scriptProperties.setProperty(
+    CONFIG.PUNIT_PAYOUT_LAST_SENT_PROPERTY,
+    period.monthKey
+  );
+  toastIfAvailable_(
+    `Punit payout email sent for ${period.monthLabel}: ${formattedPayout}.`,
+    "Vida Verde",
+    5
+  );
+}
+
+function getPreviousPunitPayoutPeriod_() {
+  const currentMonthKey = Utilities.formatDate(
+    new Date(),
+    CONFIG.PUNIT_PAYOUT_TIMEZONE,
+    "yyyy-MM"
+  );
+  const parts = currentMonthKey.split("-");
+  let year = Number(parts[0]);
+  let month = Number(parts[1]) - 1;
+
+  if (month === 0) {
+    year -= 1;
+    month = 12;
+  }
+
+  const monthNames = [
+    "January",
+    "February",
+    "March",
+    "April",
+    "May",
+    "June",
+    "July",
+    "August",
+    "September",
+    "October",
+    "November",
+    "December"
+  ];
+  const paddedMonth = String(month).padStart(2, "0");
+
+  return {
+    monthKey: `${year}-${paddedMonth}`,
+    monthLabel: `${monthNames[month - 1]} ${year}`
+  };
+}
+
+function getPunitPayoutForMonth_(monthKey) {
+  const firstDistributionMonth = CONFIG.FINANCIAL_DISTRIBUTIONS_START_DATE.slice(
+    0,
+    7
+  );
+  if (monthKey < firstDistributionMonth) return 0;
+
+  const sheet = SpreadsheetApp.getActive().getSheetByName(
+    CONFIG.ORDERS_SHEET_NAME
+  );
+  if (!sheet) {
+    throw new Error(`Sheet '${CONFIG.ORDERS_SHEET_NAME}' not found.`);
+  }
+
+  const lastRow = sheet.getLastRow();
+  if (lastRow < CONFIG.ORDERS.START_ROW) return 0;
+
+  const rows = sheet
+    .getRange(
+      CONFIG.ORDERS.START_ROW,
+      1,
+      lastRow - CONFIG.ORDERS.START_ROW + 1,
+      18
+    )
+    .getValues();
+  let payout = 0;
+
+  for (const row of rows) {
+    const createdAt = row[0];
+    if (!(createdAt instanceof Date) || Number.isNaN(createdAt.getTime())) {
+      continue;
+    }
+
+    const orderMonthKey = Utilities.formatDate(
+      createdAt,
+      CONFIG.PUNIT_PAYOUT_TIMEZONE,
+      "yyyy-MM"
+    );
+    if (orderMonthKey !== monthKey) continue;
+
+    const shipping = Number(row[12] || 0);
+    const total = Number(row[17] || 0);
+    payout += (total - shipping) * 0.15;
+  }
+
+  return Math.round((payout + Number.EPSILON) * 100) / 100;
+}
+
+function refreshFinancialDistributionsSummary_() {
+  const sheet = ensureFinancialDistributionsSheet_();
+  const distributionStart = CONFIG.FINANCIAL_DISTRIBUTIONS_START_DATE;
+  const distributionStartParts = distributionStart.split("-").map(Number);
+  const formula = `=LET(distributionStart,DATE(${distributionStartParts[0]},${distributionStartParts[1]},${distributionStartParts[2]}),firstMonth,EOMONTH(MIN(FILTER(Orders!A2:A,Orders!A2:A<>"")),0),monthCount,DATEDIF(firstMonth,EOMONTH(TODAY(),0),"M")+1,months,ARRAYFORMULA(EOMONTH(EOMONTH(TODAY(),0),-SEQUENCE(monthCount,1,0,1))),totals,MAP(months,LAMBDA(monthEnd,SUMIFS(Orders!R2:R,Orders!A2:A,">="&(EOMONTH(monthEnd,-1)+1),Orders!A2:A,"<"&(monthEnd+1),Orders!A2:A,">="&distributionStart))),shipping,MAP(months,LAMBDA(monthEnd,SUMIFS(Orders!M2:M,Orders!A2:A,">="&(EOMONTH(monthEnd,-1)+1),Orders!A2:A,"<"&(monthEnd+1),Orders!A2:A,">="&distributionStart))),net,ARRAYFORMULA(totals-shipping),{"Month End","Total Collected","Shipping","Net After Shipping","Punit (15%)","Edison (85% + Shipping)";months,totals,shipping,net,ARRAYFORMULA(net*15%),ARRAYFORMULA(net*85%+shipping)})`;
+  const rowCount = Math.max(sheet.getMaxRows(), 2);
+
+  if (sheet.getMaxColumns() < 6) {
+    sheet.insertColumnsAfter(sheet.getMaxColumns(), 6 - sheet.getMaxColumns());
+  }
+
+  sheet.getRange(1, 1, rowCount, 6).clearContent();
+  sheet.getRange(1, 1).setFormula(formula);
+  sheet
+    .getRange(1, 1, 1, 6)
+    .setFontWeight("bold")
+    .setBackground("#e6e6e6");
+  sheet
+    .getRange(2, 1, rowCount - 1, 1)
+    .setNumberFormat("mmm d, yyyy");
+  sheet
+    .getRange(2, 2, rowCount - 1, 5)
+    .setNumberFormat("$#,##0.00");
+  sheet.setFrozenRows(1);
+  sheet.setColumnWidth(1, 110);
+  sheet.setColumnWidth(2, 120);
+  sheet.setColumnWidth(3, 100);
+  sheet.setColumnWidth(4, 135);
+  sheet.setColumnWidth(5, 110);
+  sheet.setColumnWidth(6, 190);
+  SpreadsheetApp.flush();
+
+  return sheet;
 }
 
 function syncHealthCheck() {
@@ -658,6 +877,7 @@ function syncOrders() {
 
   const headerValues = [[
     "Created At",
+    "Shipment ID",
     "Order ID",
     "Fulfillment",
     "Pickup Date",
@@ -677,7 +897,10 @@ function syncOrders() {
     "Total",
     "Order Note",
     "Status",
-    "Payment Session"
+    "Payment Session",
+    "Net (Total - Shipping)",
+    "Punit Commission (15%)",
+    "Edison Payout (85% + Shipping)"
   ]];
   sheet
     .getRange(CONFIG.ORDERS.HEADER_ROW, 1, 1, headerValues[0].length)
@@ -695,6 +918,20 @@ function syncOrders() {
       const pickupDate = order?.pickup_date
         ? new Date(`${order.pickup_date}T00:00:00`)
         : "";
+      const shipping = Number(order?.amount_shipping || 0) / 100;
+      const total = Number(order?.amount_total || 0) / 100;
+      const netAfterShipping = total - shipping;
+      const orderDate = createdAt instanceof Date && !Number.isNaN(createdAt.getTime())
+        ? Utilities.formatDate(
+            createdAt,
+            CONFIG.PUNIT_PAYOUT_TIMEZONE,
+            "yyyy-MM-dd"
+          )
+        : "";
+      const isDistributable =
+        orderDate >= CONFIG.FINANCIAL_DISTRIBUTIONS_START_DATE;
+      const distributableNet = isDistributable ? netAfterShipping : 0;
+      const distributableShipping = isDistributable ? shipping : 0;
 
       return [
         createdAt,
@@ -709,15 +946,18 @@ function syncOrders() {
         Number(order?.item_count || 0),
         Number(order?.amount_subtotal || 0) / 100,
         Number(order?.amount_tax || 0) / 100,
-        Number(order?.amount_shipping || 0) / 100,
+        shipping,
         String(order?.shipping_option_label || ""),
         String(order?.shipping_tier || ""),
         Number(order?.sauerkraut_count || 0),
         Number(order?.hot_sauce_count || 0),
-        Number(order?.amount_total || 0) / 100,
+        total,
         String(order?.note || ""),
         String(order?.status || ""),
-        String(order?.payment_session_id || "")
+        String(order?.payment_session_id || ""),
+        distributableNet,
+        distributableNet * 0.15,
+        distributableNet * 0.85 + distributableShipping
       ];
     });
 
@@ -743,6 +983,9 @@ function syncOrders() {
     sheet
       .getRange(CONFIG.ORDERS.START_ROW, 18, rows.length, 1)
       .setNumberFormat("$#,##0.00");
+    sheet
+      .getRange(CONFIG.ORDERS.START_ROW, 22, rows.length, 3)
+      .setNumberFormat("$#,##0.00");
   }
 
   sheet
@@ -750,6 +993,7 @@ function syncOrders() {
     .setFontWeight("bold");
   sheet.setFrozenRows(1);
   sheet.autoResizeColumns(1, headerValues[0].length);
+  refreshFinancialDistributionsSummary_();
 }
 
 function syncShipments() {
@@ -785,7 +1029,13 @@ function syncShipments() {
     "Carrier",
     "Service",
     "Tracking",
-    "Label URL"
+    "Label URL",
+    "Parcel Summary",
+    "Total Postage",
+    "Quote 1",
+    "Quote 2",
+    "Quote 3",
+    "Selected Quote"
   ]];
   sheet
     .getRange(CONFIG.SHIPMENTS.HEADER_ROW, 1, 1, headerValues[0].length)
@@ -805,6 +1055,7 @@ function syncShipments() {
 
       return [
         createdAt,
+        String(shipment?.id || ""),
         String(shipment?.order_id || ""),
         String(shipment?.payment_session_id || ""),
         String(shipment?.customer_name || ""),
@@ -823,7 +1074,16 @@ function syncShipments() {
         String(shipment?.carrier || ""),
         String(shipment?.service || ""),
         String(shipment?.tracking_number || ""),
-        String(shipment?.label_url || "")
+        String(shipment?.label_url || ""),
+        formatShipmentParcels_(shipment?.parcels),
+        (Array.isArray(shipment?.parcels) ? shipment.parcels : []).reduce(
+          (sum, parcel) => sum + Number(parcel?.postage_cents || 0),
+          0
+        ) / 100,
+        "",
+        "",
+        "",
+        1
       ];
     });
 
@@ -835,14 +1095,20 @@ function syncShipments() {
       .getRange(CONFIG.SHIPMENTS.START_ROW, 1, rows.length, 1)
       .setNumberFormat("yyyy-mm-dd hh:mm");
     sheet
-      .getRange(CONFIG.SHIPMENTS.START_ROW, 9, rows.length, 1)
+      .getRange(CONFIG.SHIPMENTS.START_ROW, 10, rows.length, 1)
       .setNumberFormat("0");
     sheet
-      .getRange(CONFIG.SHIPMENTS.START_ROW, 10, rows.length, 1)
+      .getRange(CONFIG.SHIPMENTS.START_ROW, 11, rows.length, 1)
       .setNumberFormat("$#,##0.00");
     sheet
-      .getRange(CONFIG.SHIPMENTS.START_ROW, 13, rows.length, 2)
+      .getRange(CONFIG.SHIPMENTS.START_ROW, 14, rows.length, 2)
       .setNumberFormat("0");
+    sheet
+      .getRange(CONFIG.SHIPMENTS.START_ROW, 23, rows.length, 1)
+      .setNumberFormat("$#,##0.00");
+    sheet
+      .getRange(CONFIG.SHIPMENTS.START_ROW, 27, rows.length, 1)
+      .setDataValidation(SpreadsheetApp.newDataValidation().requireNumberBetween(1, 3).setAllowInvalid(false).build());
   }
 
   sheet
@@ -963,6 +1229,9 @@ function handleRestockEdit_(sheet, row) {
         response?.preorder_ready_pickup_emails_sent ??
         0
     );
+    const preorderReadyShippingEmailCount = Number(
+      response?.preorder_ready_shipping_emails_sent || 0
+    );
     if (Number.isFinite(preorderReadyEmailCount) && preorderReadyEmailCount > 0) {
       toastIfAvailable_(
         `${preorderReadyEmailCount} preorder ready email(s) sent for ${sku}.`,
@@ -980,8 +1249,99 @@ function handleRestockEdit_(sheet, row) {
         error && error.message ? error.message : String(error)
       );
     }
+
+    if (
+      Number.isFinite(preorderReadyShippingEmailCount) &&
+      preorderReadyShippingEmailCount > 0
+    ) {
+      try {
+        syncShipments();
+      } catch (error) {
+        Logger.log(
+          "Shipment sync after shipped preorder restock failed for %s: %s",
+          sku,
+          error && error.message ? error.message : String(error)
+        );
+      }
+    }
   } finally {
     lock.releaseLock();
+  }
+}
+
+function formatShipmentParcels_(parcels) {
+  if (!Array.isArray(parcels) || parcels.length === 0) return "";
+  return parcels.map((parcel) => {
+    const tracking = String(parcel?.tracking_number || "");
+    return `${parcel?.package_code || "Parcel"}: ${parcel?.carrier || ""} ${parcel?.service || ""}${tracking ? ` (${tracking})` : ""}`.trim();
+  }).join(" | ");
+}
+
+function getSelectedShipmentContext_() {
+  const sheet = SpreadsheetApp.getActiveSheet();
+  if (sheet.getName() !== CONFIG.SHIPMENTS_SHEET_NAME) {
+    throw new Error("Select an order row on the Shipments sheet first.");
+  }
+  const row = sheet.getActiveCell().getRow();
+  if (row < CONFIG.SHIPMENTS.START_ROW) throw new Error("Select a shipment row first.");
+  const headers = sheet.getRange(CONFIG.SHIPMENTS.HEADER_ROW, 1, 1, sheet.getLastColumn()).getValues()[0];
+  const column = (name) => headers.indexOf(name) + 1;
+  const shipmentId = String(sheet.getRange(row, column("Shipment ID")).getValue() || "").trim();
+  if (!shipmentId) throw new Error("The selected row does not have a shipment ID.");
+  return { sheet, row, column, shipmentId };
+}
+
+function formatEasyPostQuote_(quote) {
+  const total = Number(quote?.total_cost_cents || 0) / 100;
+  const postage = Number(quote?.postage_cents || 0) / 100;
+  const boxes = Number(quote?.box_cost_cents || 0) / 100;
+  const parcels = Array.isArray(quote?.quote_json?.parcels) ? quote.quote_json.parcels : [];
+  const services = parcels.map((parcel) => `${parcel?.packageCode}: ${parcel?.selectedRate?.carrier} ${parcel?.selectedRate?.service}`).join(" + ");
+  return `$${total.toFixed(2)} total ($${postage.toFixed(2)} postage + $${boxes.toFixed(2)} boxes) — ${services}`;
+}
+
+function getEasyPostRatesForSelectedShipment() {
+  try {
+    const selected = getSelectedShipmentContext_();
+    const settings = getSettings_();
+    const response = postJson_(`${settings.apiBaseUrl}/api/admin/shipments/${selected.shipmentId}/rates`, settings, {});
+    if (response.status < 200 || response.status >= 300 || response.error) throw new Error(response.error || "Rates could not be retrieved.");
+    const quotes = Array.isArray(response.quotes) ? response.quotes.slice(0, 3) : [];
+    if (!quotes.length) throw new Error("EasyPost returned no eligible rates.");
+    ["Quote 1", "Quote 2", "Quote 3"].forEach((header, index) => {
+      const cell = selected.sheet.getRange(selected.row, selected.column(header));
+      const quote = quotes[index];
+      cell.setValue(quote ? formatEasyPostQuote_(quote) : "");
+      cell.setNote(quote ? String(quote.id) : "");
+    });
+    selected.sheet.getRange(selected.row, selected.column("Selected Quote")).setValue(1);
+    SpreadsheetApp.getUi().alert("EasyPost rates added to the selected row. Review Quotes 1–3, enter the quote number in Selected Quote, then use Buy Selected EasyPost Quote.");
+  } catch (error) {
+    SpreadsheetApp.getUi().alert(`EasyPost rates failed: ${error.message || error}`);
+  }
+}
+
+function buySelectedEasyPostQuote() {
+  try {
+    const selected = getSelectedShipmentContext_();
+    const quoteNumber = Number(selected.sheet.getRange(selected.row, selected.column("Selected Quote")).getValue());
+    if (![1, 2, 3].includes(quoteNumber)) throw new Error("Selected Quote must be 1, 2, or 3.");
+    const quoteCell = selected.sheet.getRange(selected.row, selected.column(`Quote ${quoteNumber}`));
+    const quoteId = String(quoteCell.getNote() || "").trim();
+    if (!quoteId) throw new Error("Get fresh rates before buying this quote.");
+    const confirmation = SpreadsheetApp.getUi().alert(
+      "Purchase shipping labels?",
+      `${quoteCell.getValue()}\n\nEasyPost will charge the carrier postage when you continue.`,
+      SpreadsheetApp.getUi().ButtonSet.YES_NO
+    );
+    if (confirmation !== SpreadsheetApp.getUi().Button.YES) return;
+    const settings = getSettings_();
+    const response = postJson_(`${settings.apiBaseUrl}/api/admin/shipments/${selected.shipmentId}/labels`, settings, { quote_id: quoteId });
+    if (response.status < 200 || response.status >= 300 || response.error) throw new Error(response.error || "Labels could not be purchased.");
+    syncShipments();
+    SpreadsheetApp.getUi().alert(`Purchased ${Array.isArray(response.parcels) ? response.parcels.length : 0} EasyPost label(s).`);
+  } catch (error) {
+    SpreadsheetApp.getUi().alert(`EasyPost purchase failed: ${error.message || error}`);
   }
 }
 
@@ -1159,6 +1519,17 @@ function ensureOrdersSheet_() {
 
   if (!sheet) {
     sheet = book.insertSheet(CONFIG.ORDERS_SHEET_NAME);
+  }
+
+  return sheet;
+}
+
+function ensureFinancialDistributionsSheet_() {
+  const book = SpreadsheetApp.getActive();
+  let sheet = book.getSheetByName(CONFIG.FINANCIAL_DISTRIBUTIONS_SHEET_NAME);
+
+  if (!sheet) {
+    sheet = book.insertSheet(CONFIG.FINANCIAL_DISTRIBUTIONS_SHEET_NAME);
   }
 
   return sheet;

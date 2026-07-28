@@ -13,6 +13,7 @@ import {
   SUPPORT_PHONE_E164
 } from "@/lib/siteMetadata";
 import {
+  CONTINENTAL_US_SHIPPING_AREA_LABEL,
   DEFAULT_SHIPPING_OPTION_ID,
   FORM_FIELD_ORDER,
   INITIAL_FORM_VALUES,
@@ -2717,9 +2718,10 @@ export default function Storefront({ products, inventory = null, pickupDetails =
       >
         <legend>Shipping</legend>
         <p id="shipping-option-hint" className="shipping-options__hint">
-          Shipping is currently limited to the {LOCAL_SHIPPING_AREA_LABEL} in Texas.
-          We carefully pack all glass jars and bottles with protective materials so they
-          arrive safely. Choose a shipping method before payment.
+          Shipping is available across the {CONTINENTAL_US_SHIPPING_AREA_LABEL}.
+          Owner delivery is limited to {LOCAL_SHIPPING_AREA_LABEL} TX ZIP codes. We
+          carefully pack all glass jars and bottles with protective materials so they arrive
+          safely. Choose a shipping method before payment.
         </p>
         {renderShippingScheduleNotice({ id: "checkout", showShipDate: true })}
         <div className="shipping-options__list">
