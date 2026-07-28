@@ -877,7 +877,6 @@ function syncOrders() {
 
   const headerValues = [[
     "Created At",
-    "Shipment ID",
     "Order ID",
     "Fulfillment",
     "Pickup Date",
@@ -1011,6 +1010,7 @@ function syncShipments() {
 
   const headerValues = [[
     "Created At",
+    "Shipment ID",
     "Order ID",
     "Payment Session",
     "Customer",
