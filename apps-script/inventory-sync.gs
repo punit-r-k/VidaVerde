@@ -1032,6 +1032,7 @@ function syncShipments() {
     "Label URL",
     "Parcel Summary",
     "Total Postage",
+    "Total Shipping Cost (Postage + Boxes)",
     "Quote 1",
     "Quote 2",
     "Quote 3",
@@ -1080,6 +1081,10 @@ function syncShipments() {
           (sum, parcel) => sum + Number(parcel?.postage_cents || 0),
           0
         ) / 100,
+        (Array.isArray(shipment?.parcels) ? shipment.parcels : []).reduce(
+          (sum, parcel) => sum + Number(parcel?.postage_cents || 0) + Number(parcel?.box_cost_cents || 0),
+          0
+        ) / 100,
         "",
         "",
         "",
@@ -1104,10 +1109,10 @@ function syncShipments() {
       .getRange(CONFIG.SHIPMENTS.START_ROW, 14, rows.length, 2)
       .setNumberFormat("0");
     sheet
-      .getRange(CONFIG.SHIPMENTS.START_ROW, 23, rows.length, 1)
+      .getRange(CONFIG.SHIPMENTS.START_ROW, 23, rows.length, 2)
       .setNumberFormat("$#,##0.00");
     sheet
-      .getRange(CONFIG.SHIPMENTS.START_ROW, 27, rows.length, 1)
+      .getRange(CONFIG.SHIPMENTS.START_ROW, 28, rows.length, 1)
       .setDataValidation(SpreadsheetApp.newDataValidation().requireNumberBetween(1, 3).setAllowInvalid(false).build());
   }
 
@@ -1116,6 +1121,8 @@ function syncShipments() {
     .setFontWeight("bold");
   sheet.setFrozenRows(1);
   sheet.autoResizeColumns(1, headerValues[0].length);
+  sheet.getRange(CONFIG.SHIPMENTS.HEADER_ROW, 25, Math.max(sheet.getLastRow(), 1), 3).setWrap(true);
+  sheet.setColumnWidths(25, 3, 420);
 }
 
 function syncEmailSignups() {
@@ -1292,12 +1299,31 @@ function getSelectedShipmentContext_() {
 }
 
 function formatEasyPostQuote_(quote) {
-  const total = Number(quote?.total_cost_cents || 0) / 100;
   const postage = Number(quote?.postage_cents || 0) / 100;
-  const boxes = Number(quote?.box_cost_cents || 0) / 100;
   const parcels = Array.isArray(quote?.quote_json?.parcels) ? quote.quote_json.parcels : [];
-  const services = parcels.map((parcel) => `${parcel?.packageCode}: ${parcel?.selectedRate?.carrier} ${parcel?.selectedRate?.service}`).join(" + ");
-  return `$${total.toFixed(2)} total ($${postage.toFixed(2)} postage + $${boxes.toFixed(2)} boxes) — ${services}`;
+  const boxCounts = parcels.reduce((counts, parcel) => {
+    const code = String(parcel?.packageCode || "Box");
+    counts[code] = (counts[code] || 0) + 1;
+    return counts;
+  }, {});
+  const boxes = Object.keys(boxCounts).map((code) => `${boxCounts[code]} × ${code}`).join(" + ");
+  const services = [...new Set(parcels.map((parcel) => {
+    const rate = parcel?.selectedRate || {};
+    return `${rate?.carrier || "Carrier"} ${rate?.service || ""}`.trim();
+  }))].join(" + ");
+  const deliveryDays = parcels.map((parcel) => {
+    const value = parcel?.selectedRate?.deliveryDays;
+    return value === null || value === undefined || value === "" ? Number.NaN : Number(value);
+  }).filter((days) => Number.isFinite(days) && days >= 0);
+  const estimate = deliveryDays.length
+    ? `${Math.max(...deliveryDays)} day${Math.max(...deliveryDays) === 1 ? "" : "s"}`
+    : "Unavailable";
+  return `BOXES: ${boxes}\nCARRIER: ${services} — $${postage.toFixed(2)} total\nESTIMATED TIME: ${estimate}`;
+}
+
+function easyPostQuoteMeetsDeliveryTarget_(quote) {
+  const parcels = Array.isArray(quote?.quote_json?.parcels) ? quote.quote_json.parcels : [];
+  return parcels.length > 0 && parcels.every((parcel) => parcel?.selectedRate?.meetsDeliveryTarget !== false);
 }
 
 function getEasyPostRatesForSelectedShipment() {
@@ -1308,12 +1334,14 @@ function getEasyPostRatesForSelectedShipment() {
     if (response.status < 200 || response.status >= 300 || response.error) throw new Error(response.error || "Rates could not be retrieved.");
     const quotes = Array.isArray(response.quotes) ? response.quotes.slice(0, 3) : [];
     if (!quotes.length) throw new Error("EasyPost returned no eligible rates.");
-    ["Quote 1", "Quote 2", "Quote 3"].forEach((header, index) => {
-      const cell = selected.sheet.getRange(selected.row, selected.column(header));
+    const quoteRange = selected.sheet.getRange(selected.row, selected.column("Quote 1"), 1, 3);
+    quoteRange.setValues([Array.from({ length: 3 }, (_, index) => quotes[index] ? formatEasyPostQuote_(quotes[index]) : "")]);
+    quoteRange.setNotes([Array.from({ length: 3 }, (_, index) => quotes[index] ? String(quotes[index].id) : "")]);
+    quoteRange.setBackgrounds([Array.from({ length: 3 }, (_, index) => {
       const quote = quotes[index];
-      cell.setValue(quote ? formatEasyPostQuote_(quote) : "");
-      cell.setNote(quote ? String(quote.id) : "");
-    });
+      if (!quote) return null;
+      return easyPostQuoteMeetsDeliveryTarget_(quote) ? "#ffffff" : "#fce5cd";
+    })]);
     selected.sheet.getRange(selected.row, selected.column("Selected Quote")).setValue(1);
     SpreadsheetApp.getUi().alert("EasyPost rates added to the selected row. Review Quotes 1–3, enter the quote number in Selected Quote, then use Buy Selected EasyPost Quote.");
   } catch (error) {
