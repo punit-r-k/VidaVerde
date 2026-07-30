@@ -451,7 +451,7 @@ function getPunitPayoutForMonth_(monthKey) {
       CONFIG.ORDERS.START_ROW,
       1,
       lastRow - CONFIG.ORDERS.START_ROW + 1,
-      18
+      25
     )
     .getValues();
   let payout = 0;
@@ -469,6 +469,10 @@ function getPunitPayoutForMonth_(monthKey) {
     );
     if (orderMonthKey !== monthKey) continue;
 
+    const isTestOrder =
+      row[24] === true || String(row[24]).toLowerCase() === "true";
+    if (isTestOrder) continue;
+
     const shipping = Number(row[12] || 0);
     const total = Number(row[17] || 0);
     payout += (total - shipping) * 0.15;
@@ -481,7 +485,7 @@ function refreshFinancialDistributionsSummary_() {
   const sheet = ensureFinancialDistributionsSheet_();
   const distributionStart = CONFIG.FINANCIAL_DISTRIBUTIONS_START_DATE;
   const distributionStartParts = distributionStart.split("-").map(Number);
-  const formula = `=LET(distributionStart,DATE(${distributionStartParts[0]},${distributionStartParts[1]},${distributionStartParts[2]}),firstMonth,EOMONTH(MIN(FILTER(Orders!A2:A,Orders!A2:A<>"")),0),monthCount,DATEDIF(firstMonth,EOMONTH(TODAY(),0),"M")+1,months,ARRAYFORMULA(EOMONTH(EOMONTH(TODAY(),0),-SEQUENCE(monthCount,1,0,1))),totals,MAP(months,LAMBDA(monthEnd,SUMIFS(Orders!R2:R,Orders!A2:A,">="&(EOMONTH(monthEnd,-1)+1),Orders!A2:A,"<"&(monthEnd+1),Orders!A2:A,">="&distributionStart))),shipping,MAP(months,LAMBDA(monthEnd,SUMIFS(Orders!M2:M,Orders!A2:A,">="&(EOMONTH(monthEnd,-1)+1),Orders!A2:A,"<"&(monthEnd+1),Orders!A2:A,">="&distributionStart))),net,ARRAYFORMULA(totals-shipping),{"Month End","Total Collected","Shipping","Net After Shipping","Punit (15%)","Edison (85% + Shipping)";months,totals,shipping,net,ARRAYFORMULA(net*15%),ARRAYFORMULA(net*85%+shipping)})`;
+  const formula = `=LET(distributionStart,DATE(${distributionStartParts[0]},${distributionStartParts[1]},${distributionStartParts[2]}),firstMonth,EOMONTH(MIN(FILTER(Orders!A2:A,Orders!A2:A<>"")),0),monthCount,DATEDIF(firstMonth,EOMONTH(TODAY(),0),"M")+1,months,ARRAYFORMULA(EOMONTH(EOMONTH(TODAY(),0),-SEQUENCE(monthCount,1,0,1))),totals,MAP(months,LAMBDA(monthEnd,SUMIFS(Orders!R2:R,Orders!A2:A,">="&(EOMONTH(monthEnd,-1)+1),Orders!A2:A,"<"&(monthEnd+1),Orders!A2:A,">="&distributionStart,Orders!Y2:Y,FALSE))),shipping,MAP(months,LAMBDA(monthEnd,SUMIFS(Orders!M2:M,Orders!A2:A,">="&(EOMONTH(monthEnd,-1)+1),Orders!A2:A,"<"&(monthEnd+1),Orders!A2:A,">="&distributionStart,Orders!Y2:Y,FALSE))),net,ARRAYFORMULA(totals-shipping),{"Month End","Total Collected","Shipping","Net After Shipping","Punit (15%)","Edison (85% + Shipping)";months,totals,shipping,net,ARRAYFORMULA(net*15%),ARRAYFORMULA(net*85%+shipping)})`;
   const rowCount = Math.max(sheet.getMaxRows(), 2);
 
   if (sheet.getMaxColumns() < 6) {
@@ -899,7 +903,8 @@ function syncOrders() {
     "Payment Session",
     "Net (Total - Shipping)",
     "Punit Commission (15%)",
-    "Edison Payout (85% + Shipping)"
+    "Edison Payout (85% + Shipping)",
+    "Test Order"
   ]];
   sheet
     .getRange(CONFIG.ORDERS.HEADER_ROW, 1, 1, headerValues[0].length)
@@ -927,8 +932,10 @@ function syncOrders() {
             "yyyy-MM-dd"
           )
         : "";
+      const isTestOrder = order?.is_test_order === true;
       const isDistributable =
-        orderDate >= CONFIG.FINANCIAL_DISTRIBUTIONS_START_DATE;
+        orderDate >= CONFIG.FINANCIAL_DISTRIBUTIONS_START_DATE &&
+        !isTestOrder;
       const distributableNet = isDistributable ? netAfterShipping : 0;
       const distributableShipping = isDistributable ? shipping : 0;
 
@@ -956,7 +963,8 @@ function syncOrders() {
         String(order?.payment_session_id || ""),
         distributableNet,
         distributableNet * 0.15,
-        distributableNet * 0.85 + distributableShipping
+        distributableNet * 0.85 + distributableShipping,
+        isTestOrder
       ];
     });
 
@@ -1007,37 +1015,46 @@ function syncShipments() {
   const shipments = Array.isArray(response?.shipments) ? response.shipments : [];
   const sheet = ensureShipmentsSheet_();
   sheet.clearContents();
+  sheet
+    .getRange(1, 1, sheet.getMaxRows(), sheet.getMaxColumns())
+    .clearDataValidations();
 
   const headerValues = [[
     "Created At",
-    "Shipment ID",
-    "Order ID",
-    "Payment Session",
     "Customer",
-    "Email",
-    "Phone",
     "Ship To",
     "Items",
-    "Units",
-    "Order Total",
     "Shipping Method",
     "Shipping Tier",
-    "Sauerkraut Units",
-    "Hot Sauce Units",
     "Order Note",
     "Status",
-    "Carrier",
-    "Service",
-    "Tracking",
-    "Label URL",
     "Parcel Summary",
     "Total Postage",
     "Total Shipping Cost (Postage + Boxes)",
     "Quote 1",
     "Quote 2",
     "Quote 3",
-    "Selected Quote"
+    "Selected Quote",
+    "Carrier",
+    "Service",
+    "Tracking",
+    "Label URL",
+    "Shipment ID",
+    "Order ID",
+    "Payment Session",
+    "Email",
+    "Phone",
+    "Units",
+    "Order Total",
+    "Sauerkraut Units",
+    "Hot Sauce Units"
   ]];
+  if (sheet.getMaxColumns() < headerValues[0].length) {
+    sheet.insertColumnsAfter(
+      sheet.getMaxColumns(),
+      headerValues[0].length - sheet.getMaxColumns()
+    );
+  }
   sheet
     .getRange(CONFIG.SHIPMENTS.HEADER_ROW, 1, 1, headerValues[0].length)
     .setValues(headerValues);
@@ -1056,26 +1073,13 @@ function syncShipments() {
 
       return [
         createdAt,
-        String(shipment?.id || ""),
-        String(shipment?.order_id || ""),
-        String(shipment?.payment_session_id || ""),
         String(shipment?.customer_name || ""),
-        String(shipment?.customer_email || ""),
-        formatPhoneForSheet_(shipment?.customer_phone),
         formatShipmentAddress_(shipment),
         formatShipmentItems_(shipment),
-        Number(shipment?.item_count || 0),
-        amountDollars,
         String(shipment?.shipping_option_label || ""),
         String(shipment?.shipping_tier || ""),
-        Number(shipment?.sauerkraut_count || 0),
-        Number(shipment?.hot_sauce_count || 0),
         String(shipment?.notes || ""),
         String(shipment?.status || ""),
-        String(shipment?.carrier || ""),
-        String(shipment?.service || ""),
-        String(shipment?.tracking_number || ""),
-        String(shipment?.label_url || ""),
         formatShipmentParcels_(shipment?.parcels),
         (Array.isArray(shipment?.parcels) ? shipment.parcels : []).reduce(
           (sum, parcel) => sum + Number(parcel?.postage_cents || 0),
@@ -1088,7 +1092,20 @@ function syncShipments() {
         "",
         "",
         "",
-        1
+        1,
+        String(shipment?.carrier || ""),
+        String(shipment?.service || ""),
+        String(shipment?.tracking_number || ""),
+        String(shipment?.label_url || ""),
+        String(shipment?.id || ""),
+        String(shipment?.order_id || ""),
+        String(shipment?.payment_session_id || ""),
+        String(shipment?.customer_email || ""),
+        formatPhoneForSheet_(shipment?.customer_phone),
+        Number(shipment?.item_count || 0),
+        amountDollars,
+        Number(shipment?.sauerkraut_count || 0),
+        Number(shipment?.hot_sauce_count || 0)
       ];
     });
 
@@ -1100,19 +1117,19 @@ function syncShipments() {
       .getRange(CONFIG.SHIPMENTS.START_ROW, 1, rows.length, 1)
       .setNumberFormat("yyyy-mm-dd hh:mm");
     sheet
-      .getRange(CONFIG.SHIPMENTS.START_ROW, 10, rows.length, 1)
+      .getRange(CONFIG.SHIPMENTS.START_ROW, 25, rows.length, 1)
       .setNumberFormat("0");
     sheet
-      .getRange(CONFIG.SHIPMENTS.START_ROW, 11, rows.length, 1)
+      .getRange(CONFIG.SHIPMENTS.START_ROW, 26, rows.length, 1)
       .setNumberFormat("$#,##0.00");
     sheet
-      .getRange(CONFIG.SHIPMENTS.START_ROW, 14, rows.length, 2)
+      .getRange(CONFIG.SHIPMENTS.START_ROW, 27, rows.length, 2)
       .setNumberFormat("0");
     sheet
-      .getRange(CONFIG.SHIPMENTS.START_ROW, 23, rows.length, 2)
+      .getRange(CONFIG.SHIPMENTS.START_ROW, 10, rows.length, 2)
       .setNumberFormat("$#,##0.00");
     sheet
-      .getRange(CONFIG.SHIPMENTS.START_ROW, 28, rows.length, 1)
+      .getRange(CONFIG.SHIPMENTS.START_ROW, 15, rows.length, 1)
       .setDataValidation(SpreadsheetApp.newDataValidation().requireNumberBetween(1, 3).setAllowInvalid(false).build());
   }
 
@@ -1121,8 +1138,10 @@ function syncShipments() {
     .setFontWeight("bold");
   sheet.setFrozenRows(1);
   sheet.autoResizeColumns(1, headerValues[0].length);
-  sheet.getRange(CONFIG.SHIPMENTS.HEADER_ROW, 25, Math.max(sheet.getLastRow(), 1), 3).setWrap(true);
-  sheet.setColumnWidths(25, 3, 420);
+  sheet.getRange(CONFIG.SHIPMENTS.HEADER_ROW, 12, Math.max(sheet.getLastRow(), 1), 3).setWrap(true);
+  sheet.setColumnWidths(12, 3, 420);
+  sheet.showColumns(1, 19);
+  sheet.hideColumns(20, 9);
 }
 
 function syncEmailSignups() {

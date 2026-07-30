@@ -58,7 +58,7 @@ export async function GET(request) {
   let ordersQuery = supabaseAdmin
     .from("orders")
     .select(
-      "id, payment_session_id, payment_reference, payment_provider, status, fulfillment, customer_name, customer_email, customer_phone, address1, address2, city, state, postal_code, note, currency, amount_subtotal, amount_tax, amount_shipping, amount_total, shipping_tier, shipping_option, shipping_option_label, shipping_estimate, sauerkraut_count, hot_sauce_count, pickup_date, created_at"
+      "id, payment_session_id, payment_reference, payment_provider, status, fulfillment, customer_name, customer_email, customer_phone, address1, address2, city, state, postal_code, note, currency, amount_subtotal, amount_tax, amount_shipping, amount_total, shipping_tier, shipping_option, shipping_option_label, shipping_estimate, sauerkraut_count, hot_sauce_count, is_test_order, pickup_date, created_at"
     )
     .order("created_at", { ascending: false })
     .limit(limit);
@@ -158,6 +158,7 @@ export async function GET(request) {
       shipping_estimate: String(row.shipping_estimate || ""),
       sauerkraut_count: toInt(row.sauerkraut_count, 0),
       hot_sauce_count: toInt(row.hot_sauce_count, 0),
+      is_test_order: row.is_test_order === true,
       pickup_date: String(row.pickup_date || ""),
       item_count: itemCount,
       items_summary: itemsSummary,

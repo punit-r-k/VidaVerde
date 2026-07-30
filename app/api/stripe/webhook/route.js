@@ -13,6 +13,7 @@ import {
   verifyStripeSignature
 } from "@/lib/stripe";
 import { supabaseAdmin } from "@/lib/supabaseAdmin";
+import { isFinancialTestCharge } from "@/lib/testOrders";
 
 export const runtime = "nodejs";
 
@@ -140,6 +141,37 @@ const getStripeShippingRateMetadata = async (shippingRateId) => {
   return data?.metadata && typeof data.metadata === "object" ? data.metadata : {};
 };
 
+const resolveLatestCharge = async (source) => {
+  const embeddedCharge =
+    (typeof source?.latest_charge === "object" ? source.latest_charge : null) ||
+    (typeof source?.payment_intent?.latest_charge === "object"
+      ? source.payment_intent.latest_charge
+      : null) ||
+    (Array.isArray(source?.charges?.data) ? source.charges.data[0] : null);
+  if (embeddedCharge) return embeddedCharge;
+
+  const paymentIntentId = toText(
+    source?.object === "payment_intent"
+      ? source?.id
+      : typeof source?.payment_intent === "string"
+        ? source.payment_intent
+        : source?.payment_intent?.id,
+    255
+  );
+  if (!paymentIntentId) return {};
+
+  const { ok, data, error } = await stripeRequest(
+    `/v1/payment_intents/${encodeURIComponent(paymentIntentId)}?expand[]=latest_charge`,
+    { method: "GET" }
+  );
+  if (!ok) {
+    console.error("stripe payment charge fetch error:", error);
+    return {};
+  }
+
+  return typeof data?.latest_charge === "object" ? data.latest_charge : {};
+};
+
 const buildShippingRecordDetails = ({
   fulfillment,
   metadata,
@@ -211,7 +243,8 @@ const recordPaidOrder = async ({
   shippingRecordDetails,
   customer,
   items,
-  placedAt
+  placedAt,
+  isTestOrder = false
 }) => {
   const pickupDate = getAssignedPickupDateKey({
     fulfillment,
@@ -238,9 +271,18 @@ const recordPaidOrder = async ({
     p_items: items
   });
 
+  let testOrderError = null;
+  if (!recordError && isTestOrder && typeof orderId === "string") {
+    const { error } = await supabaseAdmin
+      .from("orders")
+      .update({ is_test_order: true })
+      .eq("id", orderId);
+    testOrderError = error;
+  }
+
   return {
     orderId: typeof orderId === "string" ? orderId : null,
-    error: recordError
+    error: recordError || testOrderError
   };
 };
 
@@ -341,6 +383,7 @@ const handleCheckoutSessionEvent = async (session, eventType, eventPlacedAt = ""
   const customerDetails = session?.customer_details || {};
   const shippingDetails = session?.shipping_details || {};
   const customerAddress = shippingDetails?.address || customerDetails?.address || {};
+  const latestCharge = await resolveLatestCharge(session);
 
   const customer = {
     name: toText(shippingDetails?.name || metadata.customer_name || customerDetails?.name, 120),
@@ -384,11 +427,16 @@ const handleCheckoutSessionEvent = async (session, eventType, eventPlacedAt = ""
     shippingAmount: shipping,
     shippingRateMetadata
   });
-  const receiptNumber = "";
-  const paymentMethodLabel = getFallbackPaymentMethodLabel(session);
+  const receiptNumber = getChargeReceiptNumber(latestCharge);
+  const paymentMethodLabel =
+    getChargePaymentMethodLabel(latestCharge) || getFallbackPaymentMethodLabel(session);
   const paymentSessionId = toText(session?.id, 255);
-  const paymentReference =
-    typeof session?.payment_intent === "string" ? session.payment_intent : "";
+  const paymentReference = toText(
+    typeof session?.payment_intent === "string"
+      ? session.payment_intent
+      : session?.payment_intent?.id,
+    255
+  );
   const placedAt =
     eventPlacedAt ||
     (typeof session?.created === "number"
@@ -407,7 +455,8 @@ const handleCheckoutSessionEvent = async (session, eventType, eventPlacedAt = ""
     shippingRecordDetails,
     customer,
     items,
-    placedAt
+    placedAt,
+    isTestOrder: isFinancialTestCharge(latestCharge)
   });
 
   if (recordResult.error) {
@@ -458,7 +507,7 @@ const handlePaymentIntentSucceeded = async (intent, eventPlacedAt = "") => {
 
   const shippingDetails = intent?.shipping || {};
   const shippingAddress = shippingDetails?.address || {};
-  const latestCharge = intent?.charges?.data?.[0] || {};
+  const latestCharge = await resolveLatestCharge(intent);
   const billing = latestCharge?.billing_details || {};
   const billingAddress = billing?.address || {};
   const receiptNumber = getChargeReceiptNumber(latestCharge);
@@ -492,7 +541,10 @@ const handlePaymentIntentSucceeded = async (intent, eventPlacedAt = "") => {
       : Math.max(total - shipping, 0);
   const tax = 0;
   const paymentSessionId = toText(intent?.id, 255);
-  const paymentReference = toText(intent?.latest_charge, 255);
+  const paymentReference = toText(
+    typeof intent?.latest_charge === "string" ? intent.latest_charge : latestCharge?.id,
+    255
+  );
   const placedAt =
     eventPlacedAt ||
     (typeof intent?.created === "number"
@@ -519,7 +571,8 @@ const handlePaymentIntentSucceeded = async (intent, eventPlacedAt = "") => {
     shippingRecordDetails,
     customer,
     items,
-    placedAt
+    placedAt,
+    isTestOrder: isFinancialTestCharge(latestCharge)
   });
 
   if (recordResult.error) {

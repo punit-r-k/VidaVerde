@@ -9,6 +9,7 @@
     "start": "next start",
     "lint": "eslint .",
     "analytics:report": "node scripts/analytics-report.mjs",
+    "backfill:test-orders": "node scripts/backfill-test-orders.mjs",
     "sync:fallback": "node scripts/sync-fallback-products.js",
     "security:repo": "node scripts/repo-security-checks.mjs",
     "test:shipping": "node --test tests/shippingPricing.test.mjs",

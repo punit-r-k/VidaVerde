@@ -9,6 +9,7 @@ import {
 } from "@/lib/shippingPricing";
 import { stripeConfig, stripeRequest } from "@/lib/stripe";
 import { supabaseAdmin } from "@/lib/supabaseAdmin";
+import { isFinancialTestCharge } from "@/lib/testOrders";
 import { z } from "zod";
 
 const ORDER_FINALIZE_RATE_LIMIT = getRouteRateLimitConfig("ORDER_FINALIZE_POST", {
@@ -336,7 +337,8 @@ const recordPaidOrder = async ({
   shippingRecordDetails,
   customer,
   items,
-  placedAt
+  placedAt,
+  isTestOrder = false
 }) => {
   const pickupDate = getAssignedPickupDateKey({
     fulfillment,
@@ -363,9 +365,18 @@ const recordPaidOrder = async ({
     p_items: items
   });
 
+  let testOrderError = null;
+  if (!recordError && isTestOrder && typeof orderId === "string") {
+    const { error } = await supabaseAdmin
+      .from("orders")
+      .update({ is_test_order: true })
+      .eq("id", orderId);
+    testOrderError = error;
+  }
+
   return {
     orderId: typeof orderId === "string" ? orderId : null,
-    error: recordError
+    error: recordError || testOrderError
   };
 };
 
@@ -536,7 +547,8 @@ const finalizePaymentIntent = async (intent) => {
     shippingRecordDetails,
     customer,
     items,
-    placedAt
+    placedAt,
+    isTestOrder: isFinancialTestCharge(latestCharge)
   });
 
   if (recordResult.error) {
@@ -720,7 +732,8 @@ const finalizeCheckoutSession = async (session) => {
     shippingRecordDetails,
     customer,
     items,
-    placedAt
+    placedAt,
+    isTestOrder: isFinancialTestCharge(latestCharge)
   });
 
   if (recordResult.error) {

@@ -68,6 +68,7 @@ create table if not exists orders (
   shipping_estimate text,
   sauerkraut_count integer not null default 0 check (sauerkraut_count >= 0),
   hot_sauce_count integer not null default 0 check (hot_sauce_count >= 0),
+  is_test_order boolean not null default false,
   customer_confirmation_email_sent_at timestamptz,
   customer_confirmation_email_claimed_at timestamptz,
   pickup_reminder_email_sent_at timestamptz,
@@ -199,6 +200,7 @@ create index if not exists analytics_events_page_created_at_idx on analytics_eve
 create index if not exists analytics_events_section_created_at_idx on analytics_events (section_id, created_at desc);
 create index if not exists analytics_events_product_created_at_idx on analytics_events (product_sku, created_at desc);
 create index if not exists analytics_events_session_created_at_idx on analytics_events (session_id, created_at desc);
+create index if not exists orders_test_order_created_at_idx on orders (created_at desc) where is_test_order;
 create index if not exists shipments_status_created_at_idx on shipments (status, created_at desc);
 create index if not exists shipments_created_at_idx on shipments (created_at desc);
 create index if not exists shipment_quotes_shipment_created_idx on shipment_quotes (shipment_id, created_at desc);
