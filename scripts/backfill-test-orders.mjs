@@ -26,7 +26,7 @@ loadEnvFile(path.join(repoRoot, ".env.local"));
 loadEnvFile(path.join(repoRoot, ".env"));
 
 const applyChanges = process.argv.includes("--apply");
-const [{ supabaseAdmin }, { stripeRequest }, { isFinancialTestCharge }] = await Promise.all([
+const [{ supabaseAdmin }, { stripeRequest }, { isFinancialTestOrder }] = await Promise.all([
   import("../lib/supabaseAdmin.js"),
   import("../lib/stripe.js"),
   import("../lib/testOrders.js")
@@ -36,7 +36,7 @@ if (!supabaseAdmin) throw new Error("Supabase service credentials are unavailabl
 
 const { data: orders, error: ordersError } = await supabaseAdmin
   .from("orders")
-  .select("id, payment_session_id")
+  .select("id, payment_session_id, customer_name, customer_email")
   .eq("payment_provider", "stripe")
   .eq("is_test_order", false)
   .order("created_at", { ascending: true });
@@ -49,6 +49,15 @@ const testOrderIds = [];
 let unresolvedCount = 0;
 
 for (const order of orders || []) {
+  const customer = {
+    name: order?.customer_name,
+    email: order?.customer_email
+  };
+  if (isFinancialTestOrder({ customer })) {
+    testOrderIds.push(order.id);
+    continue;
+  }
+
   const paymentSessionId = String(order?.payment_session_id || "").trim();
   let stripePath = "";
 
@@ -70,7 +79,7 @@ for (const order of orders || []) {
   const charge = paymentSessionId.startsWith("pi_")
     ? data?.latest_charge
     : data?.payment_intent?.latest_charge;
-  if (isFinancialTestCharge(charge)) testOrderIds.push(order.id);
+  if (isFinancialTestOrder({ charge, customer })) testOrderIds.push(order.id);
 }
 
 if (applyChanges && testOrderIds.length > 0) {
@@ -82,7 +91,7 @@ if (applyChanges && testOrderIds.length > 0) {
 }
 
 console.log(
-  `${applyChanges ? "Flagged" : "Found"} ${testOrderIds.length} 4242 test order(s); ` +
+  `${applyChanges ? "Flagged" : "Found"} ${testOrderIds.length} test order(s); ` +
     `${unresolvedCount} Stripe payment(s) could not be resolved.`
 );
 if (!applyChanges && testOrderIds.length > 0) {

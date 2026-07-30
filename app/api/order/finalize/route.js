@@ -9,7 +9,7 @@ import {
 } from "@/lib/shippingPricing";
 import { stripeConfig, stripeRequest } from "@/lib/stripe";
 import { supabaseAdmin } from "@/lib/supabaseAdmin";
-import { isFinancialTestCharge } from "@/lib/testOrders";
+import { isFinancialTestOrder } from "@/lib/testOrders";
 import { z } from "zod";
 
 const ORDER_FINALIZE_RATE_LIMIT = getRouteRateLimitConfig("ORDER_FINALIZE_POST", {
@@ -548,7 +548,7 @@ const finalizePaymentIntent = async (intent) => {
     customer,
     items,
     placedAt,
-    isTestOrder: isFinancialTestCharge(latestCharge)
+    isTestOrder: isFinancialTestOrder({ charge: latestCharge, customer })
   });
 
   if (recordResult.error) {
@@ -733,7 +733,7 @@ const finalizeCheckoutSession = async (session) => {
     customer,
     items,
     placedAt,
-    isTestOrder: isFinancialTestCharge(latestCharge)
+    isTestOrder: isFinancialTestOrder({ charge: latestCharge, customer })
   });
 
   if (recordResult.error) {

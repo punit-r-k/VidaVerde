@@ -13,7 +13,7 @@ import {
   verifyStripeSignature
 } from "@/lib/stripe";
 import { supabaseAdmin } from "@/lib/supabaseAdmin";
-import { isFinancialTestCharge } from "@/lib/testOrders";
+import { isFinancialTestOrder } from "@/lib/testOrders";
 
 export const runtime = "nodejs";
 
@@ -456,7 +456,7 @@ const handleCheckoutSessionEvent = async (session, eventType, eventPlacedAt = ""
     customer,
     items,
     placedAt,
-    isTestOrder: isFinancialTestCharge(latestCharge)
+    isTestOrder: isFinancialTestOrder({ charge: latestCharge, customer })
   });
 
   if (recordResult.error) {
@@ -572,7 +572,7 @@ const handlePaymentIntentSucceeded = async (intent, eventPlacedAt = "") => {
     customer,
     items,
     placedAt,
-    isTestOrder: isFinancialTestCharge(latestCharge)
+    isTestOrder: isFinancialTestOrder({ charge: latestCharge, customer })
   });
 
   if (recordResult.error) {

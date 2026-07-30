@@ -6,6 +6,7 @@ const CONFIG = {
   EMAIL_SIGNUPS_SHEET_NAME: "Email List",
   HEALTH_SHEET_NAME: "Health",
   SETTINGS_SHEET_NAME: "Settings",
+  PUNIT_MONTHLY_PAYOUTS_SHEET_NAME: "Punit Monthly Payouts",
   FINANCIAL_DISTRIBUTIONS_SHEET_NAME: "Financial Distributions",
   FINANCIAL_DISTRIBUTIONS_START_DATE: "2026-07-01",
   PUNIT_PAYOUT_EMAIL_RECIPIENTS: [
@@ -516,6 +517,16 @@ function refreshFinancialDistributionsSummary_() {
   return sheet;
 }
 
+function refreshPunitMonthlyPayoutsSummary_() {
+  const sheet = ensurePunitMonthlyPayoutsSheet_();
+  const formula = `=LET(firstMonth,EOMONTH(MIN(FILTER(Orders!A2:A,Orders!A2:A<>"")),0),months,ARRAYFORMULA(EOMONTH(firstMonth,SEQUENCE(DATEDIF(firstMonth,EOMONTH(TODAY(),0),"M")+1,1,0,1))),{"Month End","Punit Payout";months,MAP(months,LAMBDA(monthEnd,(SUMIFS(Orders!R2:R,Orders!A2:A,">="&(EOMONTH(monthEnd,-1)+1),Orders!A2:A,"<"&(monthEnd+1),Orders!Y2:Y,FALSE)-SUMIFS(Orders!M2:M,Orders!A2:A,">="&(EOMONTH(monthEnd,-1)+1),Orders!A2:A,"<"&(monthEnd+1),Orders!Y2:Y,FALSE))*15%))})`;
+
+  sheet.getRange(1, 1).setFormula(formula);
+  SpreadsheetApp.flush();
+
+  return sheet;
+}
+
 function syncHealthCheck() {
   ensureSettingsSheet_();
 
@@ -1000,6 +1011,7 @@ function syncOrders() {
     .setFontWeight("bold");
   sheet.setFrozenRows(1);
   sheet.autoResizeColumns(1, headerValues[0].length);
+  refreshPunitMonthlyPayoutsSummary_();
   refreshFinancialDistributionsSummary_();
 }
 
@@ -1577,6 +1589,17 @@ function ensureFinancialDistributionsSheet_() {
 
   if (!sheet) {
     sheet = book.insertSheet(CONFIG.FINANCIAL_DISTRIBUTIONS_SHEET_NAME);
+  }
+
+  return sheet;
+}
+
+function ensurePunitMonthlyPayoutsSheet_() {
+  const book = SpreadsheetApp.getActive();
+  let sheet = book.getSheetByName(CONFIG.PUNIT_MONTHLY_PAYOUTS_SHEET_NAME);
+
+  if (!sheet) {
+    sheet = book.insertSheet(CONFIG.PUNIT_MONTHLY_PAYOUTS_SHEET_NAME);
   }
 
   return sheet;
