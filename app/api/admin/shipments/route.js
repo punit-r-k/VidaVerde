@@ -1,6 +1,7 @@
 import { parseSearchParams, shipmentsQuerySchema } from "@/lib/adminSchemas";
 import { secureAdminRoute } from "@/lib/apiSecurity";
 import { getRouteRateLimitConfig } from "@/lib/rateLimit";
+import { autoPurchaseFastestShippingLabels } from "@/lib/shipmentLabelAutomation";
 import { supabaseAdmin } from "@/lib/supabaseAdmin";
 
 const ADMIN_SHIPMENTS_RATE_LIMIT = getRouteRateLimitConfig("ADMIN_SHIPMENTS_GET", {
@@ -54,6 +55,8 @@ export async function GET(request) {
   const { limit, status, refresh } = parsedQuery.data;
 
   let refreshedCount = 0;
+  let automaticLabelsPurchased = 0;
+  const automaticLabelErrors = [];
   if (refresh) {
     const { data: syncCount, error: syncError } = await supabaseAdmin.rpc(
       "sync_all_shipments"
@@ -66,12 +69,36 @@ export async function GET(request) {
       );
     }
     refreshedCount = toInt(syncCount, 0);
+
+    const { data: pendingShipments, error: pendingError } = await supabaseAdmin
+      .from("shipments")
+      .select("id, label_purchase_error")
+      .eq("status", "pending_label")
+      .order("created_at", { ascending: true })
+      .limit(10);
+    if (pendingError) {
+      console.error("pending shipment label read error:", pendingError);
+    } else {
+      for (const pendingShipment of pendingShipments || []) {
+        if (String(pendingShipment.label_purchase_error || "").includes("financial test order")) {
+          continue;
+        }
+        try {
+          const result = await autoPurchaseFastestShippingLabels(pendingShipment.id);
+          if (result.state === "label_purchased") automaticLabelsPurchased += 1;
+        } catch (labelError) {
+          const message = String(labelError?.message || labelError || "Automatic label purchase failed.");
+          console.error("automatic EasyPost label retry failed:", message);
+          automaticLabelErrors.push({ shipment_id: pendingShipment.id, error: message });
+        }
+      }
+    }
   }
 
   let query = supabaseAdmin
     .from("shipments")
     .select(
-      "id, order_id, payment_session_id, payment_reference, status, label_provider, label_url, tracking_number, carrier, service, customer_name, customer_email, customer_phone, address1, address2, city, state, postal_code, country, items_summary, items_json, item_count, amount_total, currency, shipping_tier, shipping_option, shipping_option_label, shipping_estimate, sauerkraut_count, hot_sauce_count, notes, label_purchased_at, shipped_at, created_at, updated_at, orders(note), shipment_parcels(parcel_index, package_code, product_family, postage_cents, box_cost_cents, carrier, service, tracking_number, label_url, label_pdf_url, status)"
+      "id, order_id, payment_session_id, payment_reference, status, label_provider, label_url, label_purchase_error, tracking_number, carrier, service, customer_name, customer_email, customer_phone, address1, address2, city, state, postal_code, country, items_summary, items_json, item_count, amount_total, currency, shipping_tier, shipping_option, shipping_option_label, shipping_estimate, sauerkraut_count, hot_sauce_count, notes, label_purchased_at, label_purchase_started_at, shipped_at, created_at, updated_at, orders(note, amount_shipping), shipment_parcels(parcel_index, package_code, product_family, postage_cents, box_cost_cents, carrier, service, tracking_number, label_url, label_pdf_url, status)"
     )
     .order("created_at", { ascending: false })
     .limit(limit);
@@ -97,6 +124,7 @@ export async function GET(request) {
     status: String(row.status || "pending_label"),
     label_provider: String(row.label_provider || ""),
     label_url: String(row.label_url || ""),
+    label_purchase_error: String(row.label_purchase_error || ""),
     tracking_number: String(row.tracking_number || ""),
     carrier: String(row.carrier || ""),
     service: String(row.service || ""),
@@ -113,6 +141,12 @@ export async function GET(request) {
     items_json: Array.isArray(row.items_json) ? row.items_json : [],
     item_count: toInt(row.item_count, 0),
     amount_total: toInt(row.amount_total, 0),
+    customer_shipping_charge_cents: toInt(
+      Array.isArray(row.orders)
+        ? row.orders[0]?.amount_shipping
+        : row.orders?.amount_shipping,
+      0
+    ),
     currency: toUpperText(row.currency, "USD"),
     shipping_tier: String(row.shipping_tier || ""),
     shipping_option: String(row.shipping_option || ""),
@@ -126,6 +160,7 @@ export async function GET(request) {
         ""
     ),
     label_purchased_at: row.label_purchased_at || null,
+    label_purchase_started_at: row.label_purchase_started_at || null,
     shipped_at: row.shipped_at || null,
     parcels: Array.isArray(row.shipment_parcels)
       ? row.shipment_parcels.sort((a, b) => a.parcel_index - b.parcel_index)
@@ -136,6 +171,8 @@ export async function GET(request) {
 
   return respond.json({
     refreshed_count: refreshedCount,
+    automatic_labels_purchased: automaticLabelsPurchased,
+    automatic_label_errors: automaticLabelErrors,
     shipments
   });
 }

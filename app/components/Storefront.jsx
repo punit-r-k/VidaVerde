@@ -17,7 +17,6 @@ import {
   DEFAULT_SHIPPING_OPTION_ID,
   FORM_FIELD_ORDER,
   INITIAL_FORM_VALUES,
-  LOCAL_SHIPPING_AREA_LABEL,
   SHIPPING_FIELDS,
   SHIPPING_COUNTRY_CODE,
   SHIPPING_COUNTRY_LABEL,
@@ -25,14 +24,12 @@ import {
   getCitySpellingSuggestion,
   getCheckoutFieldErrors,
   getStateSpellingSuggestion,
-  isOwnerDeliveryAddressEligible,
   normalizeShippingOptionId,
   normalizeFulfillment
 } from "@/lib/checkoutSchema";
 import {
   getCustomerShippingOptions,
   getEstimatedShipDate,
-  getCartUpsellMessage,
   getLatestExpectedDeliveryDate,
   getShippingOptionsForCart,
   SHIPPING_SCHEDULE_EXPEDITED_LINE,
@@ -303,6 +300,7 @@ export default function Storefront({ products, inventory = null, pickupDetails =
   const [status, setStatus] = useState("idle");
   const [notice, setNotice] = useState("");
   const [checkoutStep, setCheckoutStep] = useState("details");
+  const [preparedPayment, setPreparedPayment] = useState(null);
   const [fulfillment, setFulfillment] = useState(DEFAULT_FULFILLMENT);
   const [shippingOptionId, setShippingOptionId] = useState(DEFAULT_SHIPPING_OPTION_ID);
   const [shippingScheduleNow, setShippingScheduleNow] = useState(() => new Date());
@@ -389,13 +387,11 @@ export default function Storefront({ products, inventory = null, pickupDetails =
   checkoutStepRef.current = checkoutStep;
   isOrderFinalizingRef.current = isOrderFinalizing;
 
-  const resetPaymentState = useCallback((options = {}) => {
-    const keepPaymentStep = options.keepPaymentStep === true;
-    if (!keepPaymentStep) {
-      checkoutStepScrollPositionRef.current = null;
-      checkoutStepPreviousFormHeightRef.current = 0;
-      setCheckoutStep("details");
-    }
+  const resetPaymentState = useCallback(() => {
+    setPreparedPayment(null);
+    checkoutStepScrollPositionRef.current = null;
+    checkoutStepPreviousFormHeightRef.current = 0;
+    setCheckoutStep("details");
   }, []);
 
   const clearCartChangeNotice = useCallback(() => {
@@ -441,6 +437,7 @@ export default function Storefront({ products, inventory = null, pickupDetails =
     emailOptInSubmittedRef.current = "";
     resetCartChangeTracking();
     checkoutStepPreviousFormHeightRef.current = 0;
+    setPreparedPayment(null);
     setCheckoutStep("details");
     checkoutStartedRef.current = false;
     finalizingPaymentRef.current = "";
@@ -1283,10 +1280,6 @@ export default function Storefront({ products, inventory = null, pickupDetails =
 
   const itemCount = cartItems.reduce((sum, item) => sum + item.quantity, 0);
   const subtotal = cartItems.reduce((sum, item) => sum + item.lineTotal, 0);
-  const cartUpsellMessage = useMemo(() => {
-    if (fulfillment !== "ship" || itemCount <= 0) return null;
-    return getCartUpsellMessage({ items: cartItems });
-  }, [cartItems, fulfillment, itemCount]);
   const shippingQuote = useMemo(
     () =>
       getShippingOptionsForCart({
@@ -1299,43 +1292,59 @@ export default function Storefront({ products, inventory = null, pickupDetails =
       }),
     [cartItems, subtotal]
   );
-  const ownerDeliveryEligible = isOwnerDeliveryAddressEligible(formValues);
   const customerShippingOptions = useMemo(
     () =>
       getCustomerShippingOptions({
-        shipping: shippingQuote,
-        includeOwnerDelivery: ownerDeliveryEligible
+        shipping: shippingQuote
       }),
-    [ownerDeliveryEligible, shippingQuote]
+    [shippingQuote]
   );
   const selectedShippingOption = useMemo(() => {
     const normalizedShippingOptionId = normalizeShippingOptionId(shippingOptionId);
-    return (
+    const baseOption = (
       customerShippingOptions.find(
         (option) => option.id === normalizedShippingOptionId
       ) ||
       customerShippingOptions.find(
         (option) => option.id === DEFAULT_SHIPPING_OPTION_ID
       ) ||
-      shippingQuote.standardOption
+      shippingQuote.fastestOption
     );
-  }, [customerShippingOptions, shippingOptionId, shippingQuote.standardOption]);
+    return fulfillment === "ship" && preparedPayment?.shipping
+      ? { ...baseOption, ...preparedPayment.shipping }
+      : baseOption;
+  }, [
+    customerShippingOptions,
+    fulfillment,
+    preparedPayment?.shipping,
+    shippingOptionId,
+    shippingQuote.fastestOption
+  ]);
   const shippingCents =
     SHIPPING_CHECKOUT_VISIBLE && fulfillment === "ship" && itemCount > 0
-      ? Number(selectedShippingOption?.amountCents || 0)
+      ? Number(preparedPayment?.shipping?.amountCents || 0)
       : 0;
-  const orderTotal = subtotal + shippingCents;
+  const preparedTotal = Number(preparedPayment?.totalCents);
+  const orderTotal = Number.isFinite(preparedTotal) && preparedTotal > 0
+    ? preparedTotal
+    : subtotal + shippingCents;
+  const shippingPriceText =
+    fulfillment === "ship" && !preparedPayment?.shipping
+      ? "Calculated from address"
+      : formatCurrency(shippingCents);
   const preorderUnitsInCart = cartItems.reduce((sum, item) => sum + item.preorderUnits, 0);
   const hasPreorderItems = preorderUnitsInCart > 0;
   const estimatedShipDate = getEstimatedShipDate({
     orderDate: shippingScheduleNow,
     hasPreorderItems
   });
-  const selectedExpectedDeliveryText = getExpectedDeliveryText({
-    shippingOption: selectedShippingOption,
-    hasPreorderItems,
-    orderDate: shippingScheduleNow
-  });
+  const selectedExpectedDeliveryText = fulfillment === "ship" && !preparedPayment?.shipping
+    ? ""
+    : getExpectedDeliveryText({
+        shippingOption: selectedShippingOption,
+        hasPreorderItems,
+        orderDate: shippingScheduleNow
+      });
   const estimatedShipDateText = formatExpectedDeliveryDate(
     estimatedShipDate,
     shippingScheduleNow
@@ -1693,9 +1702,12 @@ export default function Storefront({ products, inventory = null, pickupDetails =
     hasPreorderItems
   ]);
 
-  const buildOrderPayload = useCallback(() => {
+  const buildOrderPayload = useCallback((valuesOverride = formValues) => {
     const hasCompleteInventorySnapshot =
       cartItems.length > 0 && cartItems.every((item) => item.hasInventoryRecord);
+    const checkoutValues = valuesOverride && typeof valuesOverride === "object"
+      ? valuesOverride
+      : formValues;
 
     return {
       fulfillment: normalizeFulfillment(fulfillment),
@@ -1703,16 +1715,16 @@ export default function Storefront({ products, inventory = null, pickupDetails =
         selectedShippingOption?.id || shippingOptionId
       ),
       customer: {
-        name: String(formValues.name || "").trim(),
-        email: String(formValues.email || "").trim(),
-        phone: String(formValues.phone || "").trim(),
-        address1: String(formValues.address1 || "").trim(),
-        address2: String(formValues.address2 || "").trim(),
-        city: String(formValues.city || "").trim(),
-        state: String(formValues.state || "").trim(),
-        postalCode: String(formValues.postalCode || "").trim(),
+        name: String(checkoutValues.name || "").trim(),
+        email: String(checkoutValues.email || "").trim(),
+        phone: String(checkoutValues.phone || "").trim(),
+        address1: String(checkoutValues.address1 || "").trim(),
+        address2: String(checkoutValues.address2 || "").trim(),
+        city: String(checkoutValues.city || "").trim(),
+        state: String(checkoutValues.state || "").trim(),
+        postalCode: String(checkoutValues.postalCode || "").trim(),
         country: SHIPPING_COUNTRY_CODE,
-        note: String(formValues.note || "").trim()
+        note: String(checkoutValues.note || "").trim()
       },
       consents: {
         pickupPolicyAccepted: fulfillment === "market" ? pickupAcknowledged : false
@@ -1768,7 +1780,7 @@ export default function Storefront({ products, inventory = null, pickupDetails =
     }, 520);
 
     if (isPaymentStep) {
-      resetPaymentState({ keepPaymentStep: true });
+      resetPaymentState();
       if (status !== "idle") {
         setStatus("idle");
         setNotice("");
@@ -1865,7 +1877,7 @@ export default function Storefront({ products, inventory = null, pickupDetails =
       }
     });
 
-    resetPaymentState({ keepPaymentStep: isPaymentStep && nextItemCount > 0 });
+    resetPaymentState();
     refreshPendingCartChangeReview(nextItemCount);
 
     if (nextItemCount === 0) {
@@ -2122,7 +2134,7 @@ export default function Storefront({ products, inventory = null, pickupDetails =
     }
   };
 
-  const createPaymentIntent = useCallback(async () => {
+  const preparePaymentIntent = useCallback(async (valuesOverride = formValues) => {
     if (fulfillment === "market" && !pickupAcknowledged) {
       const message = "Please accept the pickup policy before proceeding to payment.";
       trackAnalyticsEvent({
@@ -2164,7 +2176,7 @@ export default function Storefront({ products, inventory = null, pickupDetails =
     const response = await fetch("/api/order", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(buildOrderPayload())
+      body: JSON.stringify(buildOrderPayload(valuesOverride))
     });
 
     const responseContentType = response.headers.get("content-type") || "";
@@ -2198,7 +2210,12 @@ export default function Storefront({ products, inventory = null, pickupDetails =
     return {
       clientSecret: result.clientSecret,
       paymentIntentId: result.paymentIntentId,
-      returnUrl: result.returnUrl
+      returnUrl: result.returnUrl,
+      subtotalCents: Number(result.subtotalCents || 0),
+      totalCents: Number(result.totalCents || 0),
+      shipping: result.shipping && typeof result.shipping === "object"
+        ? result.shipping
+        : null
     };
   }, [
     applyInventory,
@@ -2207,10 +2224,23 @@ export default function Storefront({ products, inventory = null, pickupDetails =
     focusPickupAcknowledgement,
     focusPreorderAcknowledgement,
     fulfillment,
+    formValues,
     hasPreorderItems,
     pickupAcknowledged,
     preorderAcknowledged
   ]);
+
+  const createPaymentIntent = useCallback(async () => {
+    if (!preparedPayment?.clientSecret || !preparedPayment?.paymentIntentId) {
+      throw new Error("Your live shipping quote is no longer ready. Please review your details and try again.");
+    }
+    const quoteExpiresAt = Date.parse(preparedPayment?.shipping?.quoteExpiresAt || "");
+    if (Number.isFinite(quoteExpiresAt) && quoteExpiresAt <= Date.now() + 60_000) {
+      resetPaymentState();
+      throw new Error("Your live shipping quote expired. Please proceed to payment again for a fresh rate.");
+    }
+    return preparedPayment;
+  }, [preparedPayment, resetPaymentState]);
 
   const handlePaymentState = useCallback(
     ({ status: nextStatus, message, paymentIntentId, sessionId }) => {
@@ -2272,7 +2302,7 @@ export default function Storefront({ products, inventory = null, pickupDetails =
     [finalizePaidOrder]
   );
 
-  const handleSubmit = (event) => {
+  const handleSubmit = async (event) => {
     event.preventDefault();
 
     if (isOrderFinalizing) return;
@@ -2365,20 +2395,6 @@ export default function Storefront({ products, inventory = null, pickupDetails =
       return;
     }
 
-    trackAnalyticsEvent({
-      name: "checkout_submit",
-      sectionId: "shop",
-      elementId: "checkout_submit",
-      checkoutStep: "details",
-      metadata: {
-        itemCount,
-        subtotalCents: subtotal,
-        shippingCents,
-        totalCents: orderTotal,
-        preorderUnits: preorderUnitsInCart,
-        emailOptIn
-      }
-    });
     if (typeof window !== "undefined") {
       const formHeight = Math.ceil(event.currentTarget.getBoundingClientRect().height);
       checkoutStepPreviousFormHeightRef.current = formHeight;
@@ -2387,9 +2403,38 @@ export default function Storefront({ products, inventory = null, pickupDetails =
         y: window.scrollY
       };
     }
-    setCheckoutStep("payment");
-    setStatus("idle");
-    setNotice("");
+    setStatus("submitting");
+    setNotice(
+      fulfillment === "ship"
+        ? "Calculating the fastest live shipping rate and preparing payment..."
+        : "Preparing secure payment..."
+    );
+
+    try {
+      const nextPreparedPayment = await preparePaymentIntent(finalFormValues);
+      setPreparedPayment(nextPreparedPayment);
+      trackAnalyticsEvent({
+        name: "checkout_submit",
+        sectionId: "shop",
+        elementId: "checkout_submit",
+        checkoutStep: "details",
+        metadata: {
+          itemCount,
+          subtotalCents: Number(nextPreparedPayment.subtotalCents || subtotal),
+          shippingCents: Number(nextPreparedPayment.shipping?.amountCents || 0),
+          totalCents: Number(nextPreparedPayment.totalCents || subtotal),
+          preorderUnits: preorderUnitsInCart,
+          emailOptIn
+        }
+      });
+      setCheckoutStep("payment");
+      setStatus("idle");
+      setNotice("");
+    } catch (error) {
+      setPreparedPayment(null);
+      setStatus("error");
+      setNotice(error?.message || "We couldn't prepare payment. Please try again.");
+    }
   };
 
   const renderPickupAcknowledgement = () => {
@@ -2671,18 +2716,17 @@ export default function Storefront({ products, inventory = null, pickupDetails =
           <span>Subtotal</span>
           <strong>{formatCurrency(subtotal)}</strong>
         </div>
-        {cartUpsellMessage ? (
-          <p className="cart-upsell" role="note" aria-live="polite">
-            {cartUpsellMessage.message}
-          </p>
-        ) : null}
         <div>
           <span>Tax</span>
           <strong>$0.00</strong>
         </div>
         <div>
-          <span>Shipping</span>
-          <strong>{formatCurrency(shippingCents)}</strong>
+          <span>
+            {fulfillment === "ship" && preparedPayment?.shipping
+              ? "Shipping + packaging (rounded)"
+              : "Shipping"}
+          </span>
+          <strong>{shippingPriceText}</strong>
         </div>
         {fulfillment === "ship" && selectedExpectedDeliveryText ? (
           <div>
@@ -2691,7 +2735,11 @@ export default function Storefront({ products, inventory = null, pickupDetails =
           </div>
         ) : null}
         <div className="cart__summary-total">
-          <span>Total due today</span>
+          <span>
+            {fulfillment === "ship" && !preparedPayment?.shipping
+              ? "Subtotal before shipping"
+              : "Total due today"}
+          </span>
           <strong>{formatCurrency(orderTotal)}</strong>
         </div>
       </div>
@@ -2719,9 +2767,10 @@ export default function Storefront({ products, inventory = null, pickupDetails =
         <legend>Shipping</legend>
         <p id="shipping-option-hint" className="shipping-options__hint">
           Shipping is available across the {CONTINENTAL_US_SHIPPING_AREA_LABEL}.
-          Owner delivery is limited to {LOCAL_SHIPPING_AREA_LABEL} TX ZIP codes. We
-          carefully pack all glass jars and bottles with protective materials so they arrive
-          safely. Choose a shipping method before payment.
+          We automatically select the carrier offering the shortest transit time for your
+          address. The charge is live carrier postage plus the exact packaging cost, with the
+          combined amount rounded up to the nearest dollar. You will see the exact charge
+          before entering payment.
         </p>
         {renderShippingScheduleNotice({ id: "checkout", showShipDate: true })}
         <div className="shipping-options__list">
@@ -2753,7 +2802,7 @@ export default function Storefront({ products, inventory = null, pickupDetails =
                 <span className="shipping-option__body">
                   <span className="shipping-option__topline">
                     <strong>{option.label}</strong>
-                    <span>{formatCurrency(option.amountCents)}</span>
+                    <span>Calculated from address</span>
                   </span>
                   <span className="shipping-option__meta">
                     <span>
@@ -3761,7 +3810,7 @@ export default function Storefront({ products, inventory = null, pickupDetails =
                       <span>Method</span>
                       <strong>
                         {selectedShippingOption.label}
-                        <span>{formatCurrency(shippingCents)}</span>
+                        <span>{shippingPriceText}</span>
                       </strong>
                     </article>
                     {estimatedShipDateText ? (
@@ -3806,8 +3855,10 @@ export default function Storefront({ products, inventory = null, pickupDetails =
                 </div>
                 {fulfillment === "ship" ? (
                   <ul className="pickup-policy-modal__steps">
-                    <li>Orders are packed and shipped on Tuesdays and Saturdays after packing or production is complete.</li>
-                    <li>Expedited shipping speeds up carrier transit, but it does not skip the packing schedule.</li>
+                    <li>Packages are taken to shipping carriers once a week, every Wednesday, after packing or production is complete.</li>
+                    <li>Shipping time starts only after the carrier receives the package.</li>
+                    <li>We choose the carrier service with the shortest quoted transit time, regardless of carrier.</li>
+                    <li>Your shipping charge is postage plus packaging, rounded up to the nearest dollar.</li>
                     <li>Tracking or delivery updates will be emailed when available.</li>
                     <li>Open and inspect the package when it arrives.</li>
                     <li>Refrigerate after opening.</li>
@@ -3843,7 +3894,7 @@ export default function Storefront({ products, inventory = null, pickupDetails =
                   </div>
                   <p>
                     {fulfillment === "ship"
-                      ? "Preorder items cannot be shipped until they are ready, which can take up to 15 days. Your selected shipping window starts after that ready date."
+                      ? "Preorder items cannot be shipped until they are ready, which can take up to 15 days. They will be included in the next Wednesday carrier handoff, and transit time begins after the carrier receives the package."
                       : pickupScenario === "mixed"
                       ? "Ready items can be picked up on the date above. Preorder items will be scheduled separately when restocked, and we will email you before that pickup."
                       : "This order contains preorder items. We will email you when they are ready and confirm the pickup date before you come to market."}
@@ -3864,10 +3915,39 @@ export default function Storefront({ products, inventory = null, pickupDetails =
                     <dt>Tax</dt>
                     <dd>$0.00</dd>
                   </div>
-                  <div>
-                    <dt>Shipping</dt>
-                    <dd>{formatCurrency(shippingCents)}</dd>
-                  </div>
+                  {fulfillment === "ship" ? (
+                    <>
+                      <div>
+                        <dt>Carrier postage</dt>
+                        <dd>
+                          {preparedPayment?.shipping
+                            ? formatCurrency(preparedPayment.shipping.postageCents)
+                            : shippingPriceText}
+                        </dd>
+                      </div>
+                      {preparedPayment?.shipping ? (
+                        <div>
+                          <dt>Packaging</dt>
+                          <dd>{formatCurrency(preparedPayment.shipping.packagingCents)}</dd>
+                        </div>
+                      ) : null}
+                      {Number(preparedPayment?.shipping?.roundingCents || 0) > 0 ? (
+                        <div>
+                          <dt>Round-up to nearest dollar</dt>
+                          <dd>{formatCurrency(preparedPayment.shipping.roundingCents)}</dd>
+                        </div>
+                      ) : null}
+                      <div>
+                        <dt>Shipping charge</dt>
+                        <dd>{shippingPriceText}</dd>
+                      </div>
+                    </>
+                  ) : (
+                    <div>
+                      <dt>Shipping</dt>
+                      <dd>$0.00</dd>
+                    </div>
+                  )}
                   {fulfillment === "ship" ? (
                     <div>
                       <dt>Method</dt>
@@ -3897,7 +3977,7 @@ export default function Storefront({ products, inventory = null, pickupDetails =
                 </dl>
                 <p>
                   {fulfillment === "ship"
-                    ? "Payment stays on this page with this shipping method selected before payment."
+                    ? "The displayed shipping charge is the reserved live postage plus packaging total, rounded up to the nearest dollar."
                     : "Pickup orders have no shipping charge. Your card will be charged today to reserve available inventory and preorder items."}
                 </p>
               </section>

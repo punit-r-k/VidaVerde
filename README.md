@@ -77,8 +77,7 @@ Email signup sheet:
 - A blank spacer column separates them from `Unsubscribed At`, `Email`, `Reason`,
   and `Add Back` for suppressed addresses.
 - Select any number of `Remove` and `Add Back` checkboxes, then use the green
-  `Confirm Changes` control (or **Vida Verde → Confirm Email List Changes**) to
-  apply the whole batch together.
+  `Confirm Changes` control to apply the whole batch together.
 - Both lists appear on the same `Email List` sheet, and suppressed rows are
   shaded red so they are easy to distinguish.
 - Submitting the website signup form again is treated as renewed consent: the
@@ -92,8 +91,8 @@ Schema + seed data live in `supabase/schema.sql` for fresh rebuilds.
 Incremental production changes live in `supabase/migrations/` and should be run
 in filename order.
 It defines tables for `products`, `inventory`, `orders`, `order_items`,
-`preorder_queue`, `preorder_release_events`, `shipments`, `email_jobs`, and
-analytics data.
+`preorder_queue`, `preorder_release_events`, `shipments`, `shipment_parcels`,
+`shipment_quotes`, `checkout_shipping_quotes`, `email_jobs`, and analytics data.
 
 Preorder-specific data model:
 - `preorder_queue` stores the remaining preorder backlog by order and SKU.
@@ -123,14 +122,28 @@ The webhook still accepts `checkout.session.completed` and
 `checkout.session.async_payment_succeeded` for legacy in-flight payments created
 before the PaymentIntent migration.
 
-Shipping orders pass the selected shipping method and customer address into the
-PaymentIntent metadata and Stripe shipping details.
-The customer sees Standard Shipping, Expedited Shipping, and Personal delivery by the owner only when their entered address is eligible for the existing Greater Houston TX ZIP-prefix rule.
-Carrier selection remains internal after checkout.
+For shipping orders, the server obtains the fastest EasyPost rate for the entered
+address, adds the exact packaging cost, and rounds the combined charge up to the
+nearest dollar. That reserved quote and its cost breakdown are stored in the
+PaymentIntent metadata, then reused to buy the prepaid label automatically after
+payment. Packages are handed to carriers on Wednesday, and carrier transit time
+starts when the carrier receives the parcel.
 
 Required environment variables:
+- `NEXT_PUBLIC_SUPABASE_URL`
+- `SUPABASE_SERVICE_ROLE_KEY`
 - `STRIPE_SECRET_KEY`
+- `NEXT_PUBLIC_STRIPE_PUBLISHABLE_KEY`
 - `STRIPE_WEBHOOK_SECRET`
+- `EASYPOST_API_KEY` (use a production key before purchasing real labels)
+- `EASYPOST_FROM_NAME`
+- `EASYPOST_FROM_STREET1`
+- `EASYPOST_FROM_CITY`
+- `EASYPOST_FROM_STATE`
+- `EASYPOST_FROM_ZIP`
+- `EASYPOST_FROM_COUNTRY`
+- `EASYPOST_FROM_PHONE`
+- `EASYPOST_FROM_EMAIL`
 - `SITE_URL`
 
 Optional for customer order confirmation and preorder-ready emails:

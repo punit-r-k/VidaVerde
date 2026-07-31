@@ -30,9 +30,9 @@ This file is a practical map of the most important customer flows, operations fl
 - Behavior:
   - Customers can choose market pickup or shipping/delivery.
   - Customer details are validated before payment.
-  - `POST /api/order` creates a Stripe Checkout Session and redirects the customer to Stripe-hosted Checkout.
-  - Shipping orders send fixed Standard and Expedited shipping options through `shipping_rate_data`; owner delivery is added as a third option only for eligible local addresses.
-  - Successful payment is finalized by the Stripe webhook, with browser finalization as an idempotent backup after Stripe redirects back.
+  - `POST /api/order` creates a Stripe PaymentIntent after calculating the authoritative live shipping charge.
+  - Shipping orders use the fastest available EasyPost carrier rate plus exact packaging cost, rounded up to the nearest dollar. The same saved quote is reused for automatic prepaid-label purchase after payment.
+  - Successful payment is finalized by the Stripe webhook, with browser finalization as an idempotent backup.
 
 ### 4. Paid Order Recording And Fulfillment Side Effects
 - Webhook: `app/api/stripe/webhook/route.js`

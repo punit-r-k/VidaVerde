@@ -7,6 +7,7 @@ import {
   normalizeProductType
 } from "@/lib/shippingPricing";
 import { getRouteRateLimitConfig } from "@/lib/rateLimit";
+import { autoPurchaseFastestShippingLabels } from "@/lib/shipmentLabelAutomation";
 import {
   stripeConfig,
   stripeRequest,
@@ -287,13 +288,13 @@ const recordPaidOrder = async ({
 };
 
 const syncShipmentForOrder = async (orderId) => {
-  if (!orderId) return null;
+  if (!orderId) return { shipmentId: null, error: null };
 
-  const { error } = await supabaseAdmin.rpc("sync_shipment_for_order", {
+  const { data, error } = await supabaseAdmin.rpc("sync_shipment_for_order", {
     p_order_id: orderId
   });
 
-  return error;
+  return { shipmentId: typeof data === "string" ? data : null, error };
 };
 
 const runOrderSideEffects = async ({
@@ -319,7 +320,7 @@ const runOrderSideEffects = async ({
     };
   }
 
-  const shipmentError = await syncShipmentForOrder(orderId);
+  const { shipmentId, error: shipmentError } = await syncShipmentForOrder(orderId);
   if (shipmentError) {
     console.error("sync_shipment_for_order error:", shipmentError);
     return {
@@ -327,6 +328,14 @@ const runOrderSideEffects = async ({
       error: "Unable to sync shipment.",
       status: 500
     };
+  }
+
+  if (shipmentId) {
+    try {
+      await autoPurchaseFastestShippingLabels(shipmentId);
+    } catch (labelError) {
+      console.error("automatic EasyPost label purchase failed:", labelError?.message || labelError);
+    }
   }
 
   return maybeSendCustomerConfirmationEmail({

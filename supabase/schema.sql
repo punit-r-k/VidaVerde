@@ -82,7 +82,7 @@ create table if not exists shipments (
   payment_session_id text not null unique,
   payment_reference text,
   status text not null default 'pending_label'
-    check (status in ('pending_label', 'label_purchased', 'shipped', 'delivered', 'cancelled')),
+    check (status in ('pending_label', 'purchasing_label', 'label_purchased', 'shipped', 'delivered', 'cancelled')),
   label_provider text,
   label_url text,
   tracking_number text,
@@ -110,6 +110,8 @@ create table if not exists shipments (
   hot_sauce_count integer not null default 0 check (hot_sauce_count >= 0),
   notes text,
   label_purchased_at timestamptz,
+  label_purchase_started_at timestamptz,
+  label_purchase_error text,
   shipped_at timestamptz,
   created_at timestamptz not null default now(),
   updated_at timestamptz not null default now()
@@ -127,6 +129,29 @@ create table if not exists shipment_quotes (
   quote_json jsonb not null check (jsonb_typeof(quote_json) = 'object'),
   expires_at timestamptz not null,
   created_at timestamptz not null default now()
+);
+
+create table if not exists checkout_shipping_quotes (
+  id uuid primary key default gen_random_uuid(),
+  payment_session_id text unique,
+  status text not null default 'quoted'
+    check (status in ('quoted', 'label_purchased', 'cancelled')),
+  provider text not null default 'easypost',
+  quote_json jsonb not null check (jsonb_typeof(quote_json) = 'object'),
+  postage_cents integer not null check (postage_cents >= 0),
+  packaging_cents integer not null check (packaging_cents >= 0),
+  unrounded_cents integer not null check (unrounded_cents >= 0),
+  rounding_cents integer not null check (rounding_cents >= 0),
+  charged_shipping_cents integer not null check (charged_shipping_cents >= 0),
+  check (unrounded_cents = postage_cents + packaging_cents),
+  check (charged_shipping_cents = unrounded_cents + rounding_cents),
+  check (rounding_cents between 0 and 99),
+  check (charged_shipping_cents = 0 or mod(charged_shipping_cents, 100) = 0),
+  currency text not null default 'USD',
+  delivery_days integer check (delivery_days is null or delivery_days >= 0),
+  expires_at timestamptz not null,
+  created_at timestamptz not null default now(),
+  updated_at timestamptz not null default now()
 );
 
 create table if not exists shipment_parcels (
@@ -319,6 +344,7 @@ create index if not exists orders_test_order_created_at_idx on orders (created_a
 create index if not exists shipments_status_created_at_idx on shipments (status, created_at desc);
 create index if not exists shipments_created_at_idx on shipments (created_at desc);
 create index if not exists shipment_quotes_shipment_created_idx on shipment_quotes (shipment_id, created_at desc);
+create index if not exists checkout_shipping_quotes_status_created_idx on checkout_shipping_quotes (status, created_at desc);
 create index if not exists shipment_parcels_shipment_idx on shipment_parcels (shipment_id, parcel_index);
 create index if not exists shipment_parcels_tracking_idx on shipment_parcels (tracking_number);
 create index if not exists orders_status_created_fulfillment_idx
@@ -1389,6 +1415,7 @@ begin
     'orders',
     'shipments',
     'shipment_quotes',
+    'checkout_shipping_quotes',
     'shipment_parcels',
     'email_signups',
     'do_not_market',

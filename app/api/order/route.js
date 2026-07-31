@@ -1,7 +1,6 @@
 import { securePublicRoute } from "@/lib/apiSecurity";
 import {
   checkoutPayloadSchema,
-  isOwnerDeliveryAddressEligible,
   mapCheckoutIssuesToFieldErrors,
   SHIPPING_COUNTRY_CODE
 } from "@/lib/checkoutSchema";
@@ -9,13 +8,18 @@ import { MARKET_PICKUP_POLICY_VERSION } from "@/lib/pickupDetails";
 import { getProductMap } from "@/lib/products";
 import { getRouteRateLimitConfig } from "@/lib/rateLimit";
 import {
-  DEFAULT_SHIPPING_OPTION_ID,
-  getCustomerShippingOptions,
   getShippingOptionsForCart,
   normalizeProductType
 } from "@/lib/shippingPricing";
+import { getShippingChargeBreakdown } from "@/lib/shippingCharge";
+import { getEasyPostQuotes } from "@/lib/shippingQuotes";
+import {
+  chooseFastestQuote,
+  getQuoteTransitDays
+} from "@/lib/shippingRateRanking";
 import { getInventoryMap } from "@/lib/stock";
 import { stripeConfig, stripeRequest } from "@/lib/stripe";
+import { supabaseAdmin } from "@/lib/supabaseAdmin";
 
 const ORDER_RATE_LIMIT = getRouteRateLimitConfig("ORDER_CREATE", {
   windowMs: 60_000,
@@ -24,6 +28,7 @@ const ORDER_RATE_LIMIT = getRouteRateLimitConfig("ORDER_CREATE", {
 
 const CHECKOUT_UNAVAILABLE_MESSAGE =
   "Checkout is not available right now. Please try again later.";
+const SHIPPING_QUOTE_LIFETIME_MS = 60 * 60 * 1000;
 
 const getCheckoutValidationMessage = (issues) => {
   const message = issues?.[0]?.message || "";
@@ -170,6 +175,34 @@ const buildStripeShippingDetails = (customer) => ({
   }
 });
 
+const formatTransitDays = (days) => {
+  if (!Number.isFinite(days)) return "Live carrier estimate after carrier receipt";
+  return `${days} business ${days === 1 ? "day" : "days"} after carrier receipt`;
+};
+
+const getQuoteCarrierSummary = (quote, key) =>
+  [...new Set(
+    (Array.isArray(quote?.parcels) ? quote.parcels : [])
+      .map((parcel) => String(parcel?.selectedRate?.[key] || "").trim())
+      .filter(Boolean)
+  )].join(", ");
+
+const cancelCheckoutShippingQuote = async (quoteId) => {
+  if (!quoteId || !supabaseAdmin) return;
+
+  const { error } = await supabaseAdmin
+    .from("checkout_shipping_quotes")
+    .update({
+      status: "cancelled",
+      updated_at: new Date().toISOString()
+    })
+    .eq("id", quoteId);
+
+  if (error) {
+    console.error("checkout shipping quote cancellation failed:", error.message);
+  }
+};
+
 export const runtime = "nodejs";
 
 export async function POST(request) {
@@ -220,7 +253,6 @@ export async function POST(request) {
     consents,
     items: normalizedItems,
     fulfillment: normalizedFulfillment,
-    shippingOption: requestedShippingOption,
     inventorySnapshot
   } = parsedPayload.data;
   const { name, email } = customer;
@@ -333,19 +365,99 @@ export async function POST(request) {
     items: lineItems,
     subtotalCents: subtotal
   });
-  const includeOwnerDelivery =
-    !isPickup && isOwnerDeliveryAddressEligible(customer);
-  const customerShippingOptions = isPickup
-    ? []
-    : getCustomerShippingOptions({ shipping, includeOwnerDelivery });
-  const selectedShippingOption = isPickup
-    ? null
-    : customerShippingOptions.find((option) => option.id === requestedShippingOption) ||
-      customerShippingOptions.find((option) => option.id === DEFAULT_SHIPPING_OPTION_ID) ||
-      shipping.standardOption;
-  const defaultShippingAmount = isPickup
-    ? 0
-    : Number(selectedShippingOption?.amountCents || 0);
+  let selectedShippingOption = isPickup ? null : shipping.fastestOption;
+  let checkoutShippingQuote = null;
+  let shippingCharge = {
+    postageCents: 0,
+    packagingCents: 0,
+    unroundedCents: 0,
+    roundingCents: 0,
+    amountCents: 0
+  };
+
+  if (!isPickup) {
+    if (!supabaseAdmin) {
+      return respond.json({ error: CHECKOUT_UNAVAILABLE_MESSAGE }, { status: 500 });
+    }
+
+    try {
+      const quotes = await getEasyPostQuotes({
+        customer_name: customer.name,
+        customer_email: customer.email,
+        customer_phone: customer.phone,
+        address1: customer.address1,
+        address2: customer.address2,
+        city: customer.city,
+        state: customer.state,
+        postal_code: customer.postalCode,
+        country: SHIPPING_COUNTRY_CODE,
+        items_json: itemsPayload,
+        created_at: new Date().toISOString()
+      });
+      const fastestQuote = chooseFastestQuote(quotes);
+      if (!fastestQuote) throw new Error("EasyPost returned no shipping rates.");
+
+      shippingCharge = getShippingChargeBreakdown(fastestQuote);
+      if (shippingCharge.amountCents <= 0) {
+        throw new Error("EasyPost returned an invalid shipping total.");
+      }
+
+      const deliveryDays = getQuoteTransitDays(fastestQuote);
+      const carrier = getQuoteCarrierSummary(fastestQuote, "carrier");
+      const service = getQuoteCarrierSummary(fastestQuote, "service");
+      const carrierTransitLabel = formatTransitDays(deliveryDays);
+      selectedShippingOption = {
+        ...shipping.fastestOption,
+        amountCents: shippingCharge.amountCents,
+        carrier,
+        service,
+        carrierTransitLabel,
+        transitLabel: `Handed to the carrier on Wednesday via ${[carrier, service].filter(Boolean).join(" ") || "the fastest available service"}; estimated ${carrierTransitLabel.toLowerCase()}.`,
+        deliveryEstimate: Number.isFinite(deliveryDays)
+          ? {
+              minimum: { unit: "business_day", value: deliveryDays },
+              maximum: { unit: "business_day", value: deliveryDays }
+            }
+          : shipping.fastestOption.deliveryEstimate
+      };
+
+      const expiresAt = new Date(Date.now() + SHIPPING_QUOTE_LIFETIME_MS).toISOString();
+      const { data: savedQuote, error: saveQuoteError } = await supabaseAdmin
+        .from("checkout_shipping_quotes")
+        .insert({
+          status: "quoted",
+          provider: "easypost",
+          quote_json: fastestQuote,
+          postage_cents: shippingCharge.postageCents,
+          packaging_cents: shippingCharge.packagingCents,
+          unrounded_cents: shippingCharge.unroundedCents,
+          rounding_cents: shippingCharge.roundingCents,
+          charged_shipping_cents: shippingCharge.amountCents,
+          currency: "USD",
+          delivery_days: Number.isFinite(deliveryDays) ? deliveryDays : null,
+          expires_at: expiresAt
+        })
+        .select("id, expires_at")
+        .single();
+      if (saveQuoteError || !savedQuote) {
+        throw saveQuoteError || new Error("The live shipping quote could not be saved.");
+      }
+      checkoutShippingQuote = savedQuote;
+    } catch (shippingError) {
+      console.error("live EasyPost checkout quote failed:", shippingError?.message || shippingError);
+      return respond.json(
+        {
+          error: "We couldn't calculate live shipping for that address. Please verify the address and try again.",
+          fieldErrors: {
+            address1: "Live shipping could not be calculated for this address."
+          }
+        },
+        { status: 502 }
+      );
+    }
+  }
+
+  const defaultShippingAmount = shippingCharge.amountCents;
   const estimatedTotal = subtotal + defaultShippingAmount;
 
   if (!Number.isFinite(estimatedTotal) || estimatedTotal <= 0) {
@@ -373,6 +485,13 @@ export async function POST(request) {
     amount_subtotal: asMetadataValue(subtotal, 32),
     amount_shipping: asMetadataValue(defaultShippingAmount, 32),
     amount_total: asMetadataValue(estimatedTotal, 32),
+    shipping_quote_id: asMetadataValue(checkoutShippingQuote?.id, 64),
+    shipping_postage_cents: asMetadataValue(shippingCharge.postageCents, 32),
+    shipping_packaging_cents: asMetadataValue(shippingCharge.packagingCents, 32),
+    shipping_unrounded_cents: asMetadataValue(shippingCharge.unroundedCents, 32),
+    shipping_rounding_cents: asMetadataValue(shippingCharge.roundingCents, 32),
+    shipping_carrier: asMetadataValue(selectedShippingOption?.carrier, 120),
+    shipping_service: asMetadataValue(selectedShippingOption?.service, 120),
     customer_name: asMetadataValue(name, 120),
     customer_email: asMetadataValue(email, 254),
     customer_phone: asMetadataValue(customer.phone, 64),
@@ -396,6 +515,7 @@ export async function POST(request) {
 
   const serializedItems = JSON.stringify(itemsPayload);
   if (serializedItems.length > 500) {
+    await cancelCheckoutShippingQuote(checkoutShippingQuote?.id);
     return respond.json(
       { error: "Cart is too large to process online. Please split into multiple orders." },
       { status: 400 }
@@ -438,6 +558,7 @@ export async function POST(request) {
 
     if (!ok) {
       console.error("stripe payment_intent error:", error);
+      await cancelCheckoutShippingQuote(checkoutShippingQuote?.id);
       return respond.json(
         { error: "We couldn't start payment. Please try again." },
         { status: 500 }
@@ -445,22 +566,71 @@ export async function POST(request) {
     }
 
     if (!data?.client_secret || !data?.id) {
+      await cancelCheckoutShippingQuote(checkoutShippingQuote?.id);
       return respond.json(
         { error: "We couldn't start payment. Please try again." },
         { status: 500 }
       );
     }
 
+    if (checkoutShippingQuote?.id) {
+      const { data: attachedQuote, error: attachQuoteError } = await supabaseAdmin
+        .from("checkout_shipping_quotes")
+        .update({
+          payment_session_id: data.id,
+          updated_at: new Date().toISOString()
+        })
+        .eq("id", checkoutShippingQuote.id)
+        .eq("status", "quoted")
+        .select("id")
+        .maybeSingle();
+
+      if (attachQuoteError || !attachedQuote) {
+        console.error(
+          "checkout shipping quote attachment failed:",
+          attachQuoteError?.message || "The saved quote was no longer available."
+        );
+        await stripeRequest(`/v1/payment_intents/${encodeURIComponent(data.id)}/cancel`, {
+          method: "POST"
+        });
+        await cancelCheckoutShippingQuote(checkoutShippingQuote.id);
+        return respond.json(
+          { error: "We couldn't finish preparing shipping. Please try again." },
+          { status: 500 }
+        );
+      }
+    }
+
     return respond.json(
       {
         clientSecret: data.client_secret,
         paymentIntentId: data.id,
-        returnUrl: `${siteUrl}/?checkout=success`
+        returnUrl: `${siteUrl}/?checkout=success`,
+        subtotalCents: subtotal,
+        totalCents: estimatedTotal,
+        shipping: isPickup
+          ? null
+          : {
+              id: selectedShippingOption?.id,
+              label: selectedShippingOption?.label,
+              amountCents: shippingCharge.amountCents,
+              postageCents: shippingCharge.postageCents,
+              packagingCents: shippingCharge.packagingCents,
+              unroundedCents: shippingCharge.unroundedCents,
+              roundingCents: shippingCharge.roundingCents,
+              carrier: selectedShippingOption?.carrier,
+              service: selectedShippingOption?.service,
+              transitLabel: selectedShippingOption?.transitLabel,
+              carrierTransitLabel: selectedShippingOption?.carrierTransitLabel,
+              deliveryEstimate: selectedShippingOption?.deliveryEstimate,
+              quoteExpiresAt: checkoutShippingQuote?.expires_at
+            }
       },
       { status: 200 }
     );
   } catch (error) {
     console.error("payment_intent create error:", error);
+    await cancelCheckoutShippingQuote(checkoutShippingQuote?.id);
     return respond.json(
       { error: "We couldn't start payment. Please try again." },
       { status: 500 }
