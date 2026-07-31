@@ -145,7 +145,7 @@ The website also tracks orders and shipments, but it does not currently send:
 | Email | When it sends | Main purpose |
 | --- | --- | --- |
 | Order confirmation | Right after a paid order is successfully recorded | Confirms the purchase and shows the order details |
-| Pre-order ready for pickup | Whenever a restock makes preorder pickup items ready | Tells the customer their pre-order is now ready |
+| Pre-order ready for pickup | Five minutes after the latest restock makes preorder items ready | Consolidates newly ready products from the same order into one customer update |
 | Friday pickup reminder | Friday at about 12pm Central Time | Reminds the customer to pick up on Saturday |
 
 ## If You Want The Simplest Possible Mental Model

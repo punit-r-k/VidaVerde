@@ -1262,6 +1262,10 @@ function handleRestockEdit_(sheet, row) {
       syncInventoryRow_(sheet, row, sku, settings);
     }
 
+    if (payload.restock > 0 && response?.preorder_ready_email_queued) {
+      schedulePreorderReadyEmails_();
+    }
+
     const preorderReadyEmailCount = Number(
       response?.preorder_ready_emails_sent ??
         response?.preorder_ready_pickup_emails_sent ??
@@ -1592,6 +1596,44 @@ function ensureFinancialDistributionsSheet_() {
   }
 
   return sheet;
+}
+
+function schedulePreorderReadyEmails_() {
+  const handlerName = "sendQueuedPreorderReadyEmails";
+  const triggers = ScriptApp.getProjectTriggers().filter((trigger) =>
+    trigger.getHandlerFunction() === handlerName
+  );
+
+  for (const trigger of triggers) {
+    ScriptApp.deleteTrigger(trigger);
+  }
+
+  ScriptApp.newTrigger(handlerName)
+    .timeBased()
+    .after(5 * 60 * 1000)
+    .create();
+}
+
+function sendQueuedPreorderReadyEmails() {
+  const settings = getSettings_();
+  const response = postJson_(
+    `${settings.apiBaseUrl}/api/admin/preorder-ready-emails`,
+    settings,
+    {}
+  );
+
+  if (!response?.ok) {
+    // Keep unsent release events queued and try again after another debounce window.
+    schedulePreorderReadyEmails_();
+    throw new Error(
+      `Preorder-ready email delivery failed: ${response?.error || response?.message || response?.raw || "unknown error"}`
+    );
+  }
+
+  Logger.log(
+    "Sent %s consolidated preorder-ready email(s).",
+    Number(response?.sentCount || 0)
+  );
 }
 
 function ensurePunitMonthlyPayoutsSheet_() {

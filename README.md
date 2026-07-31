@@ -24,10 +24,10 @@ Inventory is stored in Supabase and synced to the `Inventory` sheet via Apps Scr
 Column C is a restock delta; it is cleared after a successful sync to prevent double-counting.
 The same Apps Script also syncs the weekly prep, orders, shipments, email
 signup, and health-check tabs used by operations.
-When a positive restock releases preorder units, the backend can also send
-preorder-ready emails for market-pickup or shipping orders, refresh the prep
-sheet, sync shipment rows for shipping orders, and return a count that the sheet
-shows as a toast.
+When a positive restock releases preorder units, the sheet schedules one
+preorder-ready email pass five minutes after the latest restock. Releases across
+multiple products are grouped by order so each customer receives one consolidated
+market-pickup or shipping update instead of an email per product.
 
 Apps Script file: `apps-script/inventory-sync.gs`
 
@@ -144,8 +144,8 @@ The default banner image is bundled at `public/email/order-confirmation-banner.p
 When `ORDER_CONFIRMATION_EMAIL_MODE=queue` is enabled, confirmations are written
 to `email_jobs` and processed through `POST /api/admin/email-jobs`.
 
-Preorder-ready emails are sent separately from `lib/preorderReadyEmail.js` when
-a restock releases preorder units. Market-pickup emails include the current
+Preorder-ready emails are sent separately from `lib/preorderReadyEmail.js` five
+minutes after the latest restock releases preorder units. Market-pickup emails include the current
 pickup date details and calendar attachment; shipping emails include the shipping
 method, ship-to address, and tracking/delivery follow-up language. Shipping
 orders also have their shipment rows synced when preorder release emails are

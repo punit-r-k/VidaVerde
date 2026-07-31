@@ -1,6 +1,5 @@
 import { restockPayloadSchema } from "@/lib/adminSchemas";
 import { secureAdminRoute } from "@/lib/apiSecurity";
-import { sendPreorderReadyEmails } from "@/lib/preorderReadyEmail";
 import { getRouteRateLimitConfig } from "@/lib/rateLimit";
 import { supabaseAdmin } from "@/lib/supabaseAdmin";
 
@@ -72,28 +71,12 @@ export async function POST(request) {
     return respond.json({ error: "We couldn't update stock right now." }, { status: 500 });
   }
 
-  let preorderReadyEmailResult = null;
-
-  if (qty > 0) {
-    preorderReadyEmailResult = await sendPreorderReadyEmails({
-      sku: cleanSku
-    });
-
-    if (!preorderReadyEmailResult.ok) {
-      console.error(
-        "preorder ready email error:",
-        preorderReadyEmailResult.errors || preorderReadyEmailResult.error
-      );
-    }
-  }
-
   return respond.json({
     ok: true,
     inventory: data?.[0] || null,
-    preorder_ready_emails_sent: preorderReadyEmailResult?.sentCount || 0,
-    preorder_ready_pickup_emails_sent:
-      preorderReadyEmailResult?.pickupSentCount || 0,
-    preorder_ready_shipping_emails_sent:
-      preorderReadyEmailResult?.shippingSentCount || 0
+    preorder_ready_email_queued: qty > 0,
+    preorder_ready_emails_sent: 0,
+    preorder_ready_pickup_emails_sent: 0,
+    preorder_ready_shipping_emails_sent: 0
   });
 }
