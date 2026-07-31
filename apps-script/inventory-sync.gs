@@ -53,7 +53,10 @@ const CONFIG = {
   EMAIL_SIGNUPS: {
     HEADER_ROW: 1,
     START_ROW: 2,
-    REMOVE_COL: 5
+    REMOVE_COL: 4,
+    RESTORE_COL: 9,
+    CONFIRM_ROW: 2,
+    CONFIRM_COL: 11
   },
   HEALTH: {
     HEADER_ROW: 1,
@@ -74,6 +77,7 @@ function onOpen() {
     .addItem("Pickup Reminders", "sendPickupReminders")
     .addItem("Email Queue", "processEmailQueue")
     .addItem("Process STOP Replies", "processEmailUnsubscribeReplies")
+    .addItem("Confirm Email List Changes", "confirmEmailListChanges")
     .addItem("Send Previous Month Punit Payout", "sendMonthlyPunitPayoutReport")
     .addItem("Setup Punit Payout Automation", "setupMonthlyPunitPayoutTrigger")
     .addItem("Setup Triggers", "setupTriggers")
@@ -100,11 +104,11 @@ function handleInventoryEdit_(e) {
 
   if (sheetName === CONFIG.EMAIL_SIGNUPS_SHEET_NAME) {
     if (
-      row >= CONFIG.EMAIL_SIGNUPS.START_ROW &&
-      col === CONFIG.EMAIL_SIGNUPS.REMOVE_COL &&
+      row === CONFIG.EMAIL_SIGNUPS.CONFIRM_ROW &&
+      col === CONFIG.EMAIL_SIGNUPS.CONFIRM_COL &&
       String(e.value || "").toUpperCase() === "TRUE"
     ) {
-      handleEmailSignupRemoval_(sheet, row);
+      confirmEmailListChanges_(sheet);
     }
     return;
   }
@@ -1205,11 +1209,17 @@ function syncEmailSignups() {
   sheet.clear();
 
   const headerValues = [[
-    "Added / Removed At",
+    "Signed Up At",
     "Email",
-    "Status",
-    "Source / Reason",
-    "Remove"
+    "Source",
+    "Remove",
+    "",
+    "Unsubscribed At",
+    "Email",
+    "Reason",
+    "Add Back",
+    "",
+    "Confirm Changes"
   ]];
   sheet
     .getRange(CONFIG.EMAIL_SIGNUPS.HEADER_ROW, 1, 1, headerValues[0].length)
@@ -1218,85 +1228,121 @@ function syncEmailSignups() {
   const activeRows = emailSignups.map((signup) => ([
     signup?.created_at ? new Date(signup.created_at) : "",
     String(signup?.email || ""),
-    "Active",
     String(signup?.source || "website"),
     false
   ]));
   const suppressedRows = doNotMarket.map((entry) => ([
     entry?.unsubscribed_at ? new Date(entry.unsubscribed_at) : "",
     String(entry?.email || ""),
-    "Do Not Market",
     String(entry?.reason || "manual") === "stop_reply"
       ? "STOP reply"
       : "Removed from Email List",
-    ""
+    false
   ]));
-  const rows = [...activeRows, ...suppressedRows];
 
-  if (rows.length === 0) {
-    sheet
-      .getRange(CONFIG.EMAIL_SIGNUPS.START_ROW, 1)
-      .setValue("No email list records yet.");
+  if (activeRows.length === 0) {
+    sheet.getRange(CONFIG.EMAIL_SIGNUPS.START_ROW, 1).setValue("No active subscribers.");
   } else {
     sheet
-      .getRange(CONFIG.EMAIL_SIGNUPS.START_ROW, 1, rows.length, rows[0].length)
-      .setValues(rows);
+      .getRange(CONFIG.EMAIL_SIGNUPS.START_ROW, 1, activeRows.length, 4)
+      .setValues(activeRows);
 
     sheet
-      .getRange(CONFIG.EMAIL_SIGNUPS.START_ROW, 1, rows.length, 1)
+      .getRange(CONFIG.EMAIL_SIGNUPS.START_ROW, 1, activeRows.length, 1)
       .setNumberFormat("yyyy-mm-dd hh:mm");
-    if (activeRows.length > 0) {
-      sheet
-        .getRange(
-          CONFIG.EMAIL_SIGNUPS.START_ROW,
-          CONFIG.EMAIL_SIGNUPS.REMOVE_COL,
-          activeRows.length,
-          1
-        )
-        .insertCheckboxes();
-    }
-    if (suppressedRows.length > 0) {
-      sheet
-        .getRange(
-          CONFIG.EMAIL_SIGNUPS.START_ROW + activeRows.length,
-          1,
-          suppressedRows.length,
-          5
-        )
-        .setBackground("#f4cccc");
-    }
+    sheet
+      .getRange(CONFIG.EMAIL_SIGNUPS.START_ROW, CONFIG.EMAIL_SIGNUPS.REMOVE_COL, activeRows.length, 1)
+      .insertCheckboxes();
+  }
+
+  if (suppressedRows.length === 0) {
+    sheet.getRange(CONFIG.EMAIL_SIGNUPS.START_ROW, 6).setValue("No suppressed addresses.");
+  } else {
+    sheet
+      .getRange(CONFIG.EMAIL_SIGNUPS.START_ROW, 6, suppressedRows.length, 4)
+      .setValues(suppressedRows)
+      .setBackground("#f4cccc");
+    sheet
+      .getRange(CONFIG.EMAIL_SIGNUPS.START_ROW, 6, suppressedRows.length, 1)
+      .setNumberFormat("yyyy-mm-dd hh:mm");
+    sheet
+      .getRange(CONFIG.EMAIL_SIGNUPS.START_ROW, CONFIG.EMAIL_SIGNUPS.RESTORE_COL, suppressedRows.length, 1)
+      .insertCheckboxes();
   }
 
   sheet
-    .getRange(CONFIG.EMAIL_SIGNUPS.HEADER_ROW, 1, 1, 5)
+    .getRange(CONFIG.EMAIL_SIGNUPS.HEADER_ROW, 1, 1, 11)
     .setFontWeight("bold");
+  sheet
+    .getRange(CONFIG.EMAIL_SIGNUPS.CONFIRM_ROW, CONFIG.EMAIL_SIGNUPS.CONFIRM_COL)
+    .insertCheckboxes()
+    .setValue(false)
+    .setBackground("#b6d7a8")
+    .setNote("Select all Remove and Add Back checkboxes first, then check here to apply every change together.");
   sheet.setFrozenRows(1);
-  sheet.autoResizeColumns(1, 5);
+  sheet.autoResizeColumns(1, 11);
+  sheet.setColumnWidth(5, 30);
+  sheet.setColumnWidth(10, 30);
   removeLegacyDoNotMarketSheet_();
 }
 
-function handleEmailSignupRemoval_(sheet, row) {
-  const email = String(sheet.getRange(row, 2).getValue() || "").trim().toLowerCase();
-  const status = String(sheet.getRange(row, 3).getValue() || "").trim();
-  if (!email || status !== "Active") {
-    sheet.getRange(row, CONFIG.EMAIL_SIGNUPS.REMOVE_COL).setValue(false);
-    return;
-  }
+function confirmEmailListChanges() {
+  const sheet = SpreadsheetApp.getActive().getSheetByName(CONFIG.EMAIL_SIGNUPS_SHEET_NAME);
+  if (!sheet) throw new Error("The Email List sheet was not found.");
+  confirmEmailListChanges_(sheet);
+}
 
-  const settings = getSettings_();
-  const response = deleteJson_(
-    `${settings.apiBaseUrl}/api/admin/email-signups`,
-    settings,
-    { emails: [email], reason: "manual_sheet" }
+function confirmEmailListChanges_(sheet) {
+  const confirmCell = sheet.getRange(
+    CONFIG.EMAIL_SIGNUPS.CONFIRM_ROW,
+    CONFIG.EMAIL_SIGNUPS.CONFIRM_COL
   );
+  const lock = LockService.getDocumentLock() || LockService.getScriptLock();
+  lock.waitLock(30000);
 
-  if (!response?.ok) {
-    sheet.getRange(row, CONFIG.EMAIL_SIGNUPS.REMOVE_COL).setValue(false);
-    throw new Error(response?.error || `Could not remove ${email} from the email list.`);
+  try {
+    const lastRow = Math.max(sheet.getLastRow(), CONFIG.EMAIL_SIGNUPS.START_ROW);
+    const rows = sheet
+      .getRange(CONFIG.EMAIL_SIGNUPS.START_ROW, 1, lastRow - 1, 9)
+      .getValues();
+    const removeEmails = rows
+      .filter((row) => row[3] === true)
+      .map((row) => String(row[1] || "").trim().toLowerCase())
+      .filter(Boolean);
+    const restoreEmails = rows
+      .filter((row) => row[8] === true)
+      .map((row) => String(row[6] || "").trim().toLowerCase())
+      .filter(Boolean);
+
+    if (removeEmails.length === 0 && restoreEmails.length === 0) {
+      toastIfAvailable_("Select at least one Remove or Add Back checkbox first.", "Vida Verde", 5);
+      return;
+    }
+
+    const settings = getSettings_();
+    const response = putJson_(
+      `${settings.apiBaseUrl}/api/admin/email-signups`,
+      settings,
+      {
+        remove_emails: removeEmails,
+        restore_emails: restoreEmails
+      }
+    );
+
+    if (!response?.ok) {
+      throw new Error(response?.error || "Could not apply the selected email-list changes.");
+    }
+
+    syncEmailSignups();
+    toastIfAvailable_(
+      `${Number(response?.removed_count || 0)} removed; ${Number(response?.restored_count || 0)} added back.`,
+      "Vida Verde",
+      5
+    );
+  } finally {
+    confirmCell.setValue(false);
+    lock.releaseLock();
   }
-
-  syncEmailSignups();
-  toastIfAvailable_(`${email} was removed from the email list.`, "Vida Verde", 5);
 }
 
 function processEmailUnsubscribeReplies() {
@@ -2249,6 +2295,18 @@ function deleteJson_(url, settings, payload) {
 function patchJson_(url, settings, payload) {
   const response = UrlFetchApp.fetch(url, {
     method: "patch",
+    contentType: "application/json",
+    headers: buildAdminAuthHeaders_(settings),
+    payload: JSON.stringify(payload),
+    muteHttpExceptions: true
+  });
+
+  return parseJsonResponse_(response);
+}
+
+function putJson_(url, settings, payload) {
+  const response = UrlFetchApp.fetch(url, {
+    method: "put",
     contentType: "application/json",
     headers: buildAdminAuthHeaders_(settings),
     payload: JSON.stringify(payload),

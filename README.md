@@ -73,11 +73,14 @@ Spreadsheet toggle for stock visibility:
 
 Email signup sheet:
 - A dedicated `Email List` sheet is created automatically during sync.
-- Columns: `Added / Removed At`, `Email`, `Status`, `Source / Reason`, `Remove`
-- Checking `Remove` unsubscribes that address and removes its row.
-- Active and `Do Not Market` addresses appear together on the `Email List` sheet;
-  suppressed rows are shaded red and retained so future marketing sends cannot
-  accidentally include them.
+- Active subscribers appear in `Signed Up At`, `Email`, `Source`, and `Remove`.
+- A blank spacer column separates them from `Unsubscribed At`, `Email`, `Reason`,
+  and `Add Back` for suppressed addresses.
+- Select any number of `Remove` and `Add Back` checkboxes, then use the green
+  `Confirm Changes` control (or **Vida Verde → Confirm Email List Changes**) to
+  apply the whole batch together.
+- Both lists appear on the same `Email List` sheet, and suppressed rows are
+  shaded red so they are easy to distinguish.
 - Submitting the website signup form again is treated as renewed consent: the
   address leaves `Do Not Market` and returns to the active `Email List`.
 - The Apps Script checks replies to `vvsauerkraut@gmail.com` every five minutes;
