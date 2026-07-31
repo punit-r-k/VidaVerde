@@ -201,6 +201,7 @@ create index if not exists analytics_events_section_created_at_idx on analytics_
 create index if not exists analytics_events_product_created_at_idx on analytics_events (product_sku, created_at desc);
 create index if not exists analytics_events_session_created_at_idx on analytics_events (session_id, created_at desc);
 create index if not exists orders_test_order_created_at_idx on orders (created_at desc) where is_test_order;
+
 create index if not exists shipments_status_created_at_idx on shipments (status, created_at desc);
 create index if not exists shipments_created_at_idx on shipments (created_at desc);
 create index if not exists shipment_quotes_shipment_created_idx on shipment_quotes (shipment_id, created_at desc);
@@ -321,6 +322,26 @@ create table if not exists order_items (
 );
 
 create index if not exists order_items_order_id_idx on order_items (order_id);
+
+create or replace function get_non_test_units_sold()
+returns table (
+  sku text,
+  units_sold bigint
+)
+language sql
+stable
+set search_path = public
+as $$
+  select
+    oi.sku,
+    sum(oi.quantity)::bigint as units_sold
+  from order_items oi
+  join orders o on o.id = oi.order_id
+  where o.status = 'paid'
+    and not coalesce(o.is_test_order, false)
+  group by oi.sku
+  order by oi.sku;
+$$;
 
 create table if not exists preorder_queue (
   id uuid primary key default gen_random_uuid(),

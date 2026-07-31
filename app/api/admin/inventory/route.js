@@ -42,23 +42,28 @@ export async function GET(request) {
     );
   }
 
-  const [{ data, error }, showStock] = await Promise.all([
+  const [{ data, error }, { data: salesData, error: salesError }, showStock] = await Promise.all([
     supabaseAdmin
       .from("inventory")
       .select("sku, on_hand, preorders_remaining, units_sold, expected_restock_date"),
+    supabaseAdmin.rpc("get_non_test_units_sold"),
     getShowStockSetting()
   ]);
 
-  if (error) {
-    console.error("inventory admin read error:", error);
+  if (error || salesError) {
+    console.error("inventory admin read error:", error || salesError);
     return respond.json({ error: "We couldn't load inventory right now." }, { status: 500 });
   }
+
+  const nonTestSalesBySku = new Map(
+    (salesData || []).map((row) => [normalizeSku(row?.sku), Number(row?.units_sold) || 0])
+  );
 
   const inventory = (data || []).map((row) => ({
     sku: row.sku,
     on_hand: row.on_hand ?? 0,
     preorders_remaining: row.preorders_remaining ?? 0,
-    units_sold: row.units_sold ?? 0,
+    units_sold: nonTestSalesBySku.get(normalizeSku(row.sku)) || 0,
     expected_restock_date: row.expected_restock_date || null,
     status: row.on_hand > 0 ? "In Stock" : "Out of Stock"
   }));
