@@ -73,7 +73,15 @@ Spreadsheet toggle for stock visibility:
 
 Email signup sheet:
 - A dedicated `Email List` sheet is created automatically during sync.
-- Columns: `Signed Up At`, `Email`, `Source`
+- Columns: `Added / Removed At`, `Email`, `Status`, `Source / Reason`, `Remove`
+- Checking `Remove` unsubscribes that address and removes its row.
+- Active and `Do Not Market` addresses appear together on the `Email List` sheet;
+  suppressed rows are shaded red and retained so future marketing sends cannot
+  accidentally include them.
+- Submitting the website signup form again is treated as renewed consent: the
+  address leaves `Do Not Market` and returns to the active `Email List`.
+- The Apps Script checks replies to `vvsauerkraut@gmail.com` every five minutes;
+  a reply whose first non-empty line is `STOP` (case-insensitive) is unsubscribed automatically.
 
 ## Supabase Schema
 

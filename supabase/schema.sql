@@ -157,6 +157,74 @@ create table if not exists email_signups (
   created_at timestamptz not null default now()
 );
 
+create table if not exists do_not_market (
+  email text primary key,
+  reason text not null default 'manual',
+  source_message_id text,
+  unsubscribed_at timestamptz not null default now(),
+  check (email = lower(trim(email)))
+);
+
+create or replace function unsubscribe_email_addresses(
+  p_emails text[],
+  p_reason text default 'manual',
+  p_source_message_id text default null
+)
+returns integer
+language plpgsql
+set search_path = public
+as $$
+declare
+  v_emails text[];
+  v_removed integer := 0;
+begin
+  select array_agg(distinct lower(trim(value)))
+    into v_emails
+  from unnest(coalesce(p_emails, array[]::text[])) as value
+  where trim(value) <> '';
+
+  if coalesce(array_length(v_emails, 1), 0) = 0 then
+    return 0;
+  end if;
+
+  insert into do_not_market (email, reason, source_message_id, unsubscribed_at)
+  select value, coalesce(nullif(trim(p_reason), ''), 'manual'),
+    nullif(trim(p_source_message_id), ''), now()
+  from unnest(v_emails) as value
+  on conflict (email) do update
+  set reason = excluded.reason,
+      source_message_id = coalesce(excluded.source_message_id, do_not_market.source_message_id),
+      unsubscribed_at = excluded.unsubscribed_at;
+
+  delete from email_signups where lower(trim(email)) = any(v_emails);
+  get diagnostics v_removed = row_count;
+  return v_removed;
+end;
+$$;
+
+create or replace function subscribe_email_address(
+  p_email text,
+  p_source text default 'website',
+  p_ip_address text default null,
+  p_user_agent text default null
+)
+returns uuid
+language plpgsql
+set search_path = public
+as $$
+declare
+  v_email text := lower(trim(p_email));
+  v_id uuid;
+begin
+  delete from email_signups where lower(trim(email)) = v_email;
+  delete from do_not_market where email = v_email;
+  insert into email_signups (email, source, ip_address, user_agent)
+  values (v_email, coalesce(nullif(trim(p_source), ''), 'website'), p_ip_address, p_user_agent)
+  returning id into v_id;
+  return v_id;
+end;
+$$;
+
 create table if not exists analytics_events (
   id uuid primary key default gen_random_uuid(),
   event_name text not null,
@@ -194,6 +262,7 @@ create table if not exists email_jobs (
 
 create index if not exists email_signups_email_idx on email_signups (email);
 create index if not exists email_signups_created_at_idx on email_signups (created_at desc);
+create index if not exists do_not_market_unsubscribed_at_idx on do_not_market (unsubscribed_at desc);
 create index if not exists analytics_events_created_at_idx on analytics_events (created_at desc);
 create index if not exists analytics_events_event_created_at_idx on analytics_events (event_name, created_at desc);
 create index if not exists analytics_events_page_created_at_idx on analytics_events (page_path, created_at desc);
@@ -1277,6 +1346,7 @@ begin
     'shipment_quotes',
     'shipment_parcels',
     'email_signups',
+    'do_not_market',
     'analytics_events',
     'email_jobs',
     'order_items',
@@ -1313,6 +1383,8 @@ revoke execute on function sync_all_shipments() from public, anon, authenticated
 revoke execute on function get_admin_prep_data(date, timestamptz, timestamptz) from public, anon, authenticated;
 revoke execute on function apply_restock(text, integer) from public, anon, authenticated;
 revoke execute on function set_expected_restock_date(text, date) from public, anon, authenticated;
+revoke execute on function unsubscribe_email_addresses(text[], text, text) from public, anon, authenticated;
+revoke execute on function subscribe_email_address(text, text, text, text) from public, anon, authenticated;
 
 grant execute on function consume_api_rate_limit(text, text, integer, integer) to service_role;
 grant execute on function record_paid_order(text, text, text, text, text, integer, integer, integer, integer, jsonb, jsonb) to service_role;
@@ -1321,6 +1393,8 @@ grant execute on function sync_all_shipments() to service_role;
 grant execute on function get_admin_prep_data(date, timestamptz, timestamptz) to service_role;
 grant execute on function apply_restock(text, integer) to service_role;
 grant execute on function set_expected_restock_date(text, date) to service_role;
+grant execute on function unsubscribe_email_addresses(text[], text, text) to service_role;
+grant execute on function subscribe_email_address(text, text, text, text) to service_role;
 
 insert into products (
   sku,

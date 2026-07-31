@@ -83,11 +83,11 @@ export async function POST(request) {
     MAX_USER_AGENT_LENGTH
   );
 
-  const { error } = await supabaseAdmin.from("email_signups").insert({
-    email,
-    source,
-    ip_address: clientId,
-    user_agent: userAgent
+  const { error } = await supabaseAdmin.rpc("subscribe_email_address", {
+    p_email: email,
+    p_source: source,
+    p_ip_address: clientId,
+    p_user_agent: userAgent
   });
 
   if (error) {

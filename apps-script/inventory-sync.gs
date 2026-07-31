@@ -52,7 +52,8 @@ const CONFIG = {
   },
   EMAIL_SIGNUPS: {
     HEADER_ROW: 1,
-    START_ROW: 2
+    START_ROW: 2,
+    REMOVE_COL: 5
   },
   HEALTH: {
     HEADER_ROW: 1,
@@ -72,6 +73,7 @@ function onOpen() {
     .addSeparator()
     .addItem("Pickup Reminders", "sendPickupReminders")
     .addItem("Email Queue", "processEmailQueue")
+    .addItem("Process STOP Replies", "processEmailUnsubscribeReplies")
     .addItem("Send Previous Month Punit Payout", "sendMonthlyPunitPayoutReport")
     .addItem("Setup Punit Payout Automation", "setupMonthlyPunitPayoutTrigger")
     .addItem("Setup Triggers", "setupTriggers")
@@ -95,6 +97,17 @@ function handleInventoryEdit_(e) {
   const row = e.range.getRow();
   const col = e.range.getColumn();
   const sheetName = sheet.getName();
+
+  if (sheetName === CONFIG.EMAIL_SIGNUPS_SHEET_NAME) {
+    if (
+      row >= CONFIG.EMAIL_SIGNUPS.START_ROW &&
+      col === CONFIG.EMAIL_SIGNUPS.REMOVE_COL &&
+      String(e.value || "").toUpperCase() === "TRUE"
+    ) {
+      handleEmailSignupRemoval_(sheet, row);
+    }
+    return;
+  }
 
   if (sheetName === CONFIG.SETTINGS_SHEET_NAME) {
     if (
@@ -203,9 +216,26 @@ function setupTriggers() {
   resetEditTrigger_();
   resetFridayReminderTrigger_();
   resetMonthlyPunitPayoutTrigger_();
+  resetEmailUnsubscribeTrigger_();
   SpreadsheetApp.getUi().alert(
-    "Triggers reset: inventory edits, Friday pickup reminders, and monthly Punit payout emails."
+    "Triggers reset: inventory edits, STOP replies, Friday pickup reminders, and monthly Punit payout emails."
   );
+}
+
+function resetEmailUnsubscribeTrigger_() {
+  const handlerName = "processEmailUnsubscribeReplies";
+  const triggers = ScriptApp.getProjectTriggers().filter((trigger) =>
+    trigger.getHandlerFunction() === handlerName
+  );
+
+  for (const trigger of triggers) {
+    ScriptApp.deleteTrigger(trigger);
+  }
+
+  ScriptApp.newTrigger(handlerName)
+    .timeBased()
+    .everyMinutes(5)
+    .create();
 }
 
 function masterSync() {
@@ -1168,29 +1198,46 @@ function syncEmailSignups() {
   const emailSignups = Array.isArray(response?.email_signups)
     ? response.email_signups
     : [];
+  const doNotMarket = Array.isArray(response?.do_not_market)
+    ? response.do_not_market
+    : [];
   const sheet = ensureEmailSignupsSheet_();
-  sheet.clearContents();
+  sheet.clear();
 
   const headerValues = [[
-    "Signed Up At",
+    "Added / Removed At",
     "Email",
-    "Source"
+    "Status",
+    "Source / Reason",
+    "Remove"
   ]];
   sheet
     .getRange(CONFIG.EMAIL_SIGNUPS.HEADER_ROW, 1, 1, headerValues[0].length)
     .setValues(headerValues);
 
-  if (emailSignups.length === 0) {
+  const activeRows = emailSignups.map((signup) => ([
+    signup?.created_at ? new Date(signup.created_at) : "",
+    String(signup?.email || ""),
+    "Active",
+    String(signup?.source || "website"),
+    false
+  ]));
+  const suppressedRows = doNotMarket.map((entry) => ([
+    entry?.unsubscribed_at ? new Date(entry.unsubscribed_at) : "",
+    String(entry?.email || ""),
+    "Do Not Market",
+    String(entry?.reason || "manual") === "stop_reply"
+      ? "STOP reply"
+      : "Removed from Email List",
+    ""
+  ]));
+  const rows = [...activeRows, ...suppressedRows];
+
+  if (rows.length === 0) {
     sheet
       .getRange(CONFIG.EMAIL_SIGNUPS.START_ROW, 1)
-      .setValue("No email signups yet.");
+      .setValue("No email list records yet.");
   } else {
-    const rows = emailSignups.map((signup) => ([
-      signup?.created_at ? new Date(signup.created_at) : "",
-      String(signup?.email || ""),
-      String(signup?.source || "website")
-    ]));
-
     sheet
       .getRange(CONFIG.EMAIL_SIGNUPS.START_ROW, 1, rows.length, rows[0].length)
       .setValues(rows);
@@ -1198,13 +1245,114 @@ function syncEmailSignups() {
     sheet
       .getRange(CONFIG.EMAIL_SIGNUPS.START_ROW, 1, rows.length, 1)
       .setNumberFormat("yyyy-mm-dd hh:mm");
+    if (activeRows.length > 0) {
+      sheet
+        .getRange(
+          CONFIG.EMAIL_SIGNUPS.START_ROW,
+          CONFIG.EMAIL_SIGNUPS.REMOVE_COL,
+          activeRows.length,
+          1
+        )
+        .insertCheckboxes();
+    }
+    if (suppressedRows.length > 0) {
+      sheet
+        .getRange(
+          CONFIG.EMAIL_SIGNUPS.START_ROW + activeRows.length,
+          1,
+          suppressedRows.length,
+          5
+        )
+        .setBackground("#f4cccc");
+    }
   }
 
   sheet
-    .getRange(CONFIG.EMAIL_SIGNUPS.HEADER_ROW, 1, 1, 3)
+    .getRange(CONFIG.EMAIL_SIGNUPS.HEADER_ROW, 1, 1, 5)
     .setFontWeight("bold");
   sheet.setFrozenRows(1);
-  sheet.autoResizeColumns(1, 3);
+  sheet.autoResizeColumns(1, 5);
+  removeLegacyDoNotMarketSheet_();
+}
+
+function handleEmailSignupRemoval_(sheet, row) {
+  const email = String(sheet.getRange(row, 2).getValue() || "").trim().toLowerCase();
+  const status = String(sheet.getRange(row, 3).getValue() || "").trim();
+  if (!email || status !== "Active") {
+    sheet.getRange(row, CONFIG.EMAIL_SIGNUPS.REMOVE_COL).setValue(false);
+    return;
+  }
+
+  const settings = getSettings_();
+  const response = deleteJson_(
+    `${settings.apiBaseUrl}/api/admin/email-signups`,
+    settings,
+    { emails: [email], reason: "manual_sheet" }
+  );
+
+  if (!response?.ok) {
+    sheet.getRange(row, CONFIG.EMAIL_SIGNUPS.REMOVE_COL).setValue(false);
+    throw new Error(response?.error || `Could not remove ${email} from the email list.`);
+  }
+
+  syncEmailSignups();
+  toastIfAvailable_(`${email} was removed from the email list.`, "Vida Verde", 5);
+}
+
+function processEmailUnsubscribeReplies() {
+  const inboxAddress = "vvsauerkraut@gmail.com";
+  const processedProperty = "PROCESSED_STOP_REPLY_MESSAGE_IDS";
+  const props = PropertiesService.getScriptProperties();
+  const processedIds = new Set(
+    JSON.parse(props.getProperty(processedProperty) || "[]")
+  );
+  const messages = GmailApp.search(
+    `to:${inboxAddress} -from:${inboxAddress} newer_than:30d`,
+    0,
+    100
+  ).flatMap((thread) => thread.getMessages());
+  const inspectedIds = [];
+  const unsubscribeEmails = new Set();
+
+  for (const message of messages) {
+    const messageId = String(message.getId() || "");
+    if (!messageId || processedIds.has(messageId)) continue;
+
+    inspectedIds.push(messageId);
+    const firstReplyLine = String(message.getPlainBody() || "")
+      .split(/\r?\n/)
+      .map((line) => line.trim())
+      .find(Boolean);
+    if (String(firstReplyLine || "").toLowerCase() !== "stop") continue;
+
+    const from = String(message.getFrom() || "");
+    const angleMatch = from.match(/<([^<>]+)>/);
+    const senderEmail = String(angleMatch?.[1] || from).trim().toLowerCase();
+    if (/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(senderEmail)) {
+      unsubscribeEmails.add(senderEmail);
+    }
+  }
+
+  if (unsubscribeEmails.size > 0) {
+    const settings = getSettings_();
+    const response = deleteJson_(
+      `${settings.apiBaseUrl}/api/admin/email-signups`,
+      settings,
+      { emails: [...unsubscribeEmails], reason: "stop_reply" }
+    );
+    if (!response?.ok) {
+      throw new Error(response?.error || "Could not process STOP replies.");
+    }
+    syncEmailSignups();
+  }
+
+  const nextProcessedIds = [...processedIds, ...inspectedIds].slice(-1000);
+  props.setProperty(processedProperty, JSON.stringify(nextProcessedIds));
+  Logger.log(
+    "Processed %s new email reply message(s); removed %s subscriber(s).",
+    inspectedIds.length,
+    unsubscribeEmails.size
+  );
 }
 
 function handleRestockEdit_(sheet, row) {
@@ -2068,6 +2216,27 @@ function getJson_(url, settings) {
 function postJson_(url, settings, payload) {
   const response = UrlFetchApp.fetch(url, {
     method: "post",
+    contentType: "application/json",
+    headers: buildAdminAuthHeaders_(settings),
+    payload: JSON.stringify(payload),
+    muteHttpExceptions: true
+  });
+
+  return parseJsonResponse_(response);
+}
+
+function removeLegacyDoNotMarketSheet_() {
+  const book = SpreadsheetApp.getActive();
+  const sheet = book.getSheetByName("Do Not Market");
+
+  if (sheet && book.getSheets().length > 1) {
+    book.deleteSheet(sheet);
+  }
+}
+
+function deleteJson_(url, settings, payload) {
+  const response = UrlFetchApp.fetch(url, {
+    method: "delete",
     contentType: "application/json",
     headers: buildAdminAuthHeaders_(settings),
     payload: JSON.stringify(payload),
