@@ -172,7 +172,7 @@ export async function POST(request) {
     return respond.json(
       {
         error: noEligibleRates
-          ? "We couldn't find eligible Normal or Expedited rates for that address. Please verify it and try again."
+          ? "We couldn't find eligible Shipping or Expedited rates for that address. Please verify it and try again."
           : "We couldn't update shipping for that address. Please verify it and try again."
       },
       { status: noEligibleRates ? 422 : 502 }

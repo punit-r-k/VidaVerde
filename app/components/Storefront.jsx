@@ -2782,7 +2782,7 @@ export default function Storefront({ products, inventory = null, pickupDetails =
           <div className="shipping-schedule__content">
             <p>{SHIPPING_SCHEDULE_INTRO}</p>
             {hasActiveShippingPreview && !expeditedShippingIsDisplayed ? (
-              <p>The best available service is provided as Normal Shipping. Its expected arrival date is shown with the rate.</p>
+              <p>The best available service is provided as Shipping. Its expected arrival date is shown with the rate.</p>
             ) : (
               <>
                 <p>{SHIPPING_SCHEDULE_STANDARD_LINE}</p>
@@ -2939,8 +2939,8 @@ export default function Storefront({ products, inventory = null, pickupDetails =
         <p id="shipping-option-hint" className="shipping-options__hint">
           Shipping is available across the {CONTINENTAL_US_SHIPPING_AREA_LABEL}.
           {hasActiveShippingPreview && !expeditedShippingIsDisplayed
-            ? " The best available service is shown as Normal Shipping. Its final charge and expected arrival date are shown below."
-            : " Choose Normal for a 3–5-business-day carrier estimate or Expedited for a 1–3-business-day estimate. Expedited appears only when it is a faster premium option. Both final charges and expected arrival dates are shown before payment."}
+            ? " The best available service is shown as Shipping. Its final charge and expected arrival date are shown below."
+            : " Choose Shipping for a 3–5-business-day carrier estimate or Expedited Shipping for a 1–3-business-day estimate. Expedited appears only when it is a faster premium option. Both final charges and expected arrival dates are shown before payment."}
         </p>
         {renderShippingScheduleNotice({ id: "checkout", showShipDate: true })}
         <div className="shipping-options__list">
@@ -4046,9 +4046,9 @@ export default function Storefront({ products, inventory = null, pickupDetails =
                   <ul className="pickup-policy-modal__steps">
                     <li>Packages are taken to shipping carriers once a week, every Wednesday, after packing or production is complete.</li>
                     <li>Shipping time starts only after the carrier receives the package.</li>
-                    <li>Normal Shipping uses the fastest eligible 3–5-business-day EasyPost rate and excludes rates estimated under three days.</li>
+                    <li>Shipping uses the fastest eligible 3–5-business-day EasyPost rate and excludes rates estimated under three days.</li>
                     <li>Expedited Shipping uses the fastest eligible 1–3-business-day EasyPost rate.</li>
-                    <li>Expedited appears only when it is faster and costs more than Normal. If its label costs less, that label is provided as Normal Shipping.</li>
+                    <li>Expedited appears only when it is faster and costs more than Shipping. If its label costs less, that label is provided as Shipping.</li>
                     <li>When an order needs multiple parcels, every parcel is sent with the same carrier.</li>
                     <li>Your shipping charge is postage plus packaging, rounded up to the nearest dollar.</li>
                     <li>Tracking or delivery updates will be emailed when available.</li>

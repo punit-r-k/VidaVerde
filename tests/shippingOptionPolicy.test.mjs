@@ -3,7 +3,7 @@ import test from "node:test";
 
 import { resolveCustomerShippingSelections } from "../lib/shippingOptionPolicy.js";
 
-const normalOption = { id: "normal", label: "Normal Shipping" };
+const normalOption = { id: "normal", label: "Shipping" };
 
 const selection = ({ id, amountCents, deliveryDays, marker = id }) => ({
   quote: { marker },
@@ -11,7 +11,7 @@ const selection = ({ id, amountCents, deliveryDays, marker = id }) => ({
   deliveryDays,
   option: {
     id,
-    label: id === "normal" ? "Normal Shipping" : "Expedited Shipping"
+    label: id === "normal" ? "Shipping" : "Expedited Shipping"
   }
 });
 
