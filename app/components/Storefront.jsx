@@ -1356,7 +1356,9 @@ export default function Storefront({ products, inventory = null, pickupDetails =
           (preview) => normalizeShippingOptionId(preview?.id) === option.id
         )
       )
-    : customerShippingOptions;
+    : customerShippingOptions.filter(
+        (option) => option.id === DEFAULT_SHIPPING_OPTION_ID
+      );
   const expeditedShippingIsDisplayed = displayedCustomerShippingOptions.some(
     (option) => option.id === "expedited"
   );
@@ -1434,6 +1436,7 @@ export default function Storefront({ products, inventory = null, pickupDetails =
       setShippingPreview(null);
       setShippingPreviewStatus("idle");
       setShippingPreviewError("");
+      setShippingOptionId(DEFAULT_SHIPPING_OPTION_ID);
       return undefined;
     }
 
@@ -1441,6 +1444,7 @@ export default function Storefront({ products, inventory = null, pickupDetails =
     setShippingPreview(null);
     setShippingPreviewStatus("loading");
     setShippingPreviewError("");
+    setShippingOptionId(DEFAULT_SHIPPING_OPTION_ID);
 
     const timeoutId = window.setTimeout(async () => {
       try {

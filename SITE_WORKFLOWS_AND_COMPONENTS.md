@@ -33,6 +33,7 @@ This file is a practical map of the most important customer flows, operations fl
   - Customer details are validated before payment.
   - A valid shipping address triggers concurrent Normal and Expedited live-rate previews whenever the cart or address changes; both final charges and expected arrival dates appear together, method changes use the already-loaded previews, and stale browser responses are ignored.
   - Expedited is offered only when it is both faster and more expensive than Normal. A cheaper or equal faster label is assigned to Normal and Expedited is hidden. Every parcel in a multi-parcel quote must use the same carrier.
+  - Before a valid address finishes rating, the checkout displays only Normal Shipping. Expedited is added only after the calculated rates satisfy the premium-option policy.
   - `POST /api/order` creates a Stripe PaymentIntent after calculating the authoritative live shipping charge.
   - Customers choose Normal (3–5 business days) or Expedited (1–3 business days). EasyPost selects the fastest rate inside the chosen window, the website shows the expected arrival date, and the same saved quote is reused for automatic prepaid-label purchase after payment.
   - Successful payment is finalized by the Stripe webhook, with browser finalization as an idempotent backup.

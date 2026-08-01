@@ -132,7 +132,8 @@ address, or shipping method changes. Normal and Expedited previews are calculate
 concurrently, so both final charges and expected arrival dates appear together.
 Expedited is displayed only when it is faster and costs more than Normal. If its
 label is cheaper, that label is used for Normal and Expedited is hidden. Multi-parcel
-orders use one carrier for every parcel.
+orders use one carrier for every parcel. Before an address has been rated, only
+Normal is displayed; Expedited can appear after calculation only when it qualifies.
 Checkout recalculates the authoritative amount,
 stores the reserved quote and expected arrival with the PaymentIntent, then reuses the
 same quote to buy the prepaid label automatically after payment. Packages are handed
