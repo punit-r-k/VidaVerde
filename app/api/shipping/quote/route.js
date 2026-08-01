@@ -6,6 +6,7 @@ import {
 import { selectCheckoutShippingQuote } from "@/lib/checkoutShippingQuote";
 import { getProductMap } from "@/lib/products";
 import { getRouteRateLimitConfig } from "@/lib/rateLimit";
+import { resolveCustomerShippingSelections } from "@/lib/shippingOptionPolicy";
 import {
   getShippingOptionsForCart,
   normalizeProductType
@@ -28,6 +29,19 @@ const toCount = (value) => {
   const count = Number(value);
   return Number.isFinite(count) && count > 0 ? Math.floor(count) : 0;
 };
+
+const serializeShippingSelection = (selection) => ({
+  id: selection.option.id,
+  label: selection.option.label,
+  amountCents: selection.charge.amountCents,
+  carrier: selection.option.carrier,
+  service: selection.option.service,
+  transitLabel: selection.option.transitLabel,
+  carrierTransitLabel: selection.option.carrierTransitLabel,
+  deliveryEstimate: selection.option.deliveryEstimate,
+  expectedArrivalDate: selection.expectedArrivalDateKey,
+  expectedArrivalLabel: selection.expectedArrivalLabel
+});
 
 export const runtime = "nodejs";
 
@@ -61,7 +75,7 @@ export async function POST(request) {
     );
   }
 
-  const { customer, items, shippingOption: requestedShippingOptionId } = parsedPayload.data;
+  const { customer, items } = parsedPayload.data;
   const skus = items.map((item) => item.sku);
   const [productMap, inventoryMap] = await Promise.all([
     getProductMap(skus),
@@ -108,9 +122,6 @@ export async function POST(request) {
     items: lineItems,
     subtotalCents
   });
-  const requestedOption = shipping.options.find(
-    (option) => option.id === requestedShippingOptionId
-  ) || shipping.normalOption;
   const itemsPayload = lineItems.map((item) => ({
     sku: item.sku,
     quantity: item.quantity,
@@ -122,47 +133,65 @@ export async function POST(request) {
     return toCount(item.quantity) > available;
   });
 
-  try {
-    const selection = await selectCheckoutShippingQuote({
-      customer,
-      itemsPayload,
-      requestedOption,
-      hasPreorderItems,
-      orderCreatedAt: new Date()
-    });
+  const orderCreatedAt = new Date();
+  const results = await Promise.allSettled(
+    shipping.options.map((option) =>
+      selectCheckoutShippingQuote({
+        customer,
+        itemsPayload,
+        requestedOption: option,
+        hasPreorderItems,
+        orderCreatedAt
+      })
+    )
+  );
+  const selections = new Map();
+  results.forEach((result, index) => {
+    const option = shipping.options[index];
+    if (result.status === "fulfilled") {
+      selections.set(option.id, result.value);
+      return;
+    }
 
-    return respond.json(
-      {
-        shipping: {
-          id: selection.option.id,
-          label: selection.option.label,
-          amountCents: selection.charge.amountCents,
-          carrier: selection.option.carrier,
-          service: selection.option.service,
-          transitLabel: selection.option.transitLabel,
-          carrierTransitLabel: selection.option.carrierTransitLabel,
-          deliveryEstimate: selection.option.deliveryEstimate,
-          expectedArrivalDate: selection.expectedArrivalDateKey,
-          expectedArrivalLabel: selection.expectedArrivalLabel
-        }
-      },
-      {
-        status: 200,
-        headers: { "Cache-Control": "no-store" }
-      }
+    console.error(
+      `live EasyPost ${option.id} shipping preview failed:`,
+      result.reason?.message || result.reason
     );
-  } catch (error) {
-    console.error("live EasyPost shipping preview failed:", error?.message || error);
-    const noEligibleRate = /No EasyPost rate was available in the/i.test(
-      String(error?.message || "")
+  });
+  const policy = resolveCustomerShippingSelections({
+    normalSelection: selections.get(shipping.normalOption.id),
+    expeditedSelection: selections.get(shipping.expeditedOption.id),
+    normalOption: shipping.normalOption
+  });
+
+  if (!policy.normalSelection) {
+    const noEligibleRates = results.every(
+      (result) => result.status === "rejected" &&
+        /No EasyPost rate was available in the/i.test(String(result.reason?.message || ""))
     );
     return respond.json(
       {
-        error: noEligibleRate
-          ? `We couldn't find an eligible ${requestedOption.label} rate for that address. Try the other shipping method or verify the address.`
+        error: noEligibleRates
+          ? "We couldn't find eligible Normal or Expedited rates for that address. Please verify it and try again."
           : "We couldn't update shipping for that address. Please verify it and try again."
       },
-      { status: noEligibleRate ? 422 : 502 }
+      { status: noEligibleRates ? 422 : 502 }
     );
   }
+
+  const shippingOptions = [
+    policy.normalSelection,
+    policy.expeditedSelection
+  ].filter(Boolean).map(serializeShippingSelection);
+
+  return respond.json(
+    {
+      shippingOptions,
+      expeditedAvailable: Boolean(policy.expeditedSelection)
+    },
+    {
+      status: 200,
+      headers: { "Cache-Control": "no-store" }
+    }
+  );
 }

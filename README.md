@@ -128,7 +128,12 @@ under three days; Expedited selects the fastest eligible 1–3-business-day rate
 The server adds exact packaging cost to the selected postage and rounds the combined
 charge up to the nearest dollar. Once the shipping address is valid, the storefront
 automatically refreshes that final charge and expected arrival whenever the cart,
-address, or shipping method changes. Checkout recalculates the authoritative amount,
+address, or shipping method changes. Normal and Expedited previews are calculated
+concurrently, so both final charges and expected arrival dates appear together.
+Expedited is displayed only when it is faster and costs more than Normal. If its
+label is cheaper, that label is used for Normal and Expedited is hidden. Multi-parcel
+orders use one carrier for every parcel.
+Checkout recalculates the authoritative amount,
 stores the reserved quote and expected arrival with the PaymentIntent, then reuses the
 same quote to buy the prepaid label automatically after payment. Packages are handed
 to carriers on Wednesday, and carrier transit time starts when the carrier receives

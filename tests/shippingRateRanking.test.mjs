@@ -3,11 +3,35 @@ import test from "node:test";
 import {
   chooseFastestQuote,
   compareRatesBySpeed,
+  getSameCarrierRateSets,
   getQuoteLatestDeliveryDate,
   getQuoteTransitDays,
   getRateTransitDays,
   isRateWithinTransitWindow
 } from "../lib/shippingRateRanking.js";
+
+test("multi-parcel rate sets use one carrier for every parcel", () => {
+  const rateSets = getSameCarrierRateSets([
+    [
+      { id: "ups_fast", carrier: "UPS", deliveryDays: 1, amountCents: 2000 },
+      { id: "usps_first", carrier: "USPS", deliveryDays: 3, amountCents: 800 }
+    ],
+    [
+      { id: "fedex_fast", carrier: "FedEx", deliveryDays: 1, amountCents: 1800 },
+      { id: "usps_second", carrier: "USPS", deliveryDays: 4, amountCents: 900 }
+    ]
+  ]);
+
+  assert.equal(rateSets.length, 1);
+  assert.deepEqual(rateSets[0].map((rate) => rate.carrier), ["USPS", "USPS"]);
+});
+
+test("multi-parcel rate sets reject plans without a common carrier", () => {
+  assert.deepEqual(getSameCarrierRateSets([
+    [{ carrier: "UPS", deliveryDays: 1, amountCents: 1000 }],
+    [{ carrier: "USPS", deliveryDays: 2, amountCents: 900 }]
+  ]), []);
+});
 
 test("fastest carrier wins regardless of carrier or postage price", () => {
   const rates = [

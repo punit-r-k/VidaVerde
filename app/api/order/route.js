@@ -12,6 +12,7 @@ import {
   normalizeProductType
 } from "@/lib/shippingPricing";
 import { selectCheckoutShippingQuote } from "@/lib/checkoutShippingQuote";
+import { resolveCustomerShippingSelections } from "@/lib/shippingOptionPolicy";
 import { getInventoryMap } from "@/lib/stock";
 import { stripeConfig, stripeRequest } from "@/lib/stripe";
 import { supabaseAdmin } from "@/lib/supabaseAdmin";
@@ -375,16 +376,45 @@ export async function POST(request) {
       const hasPreorderItems = normalizedItems.some((item) =>
         getCurrentAllocation(item.quantity, inventoryMap?.[item.sku]).preorderUnits > 0
       );
-      const selection = await selectCheckoutShippingQuote({
-        customer: {
-          ...customer,
-          country: SHIPPING_COUNTRY_CODE
-        },
-        itemsPayload,
-        requestedOption,
-        hasPreorderItems,
-        orderCreatedAt
+      const quoteResults = await Promise.allSettled(
+        shipping.options.map((option) =>
+          selectCheckoutShippingQuote({
+            customer: {
+              ...customer,
+              country: SHIPPING_COUNTRY_CODE
+            },
+            itemsPayload,
+            requestedOption: option,
+            hasPreorderItems,
+            orderCreatedAt
+          })
+        )
+      );
+      const selections = new Map();
+      quoteResults.forEach((result, index) => {
+        const option = shipping.options[index];
+        if (result.status === "fulfilled") {
+          selections.set(option.id, result.value);
+          return;
+        }
+        console.error(
+          `live EasyPost ${option.id} checkout quote failed:`,
+          result.reason?.message || result.reason
+        );
       });
+      const policy = resolveCustomerShippingSelections({
+        normalSelection: selections.get(shipping.normalOption.id),
+        expeditedSelection: selections.get(shipping.expeditedOption.id),
+        normalOption: shipping.normalOption
+      });
+      const selection = requestedOption.id === shipping.expeditedOption.id &&
+        policy.expeditedSelection
+        ? policy.expeditedSelection
+        : policy.normalSelection;
+      if (!selection) {
+        const firstFailure = quoteResults.find((result) => result.status === "rejected");
+        throw firstFailure?.reason || new Error("EasyPost returned no shipping rates.");
+      }
       const fastestQuote = selection.quote;
       shippingCharge = selection.charge;
       selectedShippingOption = selection.option;
