@@ -538,7 +538,7 @@ function refreshFinancialDistributionsSummary_() {
   const sheet = ensureFinancialDistributionsSheet_();
   const distributionStart = CONFIG.FINANCIAL_DISTRIBUTIONS_START_DATE;
   const distributionStartParts = distributionStart.split("-").map(Number);
-  const formula = `=LET(distributionStart,DATE(${distributionStartParts[0]},${distributionStartParts[1]},${distributionStartParts[2]}),firstMonth,EOMONTH(MIN(FILTER(Orders!A2:A,Orders!A2:A<>"")),0),monthCount,DATEDIF(firstMonth,EOMONTH(TODAY(),0),"M")+1,months,ARRAYFORMULA(EOMONTH(EOMONTH(TODAY(),0),-SEQUENCE(monthCount,1,0,1))),totals,MAP(months,LAMBDA(monthEnd,SUMIFS(Orders!R2:R,Orders!A2:A,">="&(EOMONTH(monthEnd,-1)+1),Orders!A2:A,"<"&(monthEnd+1),Orders!A2:A,">="&distributionStart,Orders!Y2:Y,FALSE))),shipping,MAP(months,LAMBDA(monthEnd,SUMIFS(Orders!M2:M,Orders!A2:A,">="&(EOMONTH(monthEnd,-1)+1),Orders!A2:A,"<"&(monthEnd+1),Orders!A2:A,">="&distributionStart,Orders!Y2:Y,FALSE))),net,ARRAYFORMULA(totals-shipping),{"Month End","Total Collected","Shipping","Net After Shipping","Punit (15%)","Edison (85% + Shipping)";months,totals,shipping,net,ARRAYFORMULA(net*15%),ARRAYFORMULA(net*85%+shipping)})`;
+  const formula = `=LET(distributionStart,DATE(${distributionStartParts[0]},${distributionStartParts[1]},${distributionStartParts[2]}),firstMonth,EOMONTH(MIN(FILTER(Orders!A2:A,Orders!A2:A<>"")),0),monthCount,DATEDIF(firstMonth,EOMONTH(TODAY(),0),"M")+1,months,ARRAYFORMULA(EOMONTH(EOMONTH(TODAY(),0),-SEQUENCE(monthCount,1,0,1))),totals,MAP(months,LAMBDA(monthEnd,SUMIFS(Orders!R2:R,Orders!A2:A,">="&(EOMONTH(monthEnd,-1)+1),Orders!A2:A,"<"&(monthEnd+1),Orders!A2:A,">="&distributionStart,Orders!Y2:Y,FALSE))),shipping,MAP(months,LAMBDA(monthEnd,SUMIFS(Orders!M2:M,Orders!A2:A,">="&(EOMONTH(monthEnd,-1)+1),Orders!A2:A,"<"&(monthEnd+1),Orders!A2:A,">="&distributionStart,Orders!Y2:Y,FALSE))),net,ARRAYFORMULA(totals-shipping),{"Month End","Total Collected","Shipping","Net After Shipping","Punit (15%)","Vida Verde (85%)";months,totals,shipping,net,ARRAYFORMULA(net*15%),ARRAYFORMULA(net*85%)})`;
   const rowCount = Math.max(sheet.getMaxRows(), 2);
 
   if (sheet.getMaxColumns() < 6) {
@@ -966,7 +966,7 @@ function syncOrders() {
     "Payment Session",
     "Net (Total - Shipping)",
     "Punit Commission (15%)",
-    "Edison Payout (85% + Shipping)",
+    "Vida Verde Payout (85%)",
     "Test Order"
   ]];
   sheet
@@ -1000,7 +1000,6 @@ function syncOrders() {
         orderDate >= CONFIG.FINANCIAL_DISTRIBUTIONS_START_DATE &&
         !isTestOrder;
       const distributableNet = isDistributable ? netAfterShipping : 0;
-      const distributableShipping = isDistributable ? shipping : 0;
 
       return [
         createdAt,
@@ -1026,7 +1025,7 @@ function syncOrders() {
         String(order?.payment_session_id || ""),
         distributableNet,
         distributableNet * 0.15,
-        distributableNet * 0.85 + distributableShipping,
+        distributableNet * 0.85,
         isTestOrder
       ];
     });

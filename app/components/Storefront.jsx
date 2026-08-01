@@ -2721,11 +2721,7 @@ export default function Storefront({ products, inventory = null, pickupDetails =
           <strong>$0.00</strong>
         </div>
         <div>
-          <span>
-            {fulfillment === "ship" && preparedPayment?.shipping
-              ? "Shipping + packaging (rounded)"
-              : "Shipping"}
-          </span>
+          <span>Shipping</span>
           <strong>{shippingPriceText}</strong>
         </div>
         {fulfillment === "ship" && selectedExpectedDeliveryText ? (
@@ -3916,32 +3912,10 @@ export default function Storefront({ products, inventory = null, pickupDetails =
                     <dd>$0.00</dd>
                   </div>
                   {fulfillment === "ship" ? (
-                    <>
-                      <div>
-                        <dt>Carrier postage</dt>
-                        <dd>
-                          {preparedPayment?.shipping
-                            ? formatCurrency(preparedPayment.shipping.postageCents)
-                            : shippingPriceText}
-                        </dd>
-                      </div>
-                      {preparedPayment?.shipping ? (
-                        <div>
-                          <dt>Packaging</dt>
-                          <dd>{formatCurrency(preparedPayment.shipping.packagingCents)}</dd>
-                        </div>
-                      ) : null}
-                      {Number(preparedPayment?.shipping?.roundingCents || 0) > 0 ? (
-                        <div>
-                          <dt>Round-up to nearest dollar</dt>
-                          <dd>{formatCurrency(preparedPayment.shipping.roundingCents)}</dd>
-                        </div>
-                      ) : null}
-                      <div>
-                        <dt>Shipping charge</dt>
-                        <dd>{shippingPriceText}</dd>
-                      </div>
-                    </>
+                    <div>
+                      <dt>Shipping</dt>
+                      <dd>{shippingPriceText}</dd>
+                    </div>
                   ) : (
                     <div>
                       <dt>Shipping</dt>
