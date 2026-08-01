@@ -132,6 +132,7 @@ const ORDER_SHIPPING_SUCCESS_POPUP_MESSAGE =
   "Your payment was received. Watch your email for your receipt and shipping updates.";
 const SHIPPING_CHECKOUT_VISIBLE = true;
 const DEFAULT_FULFILLMENT = "ship";
+const SHIPPING_QUOTE_DEBOUNCE_MS = 700;
 const formatFinalCheckoutValues = (values) =>
   Object.keys(INITIAL_FORM_VALUES).reduce((nextValues, name) => {
     nextValues[name] = formatCheckoutInputValue(name, values?.[name], { final: true });
@@ -301,6 +302,9 @@ export default function Storefront({ products, inventory = null, pickupDetails =
   const [notice, setNotice] = useState("");
   const [checkoutStep, setCheckoutStep] = useState("details");
   const [preparedPayment, setPreparedPayment] = useState(null);
+  const [shippingPreview, setShippingPreview] = useState(null);
+  const [shippingPreviewStatus, setShippingPreviewStatus] = useState("idle");
+  const [shippingPreviewError, setShippingPreviewError] = useState("");
   const [fulfillment, setFulfillment] = useState(DEFAULT_FULFILLMENT);
   const [shippingOptionId, setShippingOptionId] = useState(DEFAULT_SHIPPING_OPTION_ID);
   const [shippingScheduleNow, setShippingScheduleNow] = useState(() => new Date());
@@ -345,6 +349,7 @@ export default function Storefront({ products, inventory = null, pickupDetails =
   const checkoutStepPreviousFormHeightRef = useRef(0);
   const cartSummarySeenRef = useRef(false);
   const cartChangeSequenceRef = useRef(0);
+  const shippingPreviewRequestRef = useRef(0);
   const finalizingPaymentRef = useRef("");
   const emailOptInSubmittedRef = useRef("");
   const cartChangeDialogRef = useRef(null);
@@ -1299,8 +1304,56 @@ export default function Storefront({ products, inventory = null, pickupDetails =
       }),
     [shippingQuote]
   );
+  const normalizedShippingOptionId = normalizeShippingOptionId(shippingOptionId);
+  const shippingAddressErrors = useMemo(
+    () => getCheckoutFieldErrors(formValues, "ship", normalizedShippingOptionId),
+    [formValues, normalizedShippingOptionId]
+  );
+  const shippingPreviewReady =
+    cartHydrated &&
+    fulfillment === "ship" &&
+    cartItems.length > 0 &&
+    SHIPPING_FIELDS.every((fieldName) => !shippingAddressErrors[fieldName]);
+  const shippingQuoteRequestPayload = useMemo(
+    () => ({
+      shippingOption: normalizedShippingOptionId,
+      customer: {
+        address1: String(formValues.address1 || "").trim(),
+        address2: String(formValues.address2 || "").trim(),
+        city: String(formValues.city || "").trim(),
+        state: String(formValues.state || "").trim(),
+        postalCode: String(formValues.postalCode || "").trim(),
+        country: SHIPPING_COUNTRY_CODE
+      },
+      items: cartItems.map((item) => ({
+        sku: item.sku,
+        quantity: item.quantity
+      }))
+    }),
+    [
+      cartItems,
+      formValues.address1,
+      formValues.address2,
+      formValues.city,
+      formValues.postalCode,
+      formValues.state,
+      normalizedShippingOptionId
+    ]
+  );
+  const shippingQuoteRequestFingerprint = useMemo(
+    () => JSON.stringify(shippingQuoteRequestPayload),
+    [shippingQuoteRequestPayload]
+  );
+  const activeShippingPreview =
+    fulfillment === "ship" &&
+    shippingPreview?.requestFingerprint === shippingQuoteRequestFingerprint &&
+    normalizeShippingOptionId(shippingPreview?.id) === normalizedShippingOptionId
+      ? shippingPreview
+      : null;
+  const displayedShipping = fulfillment === "ship"
+    ? preparedPayment?.shipping || activeShippingPreview
+    : null;
   const selectedShippingOption = useMemo(() => {
-    const normalizedShippingOptionId = normalizeShippingOptionId(shippingOptionId);
     const baseOption = (
       customerShippingOptions.find(
         (option) => option.id === normalizedShippingOptionId
@@ -1308,47 +1361,124 @@ export default function Storefront({ products, inventory = null, pickupDetails =
       customerShippingOptions.find(
         (option) => option.id === DEFAULT_SHIPPING_OPTION_ID
       ) ||
-      shippingQuote.fastestOption
+      shippingQuote.normalOption
     );
-    return fulfillment === "ship" && preparedPayment?.shipping
-      ? { ...baseOption, ...preparedPayment.shipping }
+    return displayedShipping
+      ? { ...baseOption, ...displayedShipping }
       : baseOption;
   }, [
     customerShippingOptions,
-    fulfillment,
-    preparedPayment?.shipping,
-    shippingOptionId,
-    shippingQuote.fastestOption
+    displayedShipping,
+    normalizedShippingOptionId,
+    shippingQuote.normalOption
   ]);
   const shippingCents =
     SHIPPING_CHECKOUT_VISIBLE && fulfillment === "ship" && itemCount > 0
-      ? Number(preparedPayment?.shipping?.amountCents || 0)
+      ? Number(displayedShipping?.amountCents || 0)
       : 0;
   const preparedTotal = Number(preparedPayment?.totalCents);
   const orderTotal = Number.isFinite(preparedTotal) && preparedTotal > 0
     ? preparedTotal
     : subtotal + shippingCents;
   const shippingPriceText =
-    fulfillment === "ship" && !preparedPayment?.shipping
-      ? "Calculated from address"
-      : formatCurrency(shippingCents);
+    fulfillment !== "ship"
+      ? formatCurrency(0)
+      : displayedShipping
+        ? formatCurrency(shippingCents)
+        : shippingPreviewStatus === "loading" && shippingPreviewReady
+          ? "Updating..."
+          : shippingPreviewError
+            ? "Unavailable"
+            : "Calculated from address";
   const preorderUnitsInCart = cartItems.reduce((sum, item) => sum + item.preorderUnits, 0);
   const hasPreorderItems = preorderUnitsInCart > 0;
   const estimatedShipDate = getEstimatedShipDate({
     orderDate: shippingScheduleNow,
     hasPreorderItems
   });
-  const selectedExpectedDeliveryText = fulfillment === "ship" && !preparedPayment?.shipping
-    ? ""
-    : getExpectedDeliveryText({
+  const selectedExpectedDeliveryText = fulfillment === "ship" && displayedShipping?.expectedArrivalLabel
+    ? `Expected arrival: ${displayedShipping.expectedArrivalLabel}`
+    : fulfillment === "ship" && displayedShipping
+      ? getExpectedDeliveryText({
         shippingOption: selectedShippingOption,
         hasPreorderItems,
         orderDate: shippingScheduleNow
-      });
+      })
+      : "";
   const estimatedShipDateText = formatExpectedDeliveryDate(
     estimatedShipDate,
     shippingScheduleNow
   );
+
+  useEffect(() => {
+    const requestId = shippingPreviewRequestRef.current + 1;
+    shippingPreviewRequestRef.current = requestId;
+
+    if (!shippingPreviewReady) {
+      setShippingPreview(null);
+      setShippingPreviewStatus("idle");
+      setShippingPreviewError("");
+      return undefined;
+    }
+
+    const controller = new AbortController();
+    setShippingPreview(null);
+    setShippingPreviewStatus("loading");
+    setShippingPreviewError("");
+
+    const timeoutId = window.setTimeout(async () => {
+      try {
+        const response = await fetch("/api/shipping/quote", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: shippingQuoteRequestFingerprint,
+          signal: controller.signal
+        });
+        const responseContentType = response.headers.get("content-type") || "";
+        const result = responseContentType.includes("application/json")
+          ? await response.json().catch(() => ({}))
+          : {};
+
+        if (!response.ok) {
+          throw new Error(result?.error || "We couldn't update shipping. Please try again.");
+        }
+        if (!result?.shipping || Number(result.shipping.amountCents) <= 0) {
+          throw new Error("We couldn't update shipping. Please try again.");
+        }
+        if (controller.signal.aborted || shippingPreviewRequestRef.current !== requestId) {
+          return;
+        }
+
+        setShippingPreview({
+          ...result.shipping,
+          requestFingerprint: shippingQuoteRequestFingerprint
+        });
+        setShippingPreviewStatus("ready");
+        setShippingPreviewError("");
+      } catch (error) {
+        if (controller.signal.aborted || shippingPreviewRequestRef.current !== requestId) {
+          return;
+        }
+
+        setShippingPreview(null);
+        setShippingPreviewStatus("error");
+        setShippingPreviewError(
+          error instanceof Error && error.message
+            ? error.message
+            : "We couldn't update shipping. Please try again."
+        );
+      }
+    }, SHIPPING_QUOTE_DEBOUNCE_MS);
+
+    return () => {
+      window.clearTimeout(timeoutId);
+      controller.abort();
+    };
+  }, [
+    shippingPreviewReady,
+    shippingQuoteRequestFingerprint
+  ]);
+
   const pickupAcknowledgementError = fulfillment === "market" &&
     !pickupAcknowledged &&
     (submitAttempted || pickupTouched);
@@ -2406,7 +2536,7 @@ export default function Storefront({ products, inventory = null, pickupDetails =
     setStatus("submitting");
     setNotice(
       fulfillment === "ship"
-        ? "Calculating the fastest live shipping rate and preparing payment..."
+        ? `Calculating the live ${selectedShippingOption.label} rate and expected arrival date...`
         : "Preparing secure payment..."
     );
 
@@ -2726,15 +2856,17 @@ export default function Storefront({ products, inventory = null, pickupDetails =
         </div>
         {fulfillment === "ship" && selectedExpectedDeliveryText ? (
           <div>
-            <span>Latest delivery estimate</span>
-            <strong>{selectedExpectedDeliveryText.replace(/^Expected by\s+/i, "")}</strong>
+            <span>Expected arrival</span>
+            <strong>{selectedExpectedDeliveryText.replace(/^Expected (?:by|arrival:)\s+/i, "")}</strong>
           </div>
         ) : null}
         <div className="cart__summary-total">
           <span>
-            {fulfillment === "ship" && !preparedPayment?.shipping
+            {fulfillment === "ship" && !displayedShipping
               ? "Subtotal before shipping"
-              : "Total due today"}
+              : preparedPayment
+                ? "Total due today"
+                : "Current total"}
           </span>
           <strong>{formatCurrency(orderTotal)}</strong>
         </div>
@@ -2763,21 +2895,24 @@ export default function Storefront({ products, inventory = null, pickupDetails =
         <legend>Shipping</legend>
         <p id="shipping-option-hint" className="shipping-options__hint">
           Shipping is available across the {CONTINENTAL_US_SHIPPING_AREA_LABEL}.
-          We automatically select the carrier offering the shortest transit time for your
-          address. The charge is live carrier postage plus the exact packaging cost, with the
-          combined amount rounded up to the nearest dollar. You will see the exact charge
-          before entering payment.
+          Choose Normal for a 3–5-business-day carrier estimate or Expedited for a
+          1–3-business-day estimate. EasyPost selects the fastest eligible carrier rate inside
+          your chosen window; Normal rates estimated under three days are excluded. You will
+          see the final shipping charge and expected arrival date before payment.
         </p>
         {renderShippingScheduleNotice({ id: "checkout", showShipDate: true })}
         <div className="shipping-options__list">
           {customerShippingOptions.map((option) => {
             const isSelected = option.id === normalizedShippingOptionId;
             const inputId = `shipping-option-${option.id}`;
-            const expectedDeliveryText = getExpectedDeliveryText({
-              shippingOption: option,
-              hasPreorderItems,
-              orderDate: shippingScheduleNow
-            });
+            const renderedOption = isSelected ? selectedShippingOption : option;
+            const expectedDeliveryText = isSelected && selectedExpectedDeliveryText
+              ? selectedExpectedDeliveryText
+              : getExpectedDeliveryText({
+                  shippingOption: renderedOption,
+                  hasPreorderItems,
+                  orderDate: shippingScheduleNow
+                });
 
             return (
               <label
@@ -2798,12 +2933,12 @@ export default function Storefront({ products, inventory = null, pickupDetails =
                 <span className="shipping-option__body">
                   <span className="shipping-option__topline">
                     <strong>{option.label}</strong>
-                    <span>Calculated from address</span>
+                    <span>{isSelected ? shippingPriceText : "Calculated from address"}</span>
                   </span>
                   <span className="shipping-option__meta">
                     <span>
-                      {option.transitLabel}
-                      {option.note ? ` | ${option.note}` : ""}
+                      {renderedOption.transitLabel}
+                      {renderedOption.note ? ` | ${renderedOption.note}` : ""}
                     </span>
                     {expectedDeliveryText ? <span>{expectedDeliveryText}</span> : null}
                   </span>
@@ -2812,6 +2947,11 @@ export default function Storefront({ products, inventory = null, pickupDetails =
             );
           })}
         </div>
+        {shippingPreviewStatus === "error" && shippingPreviewError ? (
+          <span className="form-field__error" role="alert">
+            {shippingPreviewError}
+          </span>
+        ) : null}
         {shippingOptionError ? (
           <span id="shippingOption-error" className="form-field__error" role="alert">
             {shippingOptionError}
@@ -2874,8 +3014,8 @@ export default function Storefront({ products, inventory = null, pickupDetails =
           ...(selectedExpectedDeliveryText
             ? [
                 {
-                  label: "Latest delivery estimate",
-                  value: selectedExpectedDeliveryText.replace(/^Expected by\s+/i, "")
+                  label: "Expected arrival",
+                  value: selectedExpectedDeliveryText.replace(/^Expected (?:by|arrival:)\s+/i, "")
                 }
               ]
             : [])
@@ -3853,7 +3993,8 @@ export default function Storefront({ products, inventory = null, pickupDetails =
                   <ul className="pickup-policy-modal__steps">
                     <li>Packages are taken to shipping carriers once a week, every Wednesday, after packing or production is complete.</li>
                     <li>Shipping time starts only after the carrier receives the package.</li>
-                    <li>We choose the carrier service with the shortest quoted transit time, regardless of carrier.</li>
+                    <li>Normal Shipping uses the fastest eligible 3–5-business-day EasyPost rate and excludes rates estimated under three days.</li>
+                    <li>Expedited Shipping uses the fastest eligible 1–3-business-day EasyPost rate.</li>
                     <li>Your shipping charge is postage plus packaging, rounded up to the nearest dollar.</li>
                     <li>Tracking or delivery updates will be emailed when available.</li>
                     <li>Open and inspect the package when it arrives.</li>

@@ -3,8 +3,10 @@ import test from "node:test";
 import {
   chooseFastestQuote,
   compareRatesBySpeed,
+  getQuoteLatestDeliveryDate,
   getQuoteTransitDays,
-  getRateTransitDays
+  getRateTransitDays,
+  isRateWithinTransitWindow
 } from "../lib/shippingRateRanking.js";
 
 test("fastest carrier wins regardless of carrier or postage price", () => {
@@ -56,4 +58,34 @@ test("postage price only breaks equal-speed ties", () => {
   };
 
   assert.equal(chooseFastestQuote([expensive, affordable]).planKey, "affordable");
+});
+
+test("normal shipping excludes rates faster than three or slower than five days", () => {
+  const window = { minimumDays: 3, maximumDays: 5 };
+  assert.equal(isRateWithinTransitWindow({ deliveryDays: 2 }, window), false);
+  assert.equal(isRateWithinTransitWindow({ deliveryDays: 3 }, window), true);
+  assert.equal(isRateWithinTransitWindow({ deliveryDays: 5 }, window), true);
+  assert.equal(isRateWithinTransitWindow({ deliveryDays: 6 }, window), false);
+});
+
+test("expedited shipping accepts one-to-three-day rates and rejects unknown estimates", () => {
+  const window = { minimumDays: 1, maximumDays: 3 };
+  assert.equal(isRateWithinTransitWindow({ deliveryDays: 1 }, window), true);
+  assert.equal(isRateWithinTransitWindow({ deliveryDays: 3 }, window), true);
+  assert.equal(isRateWithinTransitWindow({ deliveryDays: 4 }, window), false);
+  assert.equal(isRateWithinTransitWindow({ deliveryDays: null }, window), false);
+});
+
+test("multi-parcel arrival uses EasyPost's latest parcel delivery date", () => {
+  const arrival = getQuoteLatestDeliveryDate({
+    parcels: [
+      { selectedRate: { deliveryDate: "2026-08-05" } },
+      { selectedRate: { deliveryDate: "2026-08-07" } }
+    ]
+  });
+  assert.equal(arrival?.toISOString().slice(0, 10), "2026-08-07");
+  assert.equal(
+    getQuoteLatestDeliveryDate({ parcels: [{ selectedRate: { deliveryDate: null } }] }),
+    null
+  );
 });

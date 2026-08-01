@@ -2,6 +2,10 @@ import { shipmentIdSchema } from "@/lib/adminSchemas";
 import { secureAdminRoute } from "@/lib/apiSecurity";
 import { getRouteRateLimitConfig } from "@/lib/rateLimit";
 import { getEasyPostQuotes } from "@/lib/shippingQuotes";
+import {
+  getShippingTransitWindow,
+  normalizeShippingOptionId
+} from "@/lib/shippingPricing";
 import { supabaseAdmin } from "@/lib/supabaseAdmin";
 
 export const runtime = "nodejs";
@@ -21,7 +25,14 @@ export async function POST(request, context) {
   if (shipment.status !== "pending_label") return respond.json({ error: "Rates can only be requested before a label is purchased." }, { status: 409 });
 
   try {
-    const quotes = await getEasyPostQuotes(shipment);
+    const rawServiceLevel = String(shipment.shipping_option || "").trim();
+    const serviceLevel = rawServiceLevel
+      ? normalizeShippingOptionId(rawServiceLevel)
+      : "fastest";
+    const transitWindow = rawServiceLevel
+      ? getShippingTransitWindow(serviceLevel)
+      : null;
+    const quotes = await getEasyPostQuotes(shipment, { serviceLevel, transitWindow });
     const expiresAt = new Date(Date.now() + 60 * 60 * 1000).toISOString();
     const { data: saved, error: saveError } = await supabaseAdmin.from("shipment_quotes").insert(
       quotes.map((quote) => ({ shipment_id: shipment.id, provider: "easypost", plan_key: quote.planKey, postage_cents: quote.postageCents, box_cost_cents: quote.boxCostCents, total_cost_cents: quote.totalCostCents, currency: "USD", quote_json: quote, expires_at: expiresAt }))

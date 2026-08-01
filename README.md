@@ -122,12 +122,17 @@ The webhook still accepts `checkout.session.completed` and
 `checkout.session.async_payment_succeeded` for legacy in-flight payments created
 before the PaymentIntent migration.
 
-For shipping orders, the server obtains the fastest EasyPost rate for the entered
-address, adds the exact packaging cost, and rounds the combined charge up to the
-nearest dollar. That reserved quote and its cost breakdown are stored in the
-PaymentIntent metadata, then reused to buy the prepaid label automatically after
-payment. Packages are handed to carriers on Wednesday, and carrier transit time
-starts when the carrier receives the parcel.
+For shipping orders, customers choose Normal or Expedited service. Normal selects
+the fastest EasyPost rate estimated at 3–5 business days and excludes estimates
+under three days; Expedited selects the fastest eligible 1–3-business-day rate.
+The server adds exact packaging cost to the selected postage and rounds the combined
+charge up to the nearest dollar. Once the shipping address is valid, the storefront
+automatically refreshes that final charge and expected arrival whenever the cart,
+address, or shipping method changes. Checkout recalculates the authoritative amount,
+stores the reserved quote and expected arrival with the PaymentIntent, then reuses the
+same quote to buy the prepaid label automatically after payment. Packages are handed
+to carriers on Wednesday, and carrier transit time starts when the carrier receives
+the parcel.
 
 Required environment variables:
 - `NEXT_PUBLIC_SUPABASE_URL`

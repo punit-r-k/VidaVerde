@@ -407,6 +407,36 @@ test("security regression suite", { timeout: 300_000 }, async (t) => {
     assert.match(JSON.stringify(quantityAttempt.json), /whole number|invalid/i);
   });
 
+  await t.test("public shipping preview rejects injection-shaped cart values", async () => {
+    const { response, json } = await requestJson("/api/shipping/quote", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        Origin: baseUrl
+      },
+      body: JSON.stringify({
+        shippingOption: "normal",
+        customer: {
+          address1: "123 Main Street",
+          address2: "",
+          city: "Austin",
+          state: "TX",
+          postalCode: "78701",
+          country: "US"
+        },
+        items: [
+          {
+            sku: "VV1'; DROP TABLE checkout_shipping_quotes;--",
+            quantity: 1
+          }
+        ]
+      })
+    });
+
+    assert.equal(response.status, 400);
+    assert.match(JSON.stringify(json), /cart|refresh/i);
+  });
+
   await t.test("public email signup rejects injection-shaped source values", async () => {
     const { response, json } = await requestJson("/api/email-signups", {
       method: "POST",

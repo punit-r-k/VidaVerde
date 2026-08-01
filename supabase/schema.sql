@@ -149,6 +149,8 @@ create table if not exists checkout_shipping_quotes (
   check (charged_shipping_cents = 0 or mod(charged_shipping_cents, 100) = 0),
   currency text not null default 'USD',
   delivery_days integer check (delivery_days is null or delivery_days >= 0),
+  service_level text check (service_level is null or service_level in ('normal', 'expedited')),
+  expected_arrival_date date,
   expires_at timestamptz not null,
   created_at timestamptz not null default now(),
   updated_at timestamptz not null default now()

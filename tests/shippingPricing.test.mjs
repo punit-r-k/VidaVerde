@@ -3,14 +3,16 @@ import test from "node:test";
 
 import {
   CONTINENTAL_US_SHIPPING_AREA_ERROR_MESSAGE,
-  FASTEST_SHIPPING_OPTION_ID,
+  EXPEDITED_SHIPPING_OPTION_ID,
   getCustomerShippingOptions,
   getEstimatedShipDate,
   getLatestExpectedDeliveryDate,
   getNextPackingDate,
   getShippingOptionsForCart,
+  getShippingTransitWindow,
   inferSelectedShippingOption,
   isContinentalUnitedStatesShippingAddressEligible,
+  NORMAL_SHIPPING_OPTION_ID,
   normalizeShippingOptionId,
   SHIPPING_SCHEDULE_TIME_ZONE
 } from "../lib/shippingPricing.js";
@@ -36,7 +38,7 @@ const formatDateKey = (date) => {
   return `${parts.year}-${parts.month}-${parts.day}`;
 };
 
-test("checkout exposes one live fastest-carrier option without a flat price", () => {
+test("checkout exposes Normal and Expedited live options without flat prices", () => {
   const cart = buildCart({ sauerkrautQty: 2, hotSauceQty: 3 });
   const shipping = getShippingOptionsForCart(cart);
   const options = getCustomerShippingOptions({ shipping });
@@ -45,22 +47,45 @@ test("checkout exposes one live fastest-carrier option without a flat price", ()
   assert.equal(shipping.subtotalCents, cart.subtotalCents);
   assert.equal(shipping.sauerkrautCount, 2);
   assert.equal(shipping.hotSauceCount, 3);
-  assert.equal(options.length, 1);
-  assert.equal(options[0].id, FASTEST_SHIPPING_OPTION_ID);
+  assert.deepEqual(options.map((option) => option.id), [
+    NORMAL_SHIPPING_OPTION_ID,
+    EXPEDITED_SHIPPING_OPTION_ID
+  ]);
   assert.equal(options[0].amountCents, 0);
-  assert.match(options[0].note, /live postage plus packaging/i);
+  assert.equal(options[1].amountCents, 0);
+  assert.deepEqual(options[0].deliveryEstimate.maximum, {
+    unit: "business_day",
+    value: 5
+  });
+  assert.deepEqual(options[1].deliveryEstimate.maximum, {
+    unit: "business_day",
+    value: 3
+  });
 });
 
-test("legacy shipping option IDs normalize to the new fastest workflow", () => {
-  for (const value of ["fastest", "standard", "expedited", "owner_delivery", "owner"]) {
-    assert.equal(normalizeShippingOptionId(value), FASTEST_SHIPPING_OPTION_ID);
+test("shipping option IDs normalize to Normal or Expedited", () => {
+  for (const value of ["normal", "standard", "owner_delivery", "owner"]) {
+    assert.equal(normalizeShippingOptionId(value), NORMAL_SHIPPING_OPTION_ID);
   }
+  for (const value of ["fastest", "expedited", "expidited", "express"]) {
+    assert.equal(normalizeShippingOptionId(value), EXPEDITED_SHIPPING_OPTION_ID);
+  }
+  assert.deepEqual(getShippingTransitWindow("normal"), {
+    minimumDays: 3,
+    maximumDays: 5
+  });
+  assert.deepEqual(getShippingTransitWindow("expedited"), {
+    minimumDays: 1,
+    maximumDays: 3
+  });
 });
 
-test("shipping copy includes the Wednesday carrier handoff", () => {
+test("both shipping options include Wednesday handoff and their transit windows", () => {
   const shipping = getShippingOptionsForCart(buildCart({ sauerkrautQty: 1 }));
-  assert.match(shipping.fastestOption.transitLabel, /carrier on Wednesday/i);
-  assert.match(shipping.fastestOption.transitLabel, /fastest available service/i);
+  assert.match(shipping.normalOption.transitLabel, /carrier on Wednesday/i);
+  assert.match(shipping.normalOption.transitLabel, /3–5 business days/i);
+  assert.match(shipping.expeditedOption.transitLabel, /carrier on Wednesday/i);
+  assert.match(shipping.expeditedOption.transitLabel, /1–3 business days/i);
 });
 
 test("carrier shipping eligibility includes only the continental United States", () => {
@@ -94,9 +119,16 @@ test("delivery timing starts from the Wednesday handoff", () => {
   assert.equal(
     formatDateKey(getLatestExpectedDeliveryDate({
       orderDate,
-      shippingOption: shipping.fastestOption
+      shippingOption: shipping.normalOption
     })),
     "2026-06-17"
+  );
+  assert.equal(
+    formatDateKey(getLatestExpectedDeliveryDate({
+      orderDate,
+      shippingOption: shipping.expeditedOption
+    })),
+    "2026-06-15"
   );
 });
 
@@ -105,26 +137,26 @@ test("preorder readiness precedes the Wednesday handoff and carrier transit", ()
   assert.equal(
     formatDateKey(getLatestExpectedDeliveryDate({
       orderDate: new Date("2026-06-08T12:00:00-05:00"),
-      shippingOption: shipping.fastestOption,
+      shippingOption: shipping.normalOption,
       hasPreorderItems: true
     })),
     "2026-07-01"
   );
 });
 
-test("historical metadata resolves to the fastest option while retaining recorded labels", () => {
+test("historical fastest metadata resolves to Expedited while retaining recorded labels", () => {
   const shipping = getShippingOptionsForCart(buildCart({ hotSauceQty: 2 }));
   const selection = inferSelectedShippingOption({
     shipping,
     amountCents: 1100,
     shippingRateMetadata: {
-      shipping_option: "expedited",
+      shipping_option: "fastest",
       shipping_option_label: "Historical Expedited Shipping",
       shipping_estimate: "Historical estimate"
     }
   });
 
-  assert.equal(selection.id, FASTEST_SHIPPING_OPTION_ID);
+  assert.equal(selection.id, EXPEDITED_SHIPPING_OPTION_ID);
   assert.equal(selection.label, "Historical Expedited Shipping");
   assert.equal(selection.transitLabel, "Historical estimate");
 });

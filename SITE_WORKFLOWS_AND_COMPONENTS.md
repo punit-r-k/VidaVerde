@@ -25,13 +25,15 @@ This file is a practical map of the most important customer flows, operations fl
 ### 3. Checkout And Payment
 - Main component: `app/components/Storefront.jsx`
 - Request validation: `lib/checkoutSchema.js`
+- Shipping preview API: `app/api/shipping/quote/route.js`
 - Payment API: `app/api/order/route.js`
 - Payment provider wrapper: `lib/stripe.js`
 - Behavior:
   - Customers can choose market pickup or shipping/delivery.
   - Customer details are validated before payment.
+  - A valid shipping address triggers an automatic live-rate refresh whenever the cart, address, or shipping method changes; stale browser responses are ignored.
   - `POST /api/order` creates a Stripe PaymentIntent after calculating the authoritative live shipping charge.
-  - Shipping orders use the fastest available EasyPost carrier rate plus exact packaging cost, rounded up to the nearest dollar. The same saved quote is reused for automatic prepaid-label purchase after payment.
+  - Customers choose Normal (3–5 business days) or Expedited (1–3 business days). EasyPost selects the fastest rate inside the chosen window, the website shows the expected arrival date, and the same saved quote is reused for automatic prepaid-label purchase after payment.
   - Successful payment is finalized by the Stripe webhook, with browser finalization as an idempotent backup.
 
 ### 4. Paid Order Recording And Fulfillment Side Effects

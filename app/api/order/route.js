@@ -11,12 +11,7 @@ import {
   getShippingOptionsForCart,
   normalizeProductType
 } from "@/lib/shippingPricing";
-import { getShippingChargeBreakdown } from "@/lib/shippingCharge";
-import { getEasyPostQuotes } from "@/lib/shippingQuotes";
-import {
-  chooseFastestQuote,
-  getQuoteTransitDays
-} from "@/lib/shippingRateRanking";
+import { selectCheckoutShippingQuote } from "@/lib/checkoutShippingQuote";
 import { getInventoryMap } from "@/lib/stock";
 import { stripeConfig, stripeRequest } from "@/lib/stripe";
 import { supabaseAdmin } from "@/lib/supabaseAdmin";
@@ -175,18 +170,6 @@ const buildStripeShippingDetails = (customer) => ({
   }
 });
 
-const formatTransitDays = (days) => {
-  if (!Number.isFinite(days)) return "Live carrier estimate after carrier receipt";
-  return `${days} business ${days === 1 ? "day" : "days"} after carrier receipt`;
-};
-
-const getQuoteCarrierSummary = (quote, key) =>
-  [...new Set(
-    (Array.isArray(quote?.parcels) ? quote.parcels : [])
-      .map((parcel) => String(parcel?.selectedRate?.[key] || "").trim())
-      .filter(Boolean)
-  )].join(", ");
-
 const cancelCheckoutShippingQuote = async (quoteId) => {
   if (!quoteId || !supabaseAdmin) return;
 
@@ -253,6 +236,7 @@ export async function POST(request) {
     consents,
     items: normalizedItems,
     fulfillment: normalizedFulfillment,
+    shippingOption: requestedShippingOption,
     inventorySnapshot
   } = parsedPayload.data;
   const { name, email } = customer;
@@ -365,8 +349,14 @@ export async function POST(request) {
     items: lineItems,
     subtotalCents: subtotal
   });
-  let selectedShippingOption = isPickup ? null : shipping.fastestOption;
+  const requestedOption = shipping.options.find(
+    (option) => option.id === requestedShippingOption
+  ) || shipping.normalOption;
+  let selectedShippingOption = isPickup ? null : requestedOption;
   let checkoutShippingQuote = null;
+  let expectedArrivalDate = null;
+  let expectedArrivalDateKey = "";
+  let expectedArrivalLabel = "";
   let shippingCharge = {
     postageCents: 0,
     packagingCents: 0,
@@ -381,45 +371,27 @@ export async function POST(request) {
     }
 
     try {
-      const quotes = await getEasyPostQuotes({
-        customer_name: customer.name,
-        customer_email: customer.email,
-        customer_phone: customer.phone,
-        address1: customer.address1,
-        address2: customer.address2,
-        city: customer.city,
-        state: customer.state,
-        postal_code: customer.postalCode,
-        country: SHIPPING_COUNTRY_CODE,
-        items_json: itemsPayload,
-        created_at: new Date().toISOString()
+      const orderCreatedAt = new Date();
+      const hasPreorderItems = normalizedItems.some((item) =>
+        getCurrentAllocation(item.quantity, inventoryMap?.[item.sku]).preorderUnits > 0
+      );
+      const selection = await selectCheckoutShippingQuote({
+        customer: {
+          ...customer,
+          country: SHIPPING_COUNTRY_CODE
+        },
+        itemsPayload,
+        requestedOption,
+        hasPreorderItems,
+        orderCreatedAt
       });
-      const fastestQuote = chooseFastestQuote(quotes);
-      if (!fastestQuote) throw new Error("EasyPost returned no shipping rates.");
-
-      shippingCharge = getShippingChargeBreakdown(fastestQuote);
-      if (shippingCharge.amountCents <= 0) {
-        throw new Error("EasyPost returned an invalid shipping total.");
-      }
-
-      const deliveryDays = getQuoteTransitDays(fastestQuote);
-      const carrier = getQuoteCarrierSummary(fastestQuote, "carrier");
-      const service = getQuoteCarrierSummary(fastestQuote, "service");
-      const carrierTransitLabel = formatTransitDays(deliveryDays);
-      selectedShippingOption = {
-        ...shipping.fastestOption,
-        amountCents: shippingCharge.amountCents,
-        carrier,
-        service,
-        carrierTransitLabel,
-        transitLabel: `Handed to the carrier on Wednesday via ${[carrier, service].filter(Boolean).join(" ") || "the fastest available service"}; estimated ${carrierTransitLabel.toLowerCase()}.`,
-        deliveryEstimate: Number.isFinite(deliveryDays)
-          ? {
-              minimum: { unit: "business_day", value: deliveryDays },
-              maximum: { unit: "business_day", value: deliveryDays }
-            }
-          : shipping.fastestOption.deliveryEstimate
-      };
+      const fastestQuote = selection.quote;
+      shippingCharge = selection.charge;
+      selectedShippingOption = selection.option;
+      const deliveryDays = selection.deliveryDays;
+      expectedArrivalDate = selection.expectedArrivalDate;
+      expectedArrivalDateKey = selection.expectedArrivalDateKey;
+      expectedArrivalLabel = selection.expectedArrivalLabel;
 
       const expiresAt = new Date(Date.now() + SHIPPING_QUOTE_LIFETIME_MS).toISOString();
       const { data: savedQuote, error: saveQuoteError } = await supabaseAdmin
@@ -435,6 +407,8 @@ export async function POST(request) {
           charged_shipping_cents: shippingCharge.amountCents,
           currency: "USD",
           delivery_days: Number.isFinite(deliveryDays) ? deliveryDays : null,
+          service_level: selectedShippingOption.id,
+          expected_arrival_date: expectedArrivalDateKey || null,
           expires_at: expiresAt
         })
         .select("id, expires_at")
@@ -445,14 +419,21 @@ export async function POST(request) {
       checkoutShippingQuote = savedQuote;
     } catch (shippingError) {
       console.error("live EasyPost checkout quote failed:", shippingError?.message || shippingError);
+      const noEligibleRate = /No EasyPost rate was available in the/i.test(
+        String(shippingError?.message || "")
+      );
       return respond.json(
         {
-          error: "We couldn't calculate live shipping for that address. Please verify the address and try again.",
+          error: noEligibleRate
+            ? `We couldn't find an eligible ${requestedOption.label} rate for that address. Try the other shipping method or verify the address.`
+            : "We couldn't calculate live shipping for that address. Please verify the address and try again.",
           fieldErrors: {
-            address1: "Live shipping could not be calculated for this address."
+            [noEligibleRate ? "shippingOption" : "address1"]: noEligibleRate
+              ? `No ${requestedOption.label} rate is currently available for this address.`
+              : "Live shipping could not be calculated for this address."
           }
         },
-        { status: 502 }
+        { status: noEligibleRate ? 422 : 502 }
       );
     }
   }
@@ -470,7 +451,7 @@ export async function POST(request) {
   const metadata = {
     checkout_flow: "payment_intent",
     fulfillment: asMetadataValue(normalizedFulfillment, 32),
-    shipping_tier: asMetadataValue(isPickup ? "" : shipping.tier, 64),
+    shipping_tier: asMetadataValue(isPickup ? "" : selectedShippingOption?.id, 64),
     shipping_option: asMetadataValue(isPickup ? "" : selectedShippingOption?.id, 64),
     shipping_option_label: asMetadataValue(
       isPickup ? "" : selectedShippingOption?.label,
@@ -492,6 +473,8 @@ export async function POST(request) {
     shipping_rounding_cents: asMetadataValue(shippingCharge.roundingCents, 32),
     shipping_carrier: asMetadataValue(selectedShippingOption?.carrier, 120),
     shipping_service: asMetadataValue(selectedShippingOption?.service, 120),
+    expected_arrival_date: asMetadataValue(expectedArrivalDateKey, 32),
+    expected_arrival_label: asMetadataValue(expectedArrivalLabel, 120),
     customer_name: asMetadataValue(name, 120),
     customer_email: asMetadataValue(email, 254),
     customer_phone: asMetadataValue(customer.phone, 64),
@@ -623,6 +606,8 @@ export async function POST(request) {
               transitLabel: selectedShippingOption?.transitLabel,
               carrierTransitLabel: selectedShippingOption?.carrierTransitLabel,
               deliveryEstimate: selectedShippingOption?.deliveryEstimate,
+              expectedArrivalDate: expectedArrivalDateKey,
+              expectedArrivalLabel,
               quoteExpiresAt: checkoutShippingQuote?.expires_at
             }
       },
