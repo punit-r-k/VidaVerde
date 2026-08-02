@@ -24,6 +24,8 @@ jobs:
 
       - run: npm run lint
 
+      - run: npm test
+
       - run: npm run security:repo
 
       - run: npm audit --audit-level=high

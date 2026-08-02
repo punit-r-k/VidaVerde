@@ -2336,12 +2336,6 @@ select:focus {
   background: var(--line);
 }
 
-.payment-element-shell {
-  display: grid;
-  gap: 12px;
-}
-
-.card-element-wrap,
 .payment-element-wrap {
   border: 1px solid var(--line);
   border-radius: var(--radius);
@@ -2350,19 +2344,6 @@ select:focus {
   min-height: 46px;
   display: flex;
   align-items: center;
-  color: rgba(41, 54, 47, 0.76);
-  font-size: 0.85rem;
-}
-
-.card-element-wrap .StripeElement {
-  width: 100%;
-}
-
-.payment-element-loading {
-  padding: 12px 14px;
-  border: 1px solid var(--line);
-  border-radius: var(--radius);
-  background: var(--surface-elevated);
   color: rgba(41, 54, 47, 0.76);
   font-size: 0.85rem;
 }

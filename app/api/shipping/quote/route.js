@@ -4,18 +4,20 @@ import {
   shippingQuotePayloadSchema
 } from "@/lib/checkoutSchema";
 import { selectCheckoutShippingQuote } from "@/lib/checkoutShippingQuote";
-import { getProductMap } from "@/lib/products";
+import { getAuthoritativeProductMap } from "@/lib/products";
 import { getRouteRateLimitConfig } from "@/lib/rateLimit";
+import { readBoundedJsonBody } from "@/lib/requestBody";
 import { resolveCustomerShippingSelections } from "@/lib/shippingOptionPolicy";
 import {
   getShippingOptionsForCart,
   normalizeProductType
 } from "@/lib/shippingPricing";
 import { getInventoryMap } from "@/lib/stock";
+import { createEasyPostRatingContext } from "@/lib/shippingQuotes";
 
 const SHIPPING_QUOTE_RATE_LIMIT = getRouteRateLimitConfig("SHIPPING_QUOTE_CREATE", {
   windowMs: 60_000,
-  ipMax: 24
+  ipMax: 12
 });
 
 const getValidationMessage = (issues) => {
@@ -34,10 +36,7 @@ const serializeShippingSelection = (selection) => ({
   id: selection.option.id,
   label: selection.option.label,
   amountCents: selection.charge.amountCents,
-  carrier: selection.option.carrier,
-  service: selection.option.service,
   transitLabel: selection.option.transitLabel,
-  carrierTransitLabel: selection.option.carrierTransitLabel,
   deliveryEstimate: selection.option.deliveryEstimate,
   expectedArrivalDate: selection.expectedArrivalDateKey,
   expectedArrivalLabel: selection.expectedArrivalLabel
@@ -54,15 +53,18 @@ export async function POST(request) {
   if (!security.ok) return security.response;
 
   const { respond } = security;
-  let payload;
-  try {
-    payload = await request.json();
-  } catch {
+  const bodyResult = await readBoundedJsonBody(request, { maxBytes: 64 * 1024 });
+  if (!bodyResult.ok) {
     return respond.json(
-      { error: "We couldn't read the shipping details. Please try again." },
-      { status: 400 }
+      {
+        error: bodyResult.status === 413
+          ? "Those shipping details are too large. Please refresh and try again."
+          : "We couldn't read the shipping details. Please try again."
+      },
+      { status: bodyResult.status }
     );
   }
+  const payload = bodyResult.data;
 
   const parsedPayload = shippingQuotePayloadSchema.safeParse(payload);
   if (!parsedPayload.success) {
@@ -78,9 +80,16 @@ export async function POST(request) {
   const { customer, items } = parsedPayload.data;
   const skus = items.map((item) => item.sku);
   const [productMap, inventoryMap] = await Promise.all([
-    getProductMap(skus),
+    getAuthoritativeProductMap(skus),
     getInventoryMap()
   ]);
+
+  if (!productMap) {
+    return respond.json(
+      { error: "Product pricing is refreshing. Shipping will update in a moment." },
+      { status: 503 }
+    );
+  }
 
   if (!inventoryMap) {
     return respond.json(
@@ -134,6 +143,7 @@ export async function POST(request) {
   });
 
   const orderCreatedAt = new Date();
+  const ratingContext = createEasyPostRatingContext();
   const results = await Promise.allSettled(
     shipping.options.map((option) =>
       selectCheckoutShippingQuote({
@@ -141,7 +151,8 @@ export async function POST(request) {
         itemsPayload,
         requestedOption: option,
         hasPreorderItems,
-        orderCreatedAt
+        orderCreatedAt,
+        ratingContext
       })
     )
   );

@@ -40,6 +40,13 @@ const readLatestValue = async (query, field) => {
   return { ok: true, value: data?.[field] || "" };
 };
 
+const readRpcRow = async (query) => {
+  const { data, error } = await query;
+  if (error) return { ok: false, row: null, error };
+  const row = Array.isArray(data) ? data[0] || null : data || null;
+  return { ok: true, row, error: null };
+};
+
 const maxIsoValue = (...values) =>
   values
     .map((value) => String(value || "").trim())
@@ -62,6 +69,9 @@ export async function GET(request) {
 
   const { respond } = security;
   const generatedAt = new Date().toISOString();
+  const staleLabelBefore = new Date(Date.now() - 15 * 60 * 1000).toISOString();
+  const staleEmailBefore = new Date(Date.now() - 30 * 60 * 1000).toISOString();
+  const preorderEmailCutoff = new Date(Date.now() - 5 * 60 * 1000).toISOString();
 
   if (!supabaseAdmin) {
     return respond.json(
@@ -89,7 +99,11 @@ export async function GET(request) {
     latestRestock,
     latestOrderReminder,
     latestPreorderReminder,
-    emailJobCounts
+    emailJobCounts,
+    shipmentLabelErrors,
+    staleLabelClaims,
+    stalePreorderEmailClaims,
+    preorderEmailBacklog
   ] = await Promise.all([
     readLatestValue(
       supabaseAdmin
@@ -145,7 +159,40 @@ export async function GET(request) {
         .maybeSingle(),
       "pickup_reminder_email_sent_at"
     ),
-    getEmailJobStatusCounts()
+    getEmailJobStatusCounts(),
+    readCount(
+      supabaseAdmin
+        .from("shipments")
+        .select("id", { count: "exact", head: true })
+        .in("status", ["pending_label", "purchasing_label"])
+        .not("label_purchase_error", "is", null)
+        .neq("label_purchase_error", "")
+    ),
+    readCount(
+      supabaseAdmin
+        .from("shipments")
+        .select("id", { count: "exact", head: true })
+        .eq("status", "purchasing_label")
+        .or(
+          `label_purchase_started_at.is.null,label_purchase_started_at.lte.${staleLabelBefore}`
+        )
+    ),
+    readCount(
+      supabaseAdmin
+        .from("preorder_release_events")
+        .select("id", { count: "exact", head: true })
+        .is("ready_pickup_email_sent_at", null)
+        .not("ready_pickup_email_claim_token", "is", null)
+        .or(
+          `ready_pickup_email_claimed_at.is.null,ready_pickup_email_claimed_at.lte.${staleEmailBefore}`
+        )
+    ),
+    readRpcRow(
+      supabaseAdmin.rpc("get_preorder_ready_email_backlog_health", {
+        p_cutoff: preorderEmailCutoff,
+        p_max_events_per_order: 200
+      })
+    )
   ]);
 
   const latestReminder = maxIsoValue(
@@ -183,15 +230,80 @@ export async function GET(request) {
         : toErrorText(missingPickupDates.error)
     },
     {
-      key: "confirmation_claims",
-      label: "Claimed confirmations not sent",
-      status: claimedConfirmations.ok
-        ? statusFromCount(claimedConfirmations.count)
+      key: "shipment_label_errors",
+      label: "Shipments needing label attention",
+      status: shipmentLabelErrors.ok
+        ? statusFromCount(shipmentLabelErrors.count)
         : "warning",
-      value: claimedConfirmations.ok ? String(claimedConfirmations.count) : "Unknown",
-      detail: claimedConfirmations.ok
-        ? "These are orders reserved for confirmation email delivery but not yet marked sent."
-        : toErrorText(claimedConfirmations.error)
+      value: shipmentLabelErrors.ok ? String(shipmentLabelErrors.count) : "Unknown",
+      detail: shipmentLabelErrors.ok
+        ? "Review the Shipments sheet Label Error column."
+        : toErrorText(shipmentLabelErrors.error)
+    },
+    {
+      key: "stale_label_claims",
+      label: "Stale label purchases",
+      status: staleLabelClaims.ok ? statusFromCount(staleLabelClaims.count) : "warning",
+      value: staleLabelClaims.ok ? String(staleLabelClaims.count) : "Unknown",
+      detail: staleLabelClaims.ok
+        ? "Label purchases should not remain claimed for more than 15 minutes."
+        : toErrorText(staleLabelClaims.error)
+    },
+    {
+      key: "confirmation_claims",
+      label: "Orphan confirmation claims",
+      status: emailJobCounts.ok
+        ? statusFromCount(emailCounts.orphanClaims || 0)
+        : claimedConfirmations.ok
+          ? statusFromCount(claimedConfirmations.count)
+          : "warning",
+      value: emailJobCounts.ok
+        ? String(emailCounts.orphanClaims || 0)
+        : claimedConfirmations.ok
+          ? String(claimedConfirmations.count)
+          : "Unknown",
+      detail: emailJobCounts.ok
+        ? "Only claimed orders without an active email job are counted."
+        : claimedConfirmations.ok
+          ? "Email queue details were unavailable, so every unsent claim is shown."
+          : toErrorText(claimedConfirmations.error)
+    },
+    {
+      key: "stale_email_jobs",
+      label: "Stale email job claims",
+      status: emailJobCounts.ok
+        ? statusFromCount(emailCounts.staleProcessing || 0)
+        : "warning",
+      value: emailJobCounts.ok ? String(emailCounts.staleProcessing || 0) : "Unknown",
+      detail: emailJobCounts.ok
+        ? "Processing jobs older than the 30-minute lease are recoverable by the next worker."
+        : toErrorText(emailJobCounts.error)
+    },
+    {
+      key: "stale_preorder_email_claims",
+      label: "Stale preorder email claims",
+      status: stalePreorderEmailClaims.ok
+        ? statusFromCount(stalePreorderEmailClaims.count)
+        : "warning",
+      value: stalePreorderEmailClaims.ok
+        ? String(stalePreorderEmailClaims.count)
+        : "Unknown",
+      detail: stalePreorderEmailClaims.ok
+        ? "Preorder email claims older than 30 minutes can be recovered safely."
+        : toErrorText(stalePreorderEmailClaims.error)
+    },
+    {
+      key: "oversized_preorder_email_batches",
+      label: "Oversized preorder email batches",
+      status: preorderEmailBacklog.ok
+        ? statusFromCount(preorderEmailBacklog.row?.poisoned_order_count || 0)
+        : "warning",
+      value: preorderEmailBacklog.ok
+        ? String(preorderEmailBacklog.row?.poisoned_order_count || 0)
+        : "Unknown",
+      detail: preorderEmailBacklog.ok
+        ? `${Number(preorderEmailBacklog.row?.poisoned_event_count || 0)} release events need operator review.`
+        : toErrorText(preorderEmailBacklog.error)
     },
     {
       key: "email_queue",

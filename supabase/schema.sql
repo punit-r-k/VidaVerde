@@ -5,6 +5,8 @@ begin;
 
 create extension if not exists "pgcrypto";
 
+revoke create on schema public from public, anon, authenticated;
+
 create table if not exists products (
   id uuid primary key default gen_random_uuid(),
   sku text not null unique,
@@ -46,7 +48,8 @@ create table if not exists orders (
   payment_session_id text not null unique,
   payment_reference text,
   payment_provider text not null default 'stripe',
-  status text not null default 'paid',
+  status text not null default 'paid'
+    check (status in ('paid', 'pending', 'cancelled', 'refunded', 'disputed', 'fulfilled')),
   fulfillment text not null check (fulfillment in ('ship', 'market')),
   customer_name text not null,
   customer_email text not null,
@@ -57,11 +60,15 @@ create table if not exists orders (
   state text,
   postal_code text,
   note text,
-  currency text not null default 'usd',
-  amount_subtotal integer not null default 0,
-  amount_tax integer not null default 0,
-  amount_shipping integer not null default 0,
-  amount_total integer not null default 0,
+  currency text not null default 'usd' check (lower(currency) = 'usd'),
+  amount_subtotal integer not null default 0 check (amount_subtotal >= 0),
+  amount_tax integer not null default 0 check (amount_tax >= 0),
+  amount_shipping integer not null default 0 check (amount_shipping >= 0),
+  amount_total integer not null default 0 check (amount_total >= 0),
+  stripe_state_effective_at timestamptz,
+  stripe_state_observed_at timestamptz,
+  stripe_state_retire_work boolean not null default false,
+  stripe_fulfillment_retired_at timestamptz,
   shipping_tier text,
   shipping_option text,
   shipping_option_label text,
@@ -71,8 +78,13 @@ create table if not exists orders (
   is_test_order boolean not null default false,
   customer_confirmation_email_sent_at timestamptz,
   customer_confirmation_email_claimed_at timestamptz,
+  customer_confirmation_email_claim_token uuid,
   pickup_reminder_email_sent_at timestamptz,
   pickup_date date,
+  constraint orders_total_matches_components
+    check (amount_total = amount_subtotal + amount_tax + amount_shipping),
+  constraint orders_market_has_no_shipping_charge
+    check (fulfillment <> 'market' or amount_shipping = 0),
   created_at timestamptz not null default now()
 );
 
@@ -326,11 +338,76 @@ create table if not exists email_jobs (
   max_attempts integer not null default 5 check (max_attempts > 0),
   available_at timestamptz not null default now(),
   claimed_at timestamptz,
+  claim_token uuid,
   processed_at timestamptz,
+  message_id text not null,
+  last_error_code text,
   last_error text,
   created_at timestamptz not null default now(),
   updated_at timestamptz not null default now()
 );
+
+alter table orders
+  add column if not exists customer_confirmation_email_claim_token uuid;
+
+alter table email_jobs
+  add column if not exists claim_token uuid,
+  add column if not exists message_id text,
+  add column if not exists last_error_code text;
+
+update email_jobs
+set message_id = format(
+  '<vida-verde-order-%s-job-%s@notifications.vida-verde>',
+  coalesce(order_id::text, 'unknown'),
+  id::text
+)
+where nullif(trim(coalesce(message_id, '')), '') is null;
+
+alter table email_jobs alter column message_id set not null;
+alter table email_jobs drop constraint if exists email_jobs_message_id_safe;
+alter table email_jobs add constraint email_jobs_message_id_safe
+  check (
+    length(message_id) between 3 and 320
+    and message_id !~ E'[\\r\\n]'
+  );
+
+update email_jobs
+set claim_token = coalesce(claim_token, gen_random_uuid()),
+    claimed_at = coalesce(claimed_at, updated_at, created_at, now())
+where status in ('pending', 'processing');
+
+update email_jobs
+set claim_token = null,
+    claimed_at = null
+where status in ('sent', 'failed');
+
+with active_job as (
+  select distinct on (ej.order_id)
+    ej.order_id,
+    ej.claim_token,
+    ej.claimed_at
+  from email_jobs ej
+  where ej.order_id is not null
+    and ej.status in ('pending', 'processing')
+  order by ej.order_id, ej.created_at, ej.id
+)
+update orders o
+set customer_confirmation_email_claim_token = aj.claim_token,
+    customer_confirmation_email_claimed_at = aj.claimed_at
+from active_job aj
+where o.id = aj.order_id
+  and o.customer_confirmation_email_sent_at is null;
+
+update orders
+set customer_confirmation_email_claim_token = gen_random_uuid()
+where customer_confirmation_email_sent_at is null
+  and customer_confirmation_email_claimed_at is not null
+  and customer_confirmation_email_claim_token is null;
+
+update orders
+set customer_confirmation_email_claim_token = null,
+    customer_confirmation_email_claimed_at = null
+where customer_confirmation_email_sent_at is not null;
 
 create index if not exists email_signups_email_idx on email_signups (email);
 create index if not exists email_signups_created_at_idx on email_signups (created_at desc);
@@ -355,10 +432,20 @@ create index if not exists email_jobs_status_available_idx
   on email_jobs (status, available_at, created_at);
 create index if not exists email_jobs_order_type_idx
   on email_jobs (order_id, type);
-create unique index if not exists email_jobs_order_confirmation_active_idx
+drop index if exists email_jobs_order_confirmation_active_idx;
+create unique index email_jobs_order_confirmation_active_idx
   on email_jobs (order_id, type)
   where type = 'order_confirmation'
-    and status in ('pending', 'processing', 'failed');
+    and status in ('pending', 'processing');
+create unique index if not exists email_jobs_message_id_uidx
+  on email_jobs (message_id);
+create index if not exists email_jobs_processing_claim_idx
+  on email_jobs (claimed_at, created_at, id)
+  where status = 'processing';
+create index if not exists orders_confirmation_email_claim_idx
+  on orders (customer_confirmation_email_claimed_at, id)
+  where customer_confirmation_email_sent_at is null
+    and customer_confirmation_email_claimed_at is not null;
 
 alter table products
   add column if not exists product_type text not null default 'sauerkraut';
@@ -435,6 +522,10 @@ begin
   end if;
 
   alter table orders add column if not exists shipping_tier text;
+  alter table orders add column if not exists stripe_state_effective_at timestamptz;
+  alter table orders add column if not exists stripe_state_observed_at timestamptz;
+  alter table orders add column if not exists stripe_state_retire_work boolean not null default false;
+  alter table orders add column if not exists stripe_fulfillment_retired_at timestamptz;
   alter table orders add column if not exists shipping_option text;
   alter table orders add column if not exists shipping_option_label text;
   alter table orders add column if not exists shipping_estimate text;
@@ -449,6 +540,65 @@ begin
   alter table shipments add column if not exists hot_sauce_count integer not null default 0 check (hot_sauce_count >= 0);
 end $$;
 
+update orders
+set stripe_state_effective_at = coalesce(
+      stripe_state_effective_at,
+      '-infinity'::timestamptz
+    ),
+    stripe_state_observed_at = coalesce(
+      stripe_state_observed_at,
+      '-infinity'::timestamptz
+    )
+where stripe_state_effective_at is null
+   or stripe_state_observed_at is null;
+
+update orders
+set stripe_state_retire_work = true,
+    stripe_fulfillment_retired_at = coalesce(
+      stripe_fulfillment_retired_at,
+      created_at
+    )
+where status in ('refunded', 'disputed')
+  and stripe_state_effective_at = '-infinity'::timestamptz;
+
+create or replace function guard_retired_stripe_fulfillment()
+returns trigger
+language plpgsql
+security definer
+set search_path = public
+as $$
+declare
+  v_retired_at timestamptz;
+begin
+  if new.status not in ('pending_label', 'purchasing_label') then
+    return new;
+  end if;
+
+  select o.stripe_fulfillment_retired_at
+    into v_retired_at
+    from orders o
+    where o.id = new.order_id;
+
+  if v_retired_at is not null then
+    new.status := 'cancelled';
+    new.label_purchase_started_at := null;
+    new.label_purchase_error :=
+      'Fulfillment is blocked because the payment state retired its inventory allocation; operator reconciliation is required.';
+    new.updated_at := clock_timestamp();
+  end if;
+
+  return new;
+end;
+$$;
+
+drop trigger if exists shipments_guard_retired_stripe_fulfillment on shipments;
+create trigger shipments_guard_retired_stripe_fulfillment
+before insert or update of status, label_purchase_started_at on shipments
+for each row execute function guard_retired_stripe_fulfillment();
+
+revoke all on function guard_retired_stripe_fulfillment()
+  from public, anon, authenticated;
+
 create index if not exists orders_pickup_date_status_idx
   on orders (pickup_date, status)
   where pickup_date is not null;
@@ -459,7 +609,8 @@ create table if not exists order_items (
   sku text not null references products(sku) on update cascade,
   quantity integer not null check (quantity > 0),
   price_cents integer not null check (price_cents >= 0),
-  preorder_qty integer not null default 0 check (preorder_qty >= 0),
+  preorder_qty integer not null default 0
+    check (preorder_qty >= 0 and preorder_qty <= quantity),
   created_at timestamptz not null default now()
 );
 
@@ -505,14 +656,27 @@ create table if not exists preorder_release_events (
   sku text not null references products(sku) on update cascade,
   quantity integer not null check (quantity > 0),
   ready_pickup_email_sent_at timestamptz,
+  ready_pickup_email_claim_token uuid,
+  ready_pickup_email_claimed_at timestamptz,
   pickup_reminder_email_sent_at timestamptz,
   created_at timestamptz not null default now()
 );
+
+alter table preorder_release_events
+  add column if not exists ready_pickup_email_claim_token uuid,
+  add column if not exists ready_pickup_email_claimed_at timestamptz;
 
 create index if not exists preorder_release_events_sku_created_at_idx
   on preorder_release_events (sku, created_at desc, id);
 create index if not exists preorder_release_events_order_created_at_idx
   on preorder_release_events (order_id, created_at desc, id);
+create index if not exists preorder_release_events_ready_email_unsent_idx
+  on preorder_release_events (order_id, created_at, id)
+  where ready_pickup_email_sent_at is null;
+create index if not exists preorder_release_events_ready_email_claim_idx
+  on preorder_release_events (ready_pickup_email_claimed_at, order_id, id)
+  where ready_pickup_email_sent_at is null
+    and ready_pickup_email_claim_token is not null;
 
 do $$
 begin
@@ -730,6 +894,15 @@ declare
   v_available integer;
   v_preorder integer;
 begin
+  if nullif(trim(coalesce(p_session_id, '')), '') is null then
+    raise exception 'A payment session id is required.';
+  end if;
+
+  -- Finalization and the Stripe webhook can arrive together. Serialize every
+  -- attempt for this payment before checking for an existing order so only one
+  -- transaction mutates inventory.
+  perform pg_advisory_xact_lock(hashtextextended(p_session_id, 0));
+
   select id into v_order_id
   from orders
   where payment_session_id = p_session_id;
@@ -810,7 +983,13 @@ begin
   )
   returning id into v_order_id;
 
-  for v_item in select * from jsonb_array_elements(p_items) loop
+  -- Lock inventory in a deterministic order so overlapping carts cannot
+  -- deadlock when their JSON item arrays were submitted in different orders.
+  for v_item in
+    select item.value
+    from jsonb_array_elements(p_items) as item(value)
+    order by trim(both from coalesce(item.value->>'sku', ''))
+  loop
     v_sku := trim(both from coalesce(v_item->>'sku', ''));
     v_qty := coalesce((v_item->>'quantity')::integer, 0);
     v_price := coalesce((v_item->>'price_cents')::integer, 0);
@@ -859,6 +1038,495 @@ begin
   return v_order_id;
 end;
 $$;
+create or replace function record_paid_order(
+  p_session_id text,
+  p_payment_reference text,
+  p_payment_provider text,
+  p_fulfillment text,
+  p_currency text,
+  p_amount_subtotal integer,
+  p_amount_tax integer,
+  p_amount_shipping integer,
+  p_amount_total integer,
+  p_customer jsonb,
+  p_items jsonb,
+  p_is_test_order boolean
+) returns uuid
+language plpgsql
+security definer
+set search_path = public
+as $$
+declare
+  v_order_id uuid;
+begin
+  v_order_id := record_paid_order(
+    p_session_id,
+    p_payment_reference,
+    p_payment_provider,
+    p_fulfillment,
+    p_currency,
+    p_amount_subtotal,
+    p_amount_tax,
+    p_amount_shipping,
+    p_amount_total,
+    p_customer,
+    p_items
+  );
+
+  if coalesce(p_is_test_order, false) then
+    update orders
+      set is_test_order = true
+      where id = v_order_id
+        and not is_test_order;
+  end if;
+
+  return v_order_id;
+end;
+$$;
+
+
+drop function if exists transition_stripe_order_state(uuid, text, timestamptz);
+
+create or replace function transition_stripe_order_state(
+  p_order_id uuid,
+  p_target_status text,
+  p_effective_at timestamptz default now(),
+  p_retire_work boolean default true
+) returns text
+language plpgsql
+security definer
+set search_path = public
+as $$
+declare
+  v_current_status text;
+  v_target_status text := lower(trim(coalesce(p_target_status, '')));
+  v_effective_at timestamptz := coalesce(p_effective_at, now());
+  v_cancelled_preorders record;
+begin
+  if v_target_status not in ('paid', 'cancelled', 'refunded', 'disputed') then
+    raise exception 'Unsupported Stripe order status transition: %', v_target_status;
+  end if;
+
+  select o.status
+    into v_current_status
+    from orders o
+    where o.id = p_order_id
+    for update;
+
+  if not found then
+    raise exception 'Unknown order id: %', p_order_id;
+  end if;
+
+  if v_current_status = 'refunded' and v_target_status in ('paid', 'disputed') then
+    v_target_status := v_current_status;
+  end if;
+
+  if v_target_status = 'paid' and v_current_status not in ('paid', 'disputed') then
+    raise exception 'Cannot restore order % to paid from status %', p_order_id, v_current_status;
+  end if;
+
+  if v_target_status = 'cancelled' and v_current_status not in ('pending', 'cancelled') then
+    raise exception 'Cannot cancel order % from status %', p_order_id, v_current_status;
+  end if;
+
+  update orders
+    set status = v_target_status
+    where id = p_order_id
+      and status <> v_target_status;
+
+  if not coalesce(p_retire_work, true)
+     or v_target_status not in ('cancelled', 'refunded', 'disputed') then
+    return v_target_status;
+  end if;
+
+  perform i.sku
+    from inventory i
+    where exists (
+      select 1
+      from preorder_queue pq
+      where pq.order_id = p_order_id
+        and pq.sku = i.sku
+        and pq.remaining > 0
+    )
+    order by i.sku
+    for update;
+
+  perform pq.id
+    from preorder_queue pq
+    where pq.order_id = p_order_id
+      and pq.remaining > 0
+    order by pq.sku, pq.created_at, pq.id
+    for update;
+
+  for v_cancelled_preorders in
+    select pq.sku, sum(pq.remaining)::integer as quantity
+    from preorder_queue pq
+    where pq.order_id = p_order_id
+      and pq.remaining > 0
+    group by pq.sku
+  loop
+    update inventory i
+      set preorders_remaining = greatest(
+            i.preorders_remaining - v_cancelled_preorders.quantity,
+            0
+          ),
+          updated_at = v_effective_at
+      where i.sku = v_cancelled_preorders.sku;
+  end loop;
+
+  update preorder_queue
+    set remaining = 0
+    where order_id = p_order_id
+      and remaining > 0;
+
+  update shipments s
+    set status = 'cancelled',
+        updated_at = v_effective_at
+    where s.order_id = p_order_id
+      and s.status in ('pending_label', 'purchasing_label')
+      and s.label_purchased_at is null
+      and nullif(trim(coalesce(s.label_url, '')), '') is null
+      and nullif(trim(coalesce(s.tracking_number, '')), '') is null
+      and not exists (
+        select 1
+        from shipment_parcels sp
+        where sp.shipment_id = s.id
+          and sp.status in ('label_purchased', 'shipped', 'delivered')
+      );
+
+  update checkout_shipping_quotes q
+    set status = 'cancelled',
+        updated_at = v_effective_at
+    from orders o
+    where o.id = p_order_id
+      and q.status = 'quoted'
+      and q.payment_session_id in (o.payment_session_id, o.payment_reference);
+
+  return v_target_status;
+end;
+$$;
+
+create or replace function transition_stripe_order_state(
+  p_order_id uuid,
+  p_target_status text,
+  p_effective_at timestamptz,
+  p_retire_work boolean,
+  p_observed_at timestamptz
+) returns text
+language plpgsql
+security definer
+set search_path = public
+as $$
+declare
+  v_current_status text;
+  v_current_effective_at timestamptz;
+  v_current_observed_at timestamptz;
+  v_current_retire_work boolean;
+  v_target_status text := lower(trim(coalesce(p_target_status, '')));
+  v_effective_at timestamptz := coalesce(p_effective_at, clock_timestamp());
+  v_observed_at timestamptz := coalesce(p_observed_at, clock_timestamp());
+  v_cancelled_preorders record;
+begin
+  if v_target_status not in ('paid', 'cancelled', 'refunded', 'disputed') then
+    raise exception 'Unsupported Stripe order status transition: %', v_target_status;
+  end if;
+
+  select
+      o.status,
+      o.stripe_state_effective_at,
+      o.stripe_state_observed_at,
+      o.stripe_state_retire_work
+    into
+      v_current_status,
+      v_current_effective_at,
+      v_current_observed_at,
+      v_current_retire_work
+    from orders o
+    where o.id = p_order_id
+    for update;
+
+  if not found then
+    raise exception 'Unknown order id: %', p_order_id;
+  end if;
+
+  if v_current_status = 'refunded' and v_target_status in ('paid', 'disputed') then
+    return v_current_status;
+  end if;
+
+  -- Order primarily by Stripe's event time. A response for an older event may
+  -- finish later, so observation time is only a same-event-time tie-breaker.
+  if v_current_effective_at is not null
+     and v_effective_at < v_current_effective_at then
+    return v_current_status;
+  end if;
+
+  if v_current_effective_at is not null
+     and v_effective_at = v_current_effective_at
+     and v_current_observed_at is not null
+     and v_observed_at < v_current_observed_at then
+    return v_current_status;
+  end if;
+
+  if v_current_effective_at is not null
+     and v_effective_at = v_current_effective_at
+     and v_current_observed_at is not null
+     and v_observed_at = v_current_observed_at
+     and (
+       case
+         when v_target_status = 'refunded' then 50
+         when v_target_status = 'disputed' and coalesce(p_retire_work, true) then 40
+         when v_target_status = 'disputed' then 30
+         when v_target_status = 'paid' then 20
+         when v_target_status = 'cancelled' then 10
+         else 0
+       end
+     ) <= (
+       case
+         when v_current_status = 'refunded' then 50
+         when v_current_status = 'disputed' and coalesce(v_current_retire_work, false) then 40
+         when v_current_status = 'disputed' then 30
+         when v_current_status = 'paid' then 20
+         when v_current_status = 'cancelled' then 10
+         else 0
+       end
+     ) then
+    return v_current_status;
+  end if;
+
+  if v_target_status = 'paid' and v_current_status not in ('paid', 'disputed') then
+    raise exception 'Cannot restore order % to paid from status %', p_order_id, v_current_status;
+  end if;
+
+  if v_target_status = 'cancelled' and v_current_status not in ('pending', 'cancelled') then
+    raise exception 'Cannot cancel order % from status %', p_order_id, v_current_status;
+  end if;
+
+  update orders
+    set status = v_target_status,
+        stripe_state_effective_at = v_effective_at,
+        stripe_state_observed_at = v_observed_at,
+        stripe_state_retire_work = (
+          v_target_status = 'disputed' and coalesce(p_retire_work, true)
+        ),
+        stripe_fulfillment_retired_at = case
+          when v_target_status in ('cancelled', 'refunded')
+            or (v_target_status = 'disputed' and coalesce(p_retire_work, true))
+            then coalesce(stripe_fulfillment_retired_at, v_effective_at)
+          else stripe_fulfillment_retired_at
+        end
+    where id = p_order_id;
+
+  if v_target_status = 'disputed' and not coalesce(p_retire_work, true) then
+    update shipments s
+      set status = 'pending_label',
+          label_purchase_started_at = null,
+          label_purchase_error = 'Label purchase paused because the payment is disputed.',
+          updated_at = v_observed_at
+      where s.order_id = p_order_id
+        and s.status = 'purchasing_label';
+  elsif v_target_status in ('cancelled', 'refunded')
+        or (v_target_status = 'disputed' and coalesce(p_retire_work, true)) then
+    update shipments s
+      set status = 'cancelled',
+          label_purchase_started_at = null,
+          label_purchase_error = case
+            when v_target_status = 'refunded'
+              then 'Label purchase stopped because the payment was fully refunded.'
+            when v_target_status = 'disputed'
+              then 'Label purchase stopped because the payment dispute was lost.'
+            else 'Label purchase stopped because the payment was cancelled.'
+          end,
+          updated_at = v_observed_at
+      where s.order_id = p_order_id
+        and s.status = 'purchasing_label';
+  end if;
+
+  if not coalesce(p_retire_work, true)
+     or v_target_status not in ('cancelled', 'refunded', 'disputed') then
+    return v_target_status;
+  end if;
+
+  perform i.sku
+    from inventory i
+    where exists (
+      select 1
+      from preorder_queue pq
+      where pq.order_id = p_order_id
+        and pq.sku = i.sku
+        and pq.remaining > 0
+    )
+    order by i.sku
+    for update;
+
+  perform pq.id
+    from preorder_queue pq
+    where pq.order_id = p_order_id
+      and pq.remaining > 0
+    order by pq.sku, pq.created_at, pq.id
+    for update;
+
+  for v_cancelled_preorders in
+    select pq.sku, sum(pq.remaining)::integer as quantity
+    from preorder_queue pq
+    where pq.order_id = p_order_id
+      and pq.remaining > 0
+    group by pq.sku
+  loop
+    update inventory i
+      set preorders_remaining = greatest(
+            i.preorders_remaining - v_cancelled_preorders.quantity,
+            0
+          ),
+          updated_at = v_effective_at
+      where i.sku = v_cancelled_preorders.sku;
+  end loop;
+
+  update preorder_queue
+    set remaining = 0
+    where order_id = p_order_id
+      and remaining > 0;
+
+  update shipments s
+    set status = 'cancelled',
+        updated_at = v_effective_at
+    where s.order_id = p_order_id
+      and s.status in ('pending_label', 'purchasing_label')
+      and s.label_purchased_at is null
+      and nullif(trim(coalesce(s.label_url, '')), '') is null
+      and nullif(trim(coalesce(s.tracking_number, '')), '') is null
+      and not exists (
+        select 1
+        from shipment_parcels sp
+        where sp.shipment_id = s.id
+          and sp.status in ('label_purchased', 'shipped', 'delivered')
+      );
+
+  update checkout_shipping_quotes q
+    set status = 'cancelled',
+        updated_at = v_effective_at
+    from orders o
+    where o.id = p_order_id
+      and q.status = 'quoted'
+      and q.payment_session_id in (o.payment_session_id, o.payment_reference);
+
+  return v_target_status;
+end;
+$$;
+
+create or replace function transition_stripe_order_state(
+  p_order_id uuid,
+  p_target_status text,
+  p_effective_at timestamptz default now(),
+  p_retire_work boolean default true
+) returns text
+language plpgsql
+security definer
+set search_path = public
+as $$
+begin
+  return transition_stripe_order_state(
+    p_order_id,
+    p_target_status,
+    p_effective_at,
+    p_retire_work,
+    clock_timestamp()
+  );
+end;
+$$;
+
+create or replace function record_stripe_order_state(
+  p_session_id text,
+  p_payment_reference text,
+  p_payment_provider text,
+  p_fulfillment text,
+  p_currency text,
+  p_amount_subtotal integer,
+  p_amount_tax integer,
+  p_amount_shipping integer,
+  p_amount_total integer,
+  p_customer jsonb,
+  p_items jsonb,
+  p_is_test_order boolean,
+  p_target_status text,
+  p_state_effective_at timestamptz,
+  p_state_observed_at timestamptz,
+  p_retire_work boolean
+) returns jsonb
+language plpgsql
+security definer
+set search_path = public
+as $$
+declare
+  v_order_id uuid;
+  v_initial_state_unset boolean := false;
+  v_final_status text;
+  v_fulfillment_retired boolean := false;
+  v_released record;
+begin
+  v_order_id := record_paid_order(
+    p_session_id,
+    p_payment_reference,
+    p_payment_provider,
+    p_fulfillment,
+    p_currency,
+    p_amount_subtotal,
+    p_amount_tax,
+    p_amount_shipping,
+    p_amount_total,
+    p_customer,
+    p_items,
+    p_is_test_order
+  );
+
+  select o.stripe_state_effective_at is null
+    into v_initial_state_unset
+    from orders o
+    where o.id = v_order_id
+    for update;
+
+  v_final_status := transition_stripe_order_state(
+    v_order_id,
+    p_target_status,
+    p_state_effective_at,
+    p_retire_work,
+    p_state_observed_at
+  );
+
+  if coalesce(v_initial_state_unset, false)
+     and (
+       v_final_status = 'refunded'
+       or (v_final_status = 'disputed' and coalesce(p_retire_work, true))
+     ) then
+    for v_released in
+      select
+        oi.sku,
+        sum(oi.quantity - oi.preorder_qty)::integer as in_stock_quantity,
+        sum(oi.quantity)::integer as total_quantity
+      from order_items oi
+      where oi.order_id = v_order_id
+      group by oi.sku
+      order by oi.sku
+    loop
+      update inventory i
+        set on_hand = i.on_hand + greatest(v_released.in_stock_quantity, 0),
+            units_sold = greatest(i.units_sold - v_released.total_quantity, 0),
+            updated_at = coalesce(p_state_observed_at, clock_timestamp())
+        where i.sku = v_released.sku;
+    end loop;
+  end if;
+
+  select o.stripe_fulfillment_retired_at is not null
+    into v_fulfillment_retired
+    from orders o
+    where o.id = v_order_id;
+
+  return jsonb_build_object(
+    'order_id', v_order_id,
+    'status', v_final_status,
+    'fulfillment_retired', coalesce(v_fulfillment_retired, false)
+  );
+end;
+$$;
 
 create or replace function sync_shipment_for_order(
   p_order_id uuid
@@ -877,17 +1545,146 @@ begin
   select *
     into v_order
     from orders o
-    where o.id = p_order_id;
+    where o.id = p_order_id
+    for update;
 
   if not found then
     raise exception 'Unknown order id: %', p_order_id;
   end if;
 
-  if v_order.fulfillment <> 'ship' then
-    delete from shipments s
-      where s.order_id = v_order.id;
+  if coalesce(v_order.is_test_order, false) then
+    update shipments s
+      set status = 'cancelled',
+          label_purchase_started_at = null,
+          label_purchase_error = 'Automatic label purchase disabled for a financial test order.',
+          updated_at = now()
+      where s.order_id = v_order.id
+        and s.status in ('pending_label', 'purchasing_label')
+        and s.label_purchased_at is null
+        and nullif(trim(coalesce(s.label_url, '')), '') is null
+        and nullif(trim(coalesce(s.tracking_number, '')), '') is null
+        and not exists (
+          select 1
+          from shipment_parcels sp
+          where sp.shipment_id = s.id
+            and sp.status in ('label_purchased', 'shipped', 'delivered')
+        );
     return null;
   end if;
+
+  if v_order.fulfillment = 'ship' and v_order.status = 'disputed' then
+    update shipments s
+      set status = 'pending_label',
+          label_purchase_started_at = null,
+          label_purchase_error = 'Label purchase paused while the payment dispute is open.',
+          updated_at = now()
+      where s.order_id = v_order.id
+        and s.status = 'purchasing_label';
+    return null;
+  end if;
+
+  if v_order.fulfillment <> 'ship' or v_order.status <> 'paid' then
+    update shipments s
+      set status = 'cancelled',
+          updated_at = now()
+      where s.order_id = v_order.id
+        and s.status in ('pending_label', 'purchasing_label')
+        and s.label_purchased_at is null
+        and nullif(trim(coalesce(s.label_url, '')), '') is null
+        and nullif(trim(coalesce(s.tracking_number, '')), '') is null
+        and not exists (
+          select 1
+          from shipment_parcels sp
+          where sp.shipment_id = s.id
+            and sp.status in ('label_purchased', 'shipped', 'delivered')
+        );
+    return null;
+  end if;
+
+  if exists (
+    select 1
+      from preorder_queue pq
+      where pq.order_id = v_order.id
+        and pq.remaining > 0
+  ) then
+    delete from shipments s
+      where s.order_id = v_order.id
+        and s.status = 'pending_label'
+        and s.label_purchased_at is null
+        and nullif(trim(coalesce(s.label_url, '')), '') is null
+        and nullif(trim(coalesce(s.tracking_number, '')), '') is null
+        and not exists (
+          select 1
+          from shipment_parcels sp
+          where sp.shipment_id = s.id
+            and sp.status in ('label_purchased', 'shipped', 'delivered')
+        );
+    update shipments s
+      set status = 'cancelled',
+          updated_at = now()
+      where s.order_id = v_order.id
+        and s.status = 'purchasing_label'
+        and s.label_purchased_at is null
+        and nullif(trim(coalesce(s.label_url, '')), '') is null
+        and nullif(trim(coalesce(s.tracking_number, '')), '') is null
+        and not exists (
+          select 1
+          from shipment_parcels sp
+          where sp.shipment_id = s.id
+            and sp.status in ('label_purchased', 'shipped', 'delivered')
+        );
+    return null;
+  end if;
+
+  update shipments s
+    set label_purchase_error = null,
+        updated_at = now()
+    where s.order_id = v_order.id
+      and s.status = 'pending_label'
+      and s.label_purchase_error = 'Label purchase paused until all preorder items are ready.';
+
+  select s.id
+    into v_shipment_id
+    from shipments s
+    where s.order_id = v_order.id
+      and (
+        s.status in ('purchasing_label', 'label_purchased', 'shipped', 'delivered')
+        or (
+          s.status = 'cancelled'
+          and (
+            s.label_purchased_at is not null
+            or nullif(trim(coalesce(s.label_url, '')), '') is not null
+            or nullif(trim(coalesce(s.tracking_number, '')), '') is not null
+            or exists (
+              select 1
+              from shipment_parcels sp
+              where sp.shipment_id = s.id
+                and sp.status in ('label_purchased', 'shipped', 'delivered')
+            )
+          )
+        )
+      );
+
+  if v_shipment_id is not null then
+    return v_shipment_id;
+  end if;
+
+  update shipments s
+    set status = 'pending_label',
+        label_purchase_started_at = null,
+        label_purchase_error = null,
+        updated_at = now()
+    where s.order_id = v_order.id
+      and s.status = 'cancelled'
+      and s.label_purchased_at is null
+      and nullif(trim(coalesce(s.label_url, '')), '') is null
+      and nullif(trim(coalesce(s.tracking_number, '')), '') is null
+      and not exists (
+        select 1
+        from shipment_parcels sp
+        where sp.shipment_id = s.id
+          and sp.status in ('label_purchased', 'shipped', 'delivered')
+      );
 
   select
     coalesce(
@@ -916,6 +1713,10 @@ begin
     from order_items oi
     left join products p on p.sku = oi.sku
     where oi.order_id = v_order.id;
+
+  if v_item_count <= 0 then
+    raise exception 'Shipping order % has no items', p_order_id;
+  end if;
 
   insert into shipments (
     order_id,
@@ -992,7 +1793,14 @@ begin
     sauerkraut_count = excluded.sauerkraut_count,
     hot_sauce_count = excluded.hot_sauce_count,
     updated_at = now()
+  where shipments.status = 'pending_label'
   returning id into v_shipment_id;
+
+  if v_shipment_id is null then
+    select s.id into v_shipment_id
+      from shipments s
+      where s.order_id = v_order.id;
+  end if;
 
   return v_shipment_id;
 end;
@@ -1006,6 +1814,7 @@ set search_path = public
 as $$
 declare
   v_order_id uuid;
+  v_shipment_id uuid;
   v_synced integer := 0;
 begin
   for v_order_id in
@@ -1013,13 +1822,765 @@ begin
     from orders o
     where o.fulfillment = 'ship'
       and o.status = 'paid'
-    order by o.created_at desc
+      and not coalesce(o.is_test_order, false)
+      and not exists (
+        select 1
+        from preorder_queue pq
+        where pq.order_id = o.id
+          and pq.remaining > 0
+      )
+      and (
+        not exists (
+          select 1
+          from shipments s
+          where s.order_id = o.id
+        )
+        or exists (
+          select 1
+          from shipments s
+          where s.order_id = o.id
+            and s.status = 'pending_label'
+            and s.label_purchase_error =
+              'Label purchase paused until all preorder items are ready.'
+        )
+        or exists (
+          select 1
+          from shipments s
+          where s.order_id = o.id
+            and s.status = 'cancelled'
+            and s.label_purchased_at is null
+            and nullif(trim(coalesce(s.label_url, '')), '') is null
+            and nullif(trim(coalesce(s.tracking_number, '')), '') is null
+            and not exists (
+              select 1
+              from shipment_parcels sp
+              where sp.shipment_id = s.id
+                and sp.status in ('label_purchased', 'shipped', 'delivered')
+            )
+        )
+      )
+    order by o.created_at, o.id
+    limit 100
   loop
-    perform sync_shipment_for_order(v_order_id);
-    v_synced := v_synced + 1;
+    v_shipment_id := sync_shipment_for_order(v_order_id);
+    if v_shipment_id is not null then
+      v_synced := v_synced + 1;
+    end if;
   end loop;
 
   return v_synced;
+end;
+$$;
+
+update shipments s
+  set status = 'cancelled',
+      label_purchase_started_at = null,
+      label_purchase_error = 'Automatic label purchase disabled for a financial test order.',
+      updated_at = now()
+from orders o
+where o.id = s.order_id
+  and coalesce(o.is_test_order, false)
+  and s.status in ('pending_label', 'purchasing_label')
+  and s.label_purchased_at is null
+  and nullif(trim(coalesce(s.label_url, '')), '') is null
+  and nullif(trim(coalesce(s.tracking_number, '')), '') is null
+  and not exists (
+    select 1
+    from shipment_parcels sp
+    where sp.shipment_id = s.id
+      and sp.status in ('label_purchased', 'shipped', 'delivered')
+  );
+
+create or replace function enqueue_order_confirmation_email(
+  p_order_id uuid,
+  p_payload jsonb,
+  p_claim_token uuid,
+  p_message_id text
+) returns uuid
+language plpgsql
+security definer
+set search_path = public
+as $$
+declare
+  v_now timestamptz := clock_timestamp();
+  v_message_id text := trim(coalesce(p_message_id, ''));
+  v_order orders%rowtype;
+  v_existing email_jobs%rowtype;
+  v_job_id uuid;
+begin
+  if p_order_id is null or p_claim_token is null then
+    raise exception 'An order id and claim token are required.';
+  end if;
+
+  if p_payload is null or jsonb_typeof(p_payload) <> 'object' then
+    raise exception 'The order confirmation payload must be a JSON object.';
+  end if;
+
+  if length(v_message_id) not between 3 and 320
+     or v_message_id ~ E'[\\r\\n]' then
+    raise exception 'The order confirmation Message-ID is invalid.';
+  end if;
+
+  select *
+    into v_order
+    from orders o
+    where o.id = p_order_id
+    for update;
+
+  if not found
+     or v_order.customer_confirmation_email_sent_at is not null
+     or v_order.status <> 'paid'
+     or v_order.stripe_fulfillment_retired_at is not null then
+    return null;
+  end if;
+
+  select ej.*
+    into v_existing
+    from email_jobs ej
+    where ej.order_id = p_order_id
+      and ej.type = 'order_confirmation'
+      and ej.status in ('pending', 'processing')
+    order by ej.created_at, ej.id
+    limit 1
+    for update;
+
+  if found then
+    update orders
+      set customer_confirmation_email_claimed_at = v_existing.claimed_at,
+          customer_confirmation_email_claim_token = v_existing.claim_token
+      where id = p_order_id;
+    return v_existing.id;
+  end if;
+
+  -- SMTP exhaustion and malformed payloads still require an explicit producer
+  -- retry. An order_ineligible failure consumed no SMTP attempt, so a safely
+  -- recovered dispute may atomically requeue that one terminal outcome.
+  select ej.*
+    into v_existing
+    from email_jobs ej
+    where ej.order_id = p_order_id
+      and ej.type = 'order_confirmation'
+      and ej.status = 'failed'
+    order by ej.processed_at desc nulls last, ej.created_at desc, ej.id desc
+    limit 1
+    for update;
+
+  if found then
+    if v_existing.last_error_code = 'order_ineligible'
+       and v_order.stripe_fulfillment_retired_at is null then
+      update email_jobs
+        set status = 'pending',
+            payload = p_payload || jsonb_build_object('orderId', p_order_id::text),
+            available_at = v_now,
+            processed_at = null,
+            claimed_at = v_now,
+            claim_token = p_claim_token,
+            last_error_code = null,
+            last_error = null
+        where id = v_existing.id;
+
+      update orders
+        set customer_confirmation_email_claimed_at = v_now,
+            customer_confirmation_email_claim_token = p_claim_token
+        where id = p_order_id;
+    end if;
+
+    return v_existing.id;
+  end if;
+
+  -- Respect an in-flight legacy/direct-delivery claim for 30 minutes. Stale
+  -- orphan claims are recovered by the atomic insert below.
+  if v_order.customer_confirmation_email_claimed_at is not null
+     and v_order.customer_confirmation_email_claimed_at > v_now - interval '30 minutes'
+     and v_order.customer_confirmation_email_claim_token is distinct from p_claim_token then
+    return null;
+  end if;
+
+  insert into email_jobs (
+    type,
+    status,
+    order_id,
+    payload,
+    available_at,
+    claimed_at,
+    claim_token,
+    message_id
+  ) values (
+    'order_confirmation',
+    'pending',
+    p_order_id,
+    p_payload || jsonb_build_object('orderId', p_order_id::text),
+    v_now,
+    v_now,
+    p_claim_token,
+    v_message_id
+  )
+  returning id into v_job_id;
+
+  update orders
+    set customer_confirmation_email_claimed_at = v_now,
+        customer_confirmation_email_claim_token = p_claim_token
+    where id = p_order_id;
+
+  return v_job_id;
+end;
+$$;
+
+create or replace function claim_email_job(
+  p_job_id uuid,
+  p_stale_before timestamptz,
+  p_claim_token uuid
+) returns jsonb
+language plpgsql
+security definer
+set search_path = public
+as $$
+declare
+  v_now timestamptz := clock_timestamp();
+  v_order_id uuid;
+  v_order orders%rowtype;
+  v_job email_jobs%rowtype;
+begin
+  if p_job_id is null or p_claim_token is null or p_stale_before is null then
+    return null;
+  end if;
+
+  select ej.order_id
+    into v_order_id
+    from email_jobs ej
+    where ej.id = p_job_id;
+
+  if not found or v_order_id is null then
+    return null;
+  end if;
+
+  -- Lock order first in every queue RPC to prevent order/job deadlocks.
+  select *
+    into v_order
+    from orders o
+    where o.id = v_order_id
+    for update;
+
+  if not found then
+    return null;
+  end if;
+
+  select *
+    into v_job
+    from email_jobs ej
+    where ej.id = p_job_id
+    for update;
+
+  if not found
+     or v_job.type <> 'order_confirmation'
+     or v_job.attempts >= v_job.max_attempts then
+    return null;
+  end if;
+
+  if v_order.customer_confirmation_email_sent_at is not null then
+    update email_jobs
+      set status = 'sent',
+          processed_at = coalesce(processed_at, v_order.customer_confirmation_email_sent_at),
+          claim_token = null,
+          claimed_at = null,
+          last_error_code = null,
+          last_error = null
+      where id = v_job.id;
+    update orders
+      set customer_confirmation_email_claim_token = null,
+          customer_confirmation_email_claimed_at = null
+      where id = v_order.id;
+    return null;
+  end if;
+
+  if v_order.status <> 'paid'
+     or v_order.stripe_fulfillment_retired_at is not null then
+    update email_jobs
+      set status = 'failed',
+          processed_at = v_now,
+          claim_token = null,
+          claimed_at = null,
+          last_error_code = 'order_ineligible',
+          last_error = 'The order is no longer eligible for confirmation delivery.'
+      where id = v_job.id;
+    update orders
+      set customer_confirmation_email_claim_token = null,
+          customer_confirmation_email_claimed_at = null
+      where id = v_order.id;
+    return null;
+  end if;
+
+  if not (
+    (v_job.status = 'pending' and v_job.available_at <= v_now)
+    or (
+      v_job.status = 'processing'
+      and v_job.claimed_at is not null
+      and v_job.claimed_at <= p_stale_before
+    )
+  ) then
+    return null;
+  end if;
+
+  update email_jobs
+    set status = 'processing',
+        claim_token = p_claim_token,
+        claimed_at = v_now,
+        processed_at = null,
+        last_error_code = null,
+        last_error = null
+    where id = v_job.id
+    returning * into v_job;
+
+  update orders
+    set customer_confirmation_email_claim_token = p_claim_token,
+        customer_confirmation_email_claimed_at = v_now
+    where id = v_order.id;
+
+  return jsonb_build_object(
+    'id', v_job.id,
+    'type', v_job.type,
+    'order_id', v_job.order_id,
+    'payload', v_job.payload,
+    'attempts', v_job.attempts,
+    'max_attempts', v_job.max_attempts,
+    'message_id', v_job.message_id,
+    'claim_token', v_job.claim_token
+  );
+end;
+$$;
+
+create or replace function reschedule_or_fail_email_job(
+  p_job_id uuid,
+  p_claim_token uuid,
+  p_error_code text,
+  p_error text,
+  p_consume_attempt boolean,
+  p_next_available_at timestamptz
+) returns jsonb
+language plpgsql
+security definer
+set search_path = public
+as $$
+declare
+  v_now timestamptz := clock_timestamp();
+  v_order_id uuid;
+  v_job email_jobs%rowtype;
+  v_error_code text := left(
+    coalesce(nullif(lower(trim(p_error_code)), ''), 'delivery_failed'),
+    80
+  );
+  v_error text := left(trim(coalesce(p_error, 'Email delivery failed.')), 1000);
+  v_attempts integer;
+  v_terminal boolean;
+  v_status text;
+begin
+  if p_job_id is null or p_claim_token is null then
+    return null;
+  end if;
+
+  select ej.order_id into v_order_id
+    from email_jobs ej
+    where ej.id = p_job_id;
+
+  if not found or v_order_id is null then
+    return null;
+  end if;
+
+  perform o.id from orders o where o.id = v_order_id for update;
+  if not found then
+    return null;
+  end if;
+
+  select * into v_job
+    from email_jobs ej
+    where ej.id = p_job_id
+    for update;
+
+  if not found
+     or v_job.status <> 'processing'
+     or v_job.claim_token is distinct from p_claim_token then
+    return null;
+  end if;
+
+  v_attempts := v_job.attempts + case when coalesce(p_consume_attempt, false) then 1 else 0 end;
+  v_terminal := v_error_code in ('invalid_payload', 'unknown_job_type', 'order_ineligible')
+    or v_attempts >= v_job.max_attempts;
+  v_status := case when v_terminal then 'failed' else 'pending' end;
+
+  update email_jobs
+    set status = v_status,
+        attempts = v_attempts,
+        available_at = case
+          when v_terminal then v_now
+          else greatest(coalesce(p_next_available_at, v_now), v_now)
+        end,
+        processed_at = case when v_terminal then v_now else null end,
+        claim_token = null,
+        claimed_at = null,
+        last_error_code = nullif(v_error_code, ''),
+        last_error = nullif(v_error, '')
+    where id = v_job.id;
+
+  update orders
+    set customer_confirmation_email_claim_token = null,
+        customer_confirmation_email_claimed_at = null
+    where id = v_order_id
+      and customer_confirmation_email_claim_token = p_claim_token;
+
+  return jsonb_build_object(
+    'id', v_job.id,
+    'status', v_status,
+    'attempts', v_attempts,
+    'max_attempts', v_job.max_attempts,
+    'terminal', v_terminal,
+    'exhausted', v_terminal,
+    'available_at', case
+      when v_terminal then v_now
+      else greatest(coalesce(p_next_available_at, v_now), v_now)
+    end
+  );
+end;
+$$;
+
+create or replace function complete_email_job(
+  p_job_id uuid,
+  p_claim_token uuid,
+  p_sent_at timestamptz
+) returns boolean
+language plpgsql
+security definer
+set search_path = public
+as $$
+declare
+  v_sent_at timestamptz := coalesce(p_sent_at, clock_timestamp());
+  v_order_id uuid;
+  v_order orders%rowtype;
+  v_job email_jobs%rowtype;
+begin
+  if p_job_id is null or p_claim_token is null then
+    return false;
+  end if;
+
+  select ej.order_id into v_order_id
+    from email_jobs ej
+    where ej.id = p_job_id;
+
+  if not found or v_order_id is null then
+    return false;
+  end if;
+
+  select * into v_order
+    from orders o
+    where o.id = v_order_id
+    for update;
+
+  if not found then
+    return false;
+  end if;
+
+  select * into v_job
+    from email_jobs ej
+    where ej.id = p_job_id
+    for update;
+
+  if not found
+     or v_job.status <> 'processing'
+     or v_job.claim_token is distinct from p_claim_token
+     or v_order.customer_confirmation_email_claim_token is distinct from p_claim_token then
+    return false;
+  end if;
+
+  update orders
+    set customer_confirmation_email_sent_at = coalesce(customer_confirmation_email_sent_at, v_sent_at),
+        customer_confirmation_email_claimed_at = null,
+        customer_confirmation_email_claim_token = null
+    where id = v_order_id;
+
+  update email_jobs
+    set status = 'sent',
+        processed_at = v_sent_at,
+        claimed_at = null,
+        claim_token = null,
+        last_error_code = null,
+        last_error = null
+    where id = v_job.id;
+
+  return true;
+end;
+$$;
+
+create or replace function retry_failed_email_job(
+  p_job_id uuid,
+  p_available_at timestamptz
+) returns boolean
+language plpgsql
+security definer
+set search_path = public
+as $$
+declare
+  v_now timestamptz := clock_timestamp();
+  v_order_id uuid;
+  v_order orders%rowtype;
+  v_job email_jobs%rowtype;
+  v_claim_token uuid := gen_random_uuid();
+begin
+  if p_job_id is null then
+    return false;
+  end if;
+
+  select ej.order_id into v_order_id
+    from email_jobs ej
+    where ej.id = p_job_id;
+
+  if not found or v_order_id is null then
+    return false;
+  end if;
+
+  select * into v_order
+    from orders o
+    where o.id = v_order_id
+    for update;
+
+  if not found
+     or v_order.status <> 'paid'
+     or v_order.stripe_fulfillment_retired_at is not null
+     or v_order.customer_confirmation_email_sent_at is not null then
+    return false;
+  end if;
+
+  select * into v_job
+    from email_jobs ej
+    where ej.id = p_job_id
+    for update;
+
+  if not found
+     or v_job.type <> 'order_confirmation'
+     or v_job.status <> 'failed'
+     or exists (
+       select 1
+       from email_jobs active_job
+       where active_job.order_id = v_order_id
+         and active_job.type = 'order_confirmation'
+         and active_job.status in ('pending', 'processing')
+         and active_job.id <> v_job.id
+     ) then
+    return false;
+  end if;
+
+  update email_jobs
+    set status = 'pending',
+        attempts = 0,
+        available_at = greatest(coalesce(p_available_at, v_now), v_now),
+        processed_at = null,
+        claimed_at = v_now,
+        claim_token = v_claim_token,
+        last_error_code = null,
+        last_error = null
+    where id = v_job.id;
+
+  update orders
+    set customer_confirmation_email_claimed_at = v_now,
+        customer_confirmation_email_claim_token = v_claim_token
+    where id = v_order_id;
+
+  return true;
+end;
+$$;
+
+create or replace function claim_preorder_ready_email_events(
+  p_order_id uuid,
+  p_event_ids uuid[],
+  p_claim_token uuid,
+  p_stale_before timestamptz,
+  p_cutoff timestamptz
+) returns boolean
+language plpgsql
+security definer
+set search_path = public
+as $$
+declare
+  v_requested_ids uuid[];
+  v_unsent_ids uuid[];
+  v_all_old_enough boolean;
+  v_all_claimable boolean;
+  v_updated integer := 0;
+begin
+  if p_order_id is null
+     or p_claim_token is null
+     or p_stale_before is null
+     or p_cutoff is null
+     or coalesce(cardinality(p_event_ids), 0) = 0 then
+    return false;
+  end if;
+
+  select array_agg(distinct event_id order by event_id)
+    into v_requested_ids
+    from unnest(p_event_ids) as requested(event_id)
+    where event_id is not null;
+
+  if coalesce(cardinality(v_requested_ids), 0) <> cardinality(p_event_ids) then
+    return false;
+  end if;
+
+  -- The order lock serializes claims and also prevents a concurrent FK insert
+  -- from adding a release event between the exact-set check and claim update.
+  perform o.id
+    from orders o
+    where o.id = p_order_id
+      and o.status = 'paid'
+    for update;
+
+  if not found then
+    return false;
+  end if;
+
+  perform pre.id
+    from preorder_release_events pre
+    where pre.order_id = p_order_id
+      and pre.ready_pickup_email_sent_at is null
+    order by pre.id
+    for update;
+
+  select
+    array_agg(pre.id order by pre.id),
+    bool_and(pre.created_at <= p_cutoff),
+    bool_and(
+      pre.ready_pickup_email_claim_token is null
+      or pre.ready_pickup_email_claim_token = p_claim_token
+      or pre.ready_pickup_email_claimed_at is null
+      or pre.ready_pickup_email_claimed_at <= p_stale_before
+    )
+    into v_unsent_ids, v_all_old_enough, v_all_claimable
+    from preorder_release_events pre
+    where pre.order_id = p_order_id
+      and pre.ready_pickup_email_sent_at is null;
+
+  if coalesce(cardinality(v_unsent_ids), 0) = 0
+     or v_requested_ids is distinct from v_unsent_ids
+     or not coalesce(v_all_old_enough, false)
+     or not coalesce(v_all_claimable, false) then
+    return false;
+  end if;
+
+  update preorder_release_events
+    set ready_pickup_email_claim_token = p_claim_token,
+        ready_pickup_email_claimed_at = clock_timestamp()
+    where order_id = p_order_id
+      and id = any(v_unsent_ids)
+      and ready_pickup_email_sent_at is null;
+  get diagnostics v_updated = row_count;
+
+  return v_updated = cardinality(v_unsent_ids);
+end;
+$$;
+
+create or replace function release_preorder_ready_email_events(
+  p_event_ids uuid[],
+  p_claim_token uuid
+) returns integer
+language plpgsql
+security definer
+set search_path = public
+as $$
+declare
+  v_requested_ids uuid[];
+  v_matching_ids uuid[];
+  v_updated integer := 0;
+begin
+  if p_claim_token is null or coalesce(cardinality(p_event_ids), 0) = 0 then
+    return 0;
+  end if;
+
+  select array_agg(distinct event_id order by event_id)
+    into v_requested_ids
+    from unnest(p_event_ids) as requested(event_id)
+    where event_id is not null;
+
+  if coalesce(cardinality(v_requested_ids), 0) <> cardinality(p_event_ids) then
+    return 0;
+  end if;
+
+  perform pre.id
+    from preorder_release_events pre
+    where pre.id = any(v_requested_ids)
+    order by pre.id
+    for update;
+
+  select array_agg(pre.id order by pre.id)
+    into v_matching_ids
+    from preorder_release_events pre
+    where pre.id = any(v_requested_ids)
+      and pre.ready_pickup_email_sent_at is null
+      and pre.ready_pickup_email_claim_token = p_claim_token;
+
+  if v_matching_ids is distinct from v_requested_ids then
+    return 0;
+  end if;
+
+  update preorder_release_events
+    set ready_pickup_email_claim_token = null,
+        ready_pickup_email_claimed_at = null
+    where id = any(v_requested_ids)
+      and ready_pickup_email_sent_at is null
+      and ready_pickup_email_claim_token = p_claim_token;
+  get diagnostics v_updated = row_count;
+  return v_updated;
+end;
+$$;
+
+create or replace function complete_preorder_ready_email_events(
+  p_event_ids uuid[],
+  p_claim_token uuid,
+  p_sent_at timestamptz
+) returns integer
+language plpgsql
+security definer
+set search_path = public
+as $$
+declare
+  v_requested_ids uuid[];
+  v_matching_ids uuid[];
+  v_updated integer := 0;
+begin
+  if p_claim_token is null or coalesce(cardinality(p_event_ids), 0) = 0 then
+    return 0;
+  end if;
+
+  select array_agg(distinct event_id order by event_id)
+    into v_requested_ids
+    from unnest(p_event_ids) as requested(event_id)
+    where event_id is not null;
+
+  if coalesce(cardinality(v_requested_ids), 0) <> cardinality(p_event_ids) then
+    return 0;
+  end if;
+
+  perform pre.id
+    from preorder_release_events pre
+    where pre.id = any(v_requested_ids)
+    order by pre.id
+    for update;
+
+  select array_agg(pre.id order by pre.id)
+    into v_matching_ids
+    from preorder_release_events pre
+    where pre.id = any(v_requested_ids)
+      and pre.ready_pickup_email_sent_at is null
+      and pre.ready_pickup_email_claim_token = p_claim_token;
+
+  if v_matching_ids is distinct from v_requested_ids then
+    return 0;
+  end if;
+
+  update preorder_release_events
+    set ready_pickup_email_sent_at = coalesce(p_sent_at, clock_timestamp()),
+        ready_pickup_email_claim_token = null,
+        ready_pickup_email_claimed_at = null
+    where id = any(v_requested_ids)
+      and ready_pickup_email_sent_at is null
+      and ready_pickup_email_claim_token = p_claim_token;
+  get diagnostics v_updated = row_count;
+  return v_updated;
 end;
 $$;
 
@@ -1392,6 +2953,61 @@ begin
 end;
 $$;
 
+create or replace function get_preorder_ready_email_candidate_orders(
+  p_cutoff timestamptz,
+  p_stale_before timestamptz,
+  p_limit integer default 4,
+  p_max_events_per_order integer default 200
+) returns table(order_id uuid, event_count integer)
+language sql
+stable
+security definer
+set search_path = public
+as $$
+  select
+    pre.order_id,
+    count(*)::integer as event_count
+  from preorder_release_events pre
+  join orders o on o.id = pre.order_id
+  where o.status = 'paid'
+    and pre.ready_pickup_email_sent_at is null
+  group by pre.order_id
+  having max(pre.created_at) <= p_cutoff
+    and count(*) <= least(greatest(coalesce(p_max_events_per_order, 200), 1), 1000)
+    and bool_and(
+      pre.ready_pickup_email_claim_token is null
+      or pre.ready_pickup_email_claimed_at is null
+      or pre.ready_pickup_email_claimed_at <= p_stale_before
+    )
+  order by min(pre.created_at), pre.order_id
+  limit least(greatest(coalesce(p_limit, 4), 1), 25);
+$$;
+
+create or replace function get_preorder_ready_email_backlog_health(
+  p_cutoff timestamptz,
+  p_max_events_per_order integer default 200
+) returns table(poisoned_order_count bigint, poisoned_event_count bigint)
+language sql
+stable
+security definer
+set search_path = public
+as $$
+  with oversized as (
+    select count(*)::bigint as event_count
+    from preorder_release_events pre
+    join orders o on o.id = pre.order_id
+    where o.status = 'paid'
+      and pre.ready_pickup_email_sent_at is null
+    group by pre.order_id
+    having min(pre.created_at) <= p_cutoff
+      and count(*) > least(greatest(coalesce(p_max_events_per_order, 200), 1), 1000)
+  )
+  select
+    count(*)::bigint as poisoned_order_count,
+    coalesce(sum(oversized.event_count), 0)::bigint as poisoned_event_count
+  from oversized;
+$$;
+
 create or replace view inventory_snapshot as
 select
   sku,
@@ -1450,27 +3066,53 @@ alter default privileges in schema public revoke all on tables from public, anon
 alter default privileges in schema public revoke all on sequences from public, anon, authenticated;
 alter default privileges in schema public revoke execute on functions from public, anon, authenticated;
 
-revoke execute on function consume_api_rate_limit(text, text, integer, integer) from public, anon, authenticated;
-revoke execute on function record_paid_order(text, text, text, text, text, integer, integer, integer, integer, jsonb, jsonb) from public, anon, authenticated;
-revoke execute on function sync_shipment_for_order(uuid) from public, anon, authenticated;
-revoke execute on function sync_all_shipments() from public, anon, authenticated;
-revoke execute on function get_admin_prep_data(date, timestamptz, timestamptz) from public, anon, authenticated;
-revoke execute on function apply_restock(text, integer) from public, anon, authenticated;
-revoke execute on function set_expected_restock_date(text, date) from public, anon, authenticated;
-revoke execute on function unsubscribe_email_addresses(text[], text, text) from public, anon, authenticated;
-revoke execute on function subscribe_email_address(text, text, text, text) from public, anon, authenticated;
-revoke execute on function apply_email_list_changes(text[], text[]) from public, anon, authenticated;
-
-grant execute on function consume_api_rate_limit(text, text, integer, integer) to service_role;
-grant execute on function record_paid_order(text, text, text, text, text, integer, integer, integer, integer, jsonb, jsonb) to service_role;
-grant execute on function sync_shipment_for_order(uuid) to service_role;
-grant execute on function sync_all_shipments() to service_role;
-grant execute on function get_admin_prep_data(date, timestamptz, timestamptz) to service_role;
-grant execute on function apply_restock(text, integer) to service_role;
-grant execute on function set_expected_restock_date(text, date) to service_role;
-grant execute on function unsubscribe_email_addresses(text[], text, text) to service_role;
-grant execute on function subscribe_email_address(text, text, text, text) to service_role;
-grant execute on function apply_email_list_changes(text[], text[]) to service_role;
+do $$
+declare
+  v_signature text;
+  v_function regprocedure;
+begin
+  foreach v_signature in array array[
+    'public.consume_api_rate_limit(text,text,integer,integer)',
+    'public.record_paid_order(text,text,text,text,text,integer,integer,integer,integer,jsonb,jsonb)',
+    'public.record_paid_order(text,text,text,text,text,integer,integer,integer,integer,jsonb,jsonb,boolean)',
+    'public.record_stripe_order_state(text,text,text,text,text,integer,integer,integer,integer,jsonb,jsonb,boolean,text,timestamptz,timestamptz,boolean)',
+    'public.transition_stripe_order_state(uuid,text,timestamptz)',
+    'public.transition_stripe_order_state(uuid,text,timestamptz,boolean)',
+    'public.transition_stripe_order_state(uuid,text,timestamptz,boolean,timestamptz)',
+    'public.sync_shipment_for_order(uuid)',
+    'public.sync_all_shipments()',
+    'public.get_admin_prep_data(date,timestamptz,timestamptz)',
+    'public.apply_restock(text,integer)',
+    'public.set_expected_restock_date(text,date)',
+    'public.get_non_test_units_sold()',
+    'public.unsubscribe_email_addresses(text[],text,text)',
+    'public.subscribe_email_address(text,text,text,text)',
+    'public.apply_email_list_changes(text[],text[])',
+    'public.enqueue_order_confirmation_email(uuid,jsonb,uuid,text)',
+    'public.claim_email_job(uuid,timestamptz,uuid)',
+    'public.reschedule_or_fail_email_job(uuid,uuid,text,text,boolean,timestamptz)',
+    'public.complete_email_job(uuid,uuid,timestamptz)',
+    'public.retry_failed_email_job(uuid,timestamptz)',
+    'public.claim_preorder_ready_email_events(uuid,uuid[],uuid,timestamptz,timestamptz)',
+    'public.release_preorder_ready_email_events(uuid[],uuid)',
+    'public.complete_preorder_ready_email_events(uuid[],uuid,timestamptz)',
+    'public.get_preorder_ready_email_candidate_orders(timestamptz,timestamptz,integer,integer)',
+    'public.get_preorder_ready_email_backlog_health(timestamptz,integer)'
+  ]
+  loop
+    v_function := to_regprocedure(v_signature);
+    if v_function is not null then
+      execute format(
+        'revoke all on function %s from public, anon, authenticated',
+        v_function
+      );
+      execute format(
+        'grant execute on function %s to service_role',
+        v_function
+      );
+    end if;
+  end loop;
+end $$;
 
 insert into products (
   sku,

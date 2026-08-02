@@ -36,7 +36,7 @@ if (!supabaseAdmin) throw new Error("Supabase service credentials are unavailabl
 
 const { data: orders, error: ordersError } = await supabaseAdmin
   .from("orders")
-  .select("id, payment_session_id, customer_name, customer_email")
+  .select("id, payment_session_id")
   .eq("payment_provider", "stripe")
   .eq("is_test_order", false)
   .order("created_at", { ascending: true });
@@ -49,15 +49,6 @@ const testOrderIds = [];
 let unresolvedCount = 0;
 
 for (const order of orders || []) {
-  const customer = {
-    name: order?.customer_name,
-    email: order?.customer_email
-  };
-  if (isFinancialTestOrder({ customer })) {
-    testOrderIds.push(order.id);
-    continue;
-  }
-
   const paymentSessionId = String(order?.payment_session_id || "").trim();
   let stripePath = "";
 
@@ -79,7 +70,7 @@ for (const order of orders || []) {
   const charge = paymentSessionId.startsWith("pi_")
     ? data?.latest_charge
     : data?.payment_intent?.latest_charge;
-  if (isFinancialTestOrder({ charge, customer })) testOrderIds.push(order.id);
+  if (isFinancialTestOrder({ charge, source: data })) testOrderIds.push(order.id);
 }
 
 if (applyChanges && testOrderIds.length > 0) {

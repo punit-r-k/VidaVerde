@@ -1,12 +1,13 @@
 import fs from "node:fs";
 import path from "node:path";
+import { execFileSync } from "node:child_process";
 import { fileURLToPath } from "node:url";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const repoRoot = path.resolve(__dirname, "..");
 const bidiRegex = /[\u202A-\u202E\u2066-\u2069]/u;
 const textFileRegex =
-  /\.(?:[cm]?[jt]sx?|json|md|css|sql|ya?ml|txt|env(?:\.example)?|gitignore)$/i;
+  /(?:^|\/)(?:\.env(?:\.example)?|\.gitignore)$|\.(?:[cm]?[jt]sx?|gs|json|md|css|sql|ya?ml|txt)$/i;
 
 const secretRules = [
   {
@@ -22,12 +23,24 @@ const secretRules = [
     regex: /\bgh[pousr]_[A-Za-z0-9_]{20,}\b/
   },
   {
-    name: "stripe-live-secret",
-    regex: /\bsk_live_[0-9A-Za-z]{16,}\b/
+    name: "stripe-secret",
+    regex: /\b(?:sk|rk)_(?:live|test)_[0-9A-Za-z]{16,}\b/
   },
   {
-    name: "stripe-live-restricted",
-    regex: /\brk_live_[0-9A-Za-z]{16,}\b/
+    name: "stripe-webhook-secret",
+    regex: /\bwhsec_[0-9A-Za-z]{16,}\b/
+  },
+  {
+    name: "easypost-api-key",
+    regex: /\bEZA[KT][A-Za-z0-9_]{16,}\b/
+  },
+  {
+    name: "google-api-key",
+    regex: /\bAIza[0-9A-Za-z_-]{30,}\b/
+  },
+  {
+    name: "jwt-token",
+    regex: /\beyJ[0-9A-Za-z_-]{16,}\.[0-9A-Za-z_-]{16,}\.[0-9A-Za-z_-]{16,}\b/
   },
   {
     name: "slack-token",
@@ -41,47 +54,39 @@ const allowlistedFragments = [
   "sk_live_or_test_key",
   "pk_live_or_test_key",
   "whsec_from_stripe_endpoint",
+  "EZTK_your_test_key",
   "https://your-project-id.supabase.co",
   "https://your-site-url"
 ];
 
-const IGNORED_DIRECTORIES = new Set([
-  ".git",
-  ".next",
-  ".next-dev",
-  "node_modules"
-]);
-
-const collectTrackedTextFiles = (directory, relativePrefix = "") => {
-  const entries = fs.readdirSync(directory, { withFileTypes: true });
-  const collected = [];
-
-  for (const entry of entries) {
-    if (IGNORED_DIRECTORIES.has(entry.name)) {
-      continue;
-    }
-
-    const absolutePath = path.join(directory, entry.name);
-    const relativePath = path.join(relativePrefix, entry.name);
-
-    if (entry.isDirectory()) {
-      collected.push(...collectTrackedTextFiles(absolutePath, relativePath));
-      continue;
-    }
-
-    if (textFileRegex.test(relativePath)) {
-      collected.push(relativePath);
-    }
+const scannedFiles = execFileSync(
+  "git",
+  ["ls-files", "--cached", "--others", "--exclude-standard", "-z"],
+  {
+    cwd: repoRoot,
+    encoding: "utf8"
   }
-
-  return collected;
-};
-
-const trackedFiles = collectTrackedTextFiles(repoRoot);
+)
+  .split("\0")
+  .map((file) => file.trim())
+  .filter(Boolean)
+  .filter((file) => textFileRegex.test(file.replaceAll("\\", "/")))
+  .filter((file) => fs.existsSync(path.join(repoRoot, file)));
 
 const findings = [];
 
-for (const relativeFile of trackedFiles) {
+for (const relativeFile of scannedFiles) {
+  const normalizedPath = relativeFile.replaceAll("\\", "/");
+  const basename = path.posix.basename(normalizedPath).toLowerCase();
+  if (basename === ".env" || (basename.startsWith(".env.") && basename !== ".env.example")) {
+    findings.push({
+      file: relativeFile,
+      line: 1,
+      rule: "tracked-environment-file",
+      detail: "Environment files containing deploy-time credentials must not be committed."
+    });
+  }
+
   const absoluteFile = path.join(repoRoot, relativeFile);
   const content = fs.readFileSync(absoluteFile, "utf8");
   const lines = content.split(/\r?\n/u);
@@ -120,4 +125,6 @@ if (findings.length > 0) {
   process.exit(1);
 }
 
-console.log(`Repository security checks passed for ${trackedFiles.length} tracked text files.`);
+console.log(
+  `Repository security checks passed for ${scannedFiles.length} tracked and untracked text files.`
+);

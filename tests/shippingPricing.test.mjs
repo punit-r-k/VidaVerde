@@ -80,11 +80,11 @@ test("shipping option IDs normalize to Normal or Expedited", () => {
   });
 });
 
-test("both shipping options include Wednesday handoff and their transit windows", () => {
+test("both shipping options include Wednesday shipment and their delivery windows", () => {
   const shipping = getShippingOptionsForCart(buildCart({ sauerkrautQty: 1 }));
-  assert.match(shipping.normalOption.transitLabel, /carrier on Wednesday/i);
+  assert.match(shipping.normalOption.transitLabel, /Wednesday shipment/i);
   assert.match(shipping.normalOption.transitLabel, /3–5 business days/i);
-  assert.match(shipping.expeditedOption.transitLabel, /carrier on Wednesday/i);
+  assert.match(shipping.expeditedOption.transitLabel, /Wednesday shipment/i);
   assert.match(shipping.expeditedOption.transitLabel, /1–3 business days/i);
 });
 

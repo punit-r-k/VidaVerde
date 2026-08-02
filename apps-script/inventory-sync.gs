@@ -75,6 +75,7 @@ function onOpen() {
     .createMenu("Customer Emails")
     .addItem("Send Pickup Reminders Now", "sendPickupReminders")
     .addItem("Process Pending Emails Now", "processEmailQueue")
+    .addItem("Retry Failed Confirmations", "retryFailedConfirmationEmails")
     .addItem("Check STOP Replies Now", "processEmailUnsubscribeReplies");
   const payoutMenu = ui
     .createMenu("Payouts")
@@ -222,9 +223,11 @@ function setupTriggers() {
   resetFridayReminderTrigger_();
   resetMonthlyPunitPayoutTrigger_();
   resetEmailUnsubscribeTrigger_();
+  resetEmailQueueTrigger_();
+  resetPreorderReadyEmailTrigger_();
   resetShipmentSyncTrigger_();
   SpreadsheetApp.getUi().alert(
-    "Triggers reset: inventory edits, shipment and label refreshes, STOP replies, Friday pickup reminders, and monthly Punit payout emails."
+    "Triggers reset: inventory edits, shipment and label refreshes, pending confirmation emails, preorder-ready emails, STOP replies, Friday pickup reminders, and monthly Punit payout emails."
   );
 }
 
@@ -246,6 +249,38 @@ function resetShipmentSyncTrigger_() {
 
 function resetEmailUnsubscribeTrigger_() {
   const handlerName = "processEmailUnsubscribeReplies";
+  const triggers = ScriptApp.getProjectTriggers().filter((trigger) =>
+    trigger.getHandlerFunction() === handlerName
+  );
+
+  for (const trigger of triggers) {
+    ScriptApp.deleteTrigger(trigger);
+  }
+
+  ScriptApp.newTrigger(handlerName)
+    .timeBased()
+    .everyMinutes(5)
+    .create();
+}
+
+function resetEmailQueueTrigger_() {
+  const handlerName = "processEmailQueue";
+  const triggers = ScriptApp.getProjectTriggers().filter((trigger) =>
+    trigger.getHandlerFunction() === handlerName
+  );
+
+  for (const trigger of triggers) {
+    ScriptApp.deleteTrigger(trigger);
+  }
+
+  ScriptApp.newTrigger(handlerName)
+    .timeBased()
+    .everyMinutes(5)
+    .create();
+}
+
+function resetPreorderReadyEmailTrigger_() {
+  const handlerName = "sendQueuedPreorderReadyEmails";
   const triggers = ScriptApp.getProjectTriggers().filter((trigger) =>
     trigger.getHandlerFunction() === handlerName
   );
@@ -362,7 +397,7 @@ function processEmailQueue() {
   const response = postJson_(
     `${settings.apiBaseUrl}/api/admin/email-jobs`,
     settings,
-    { limit: 10 }
+    { action: "process", limit: 10 }
   );
 
   if (!response?.ok) {
@@ -380,10 +415,63 @@ function processEmailQueue() {
     return;
   }
 
+  if (response?.deliveryOk === false) {
+    Logger.log(
+      "Email queue completed with delivery failures (failed: %s)",
+      Number(response?.failedCount || 0)
+    );
+    toastIfAvailable_(
+      "One or more confirmation emails need attention. Check the Health sheet.",
+      "Vida Verde",
+      6
+    );
+    syncHealthCheck();
+    return;
+  }
+
+  const sentCount = Number(response?.sentCount || 0);
+  const deferredCount = Number(response?.deferredCount || 0);
+  const failedCount = Number(response?.failedCount || 0);
   toastIfAvailable_(
-    `${Number(response?.sentCount || 0)} email(s) sent, ${Number(response?.failedCount || 0)} failed.`,
+    `${sentCount} email(s) sent, ${deferredCount} waiting, ${failedCount} failed.`,
     "Vida Verde",
     5
+  );
+  syncHealthCheck();
+}
+
+function retryFailedConfirmationEmails() {
+  ensureSettingsSheet_();
+
+  const settings = getSettings_();
+  const response = postJson_(
+    `${settings.apiBaseUrl}/api/admin/email-jobs`,
+    settings,
+    { action: "retry_failed", limit: 10 }
+  );
+
+  if (!response?.ok) {
+    Logger.log(
+      "Failed confirmation retry failed (status: %s, error: %s)",
+      response?.status ?? "unknown",
+      response?.error || response?.message || response?.raw || "unknown"
+    );
+    toastIfAvailable_(
+      "Failed confirmations could not be queued again. Check Apps Script logs.",
+      "Vida Verde",
+      6
+    );
+    syncHealthCheck();
+    return;
+  }
+
+  const retriedCount = Number(response?.retriedCount || 0);
+  toastIfAvailable_(
+    retriedCount > 0
+      ? `${retriedCount} failed confirmation email(s) queued again.`
+      : "No failed confirmation emails need retrying.",
+    "Vida Verde",
+    6
   );
   syncHealthCheck();
 }
@@ -620,7 +708,7 @@ function syncHealthCheck() {
 
     sheet
       .getRange(CONFIG.HEALTH.START_ROW, 1, rows.length, rows[0].length)
-      .setValues(rows);
+      .setValues(sanitizeSheetRows_(rows));
     sheet
       .getRange(CONFIG.HEALTH.START_ROW, 1, rows.length, 1)
       .setNumberFormat("yyyy-mm-dd hh:mm");
@@ -767,7 +855,7 @@ function syncWeeklyPrep() {
 
     sheet
       .getRange(currentRow, 1, pickupRows.length, pickupRows[0].length)
-      .setValues(pickupRows);
+      .setValues(sanitizeSheetRows_(pickupRows));
     sheet
       .getRange(currentRow, 5, pickupRows.length, 1)
       .setNumberFormat("0");
@@ -807,7 +895,7 @@ function syncWeeklyPrep() {
 
     sheet
       .getRange(currentRow, 1, rows.length, rows[0].length)
-      .setValues(rows);
+      .setValues(sanitizeSheetRows_(rows));
 
     const shipTotal = rows.reduce((sum, row) => sum + row[1], 0);
     const marketTotal = rows.reduce((sum, row) => sum + row[2], 0);
@@ -860,7 +948,7 @@ function syncWeeklyPrep() {
 
     sheet
       .getRange(currentRow, 1, rows.length, rows[0].length)
-      .setValues(rows);
+      .setValues(sanitizeSheetRows_(rows));
 
     const preorderTotal = rows.reduce((sum, row) => sum + row[1], 0);
     const totalsRow = currentRow + rows.length;
@@ -963,7 +1051,7 @@ function syncOrders() {
     "Total",
     "Order Note",
     "Status",
-    "Payment Session",
+    "Payment ID",
     "Net (Total - Shipping)",
     "Punit Commission (15%)",
     "Vida Verde Payout (85%)",
@@ -1032,7 +1120,7 @@ function syncOrders() {
 
     sheet
       .getRange(CONFIG.ORDERS.START_ROW, 1, rows.length, rows[0].length)
-      .setValues(rows);
+      .setValues(sanitizeSheetRows_(rows));
 
     sheet
       .getRange(CONFIG.ORDERS.START_ROW, 1, rows.length, 1)
@@ -1070,10 +1158,43 @@ function syncShipments() {
   ensureSettingsSheet_();
 
   const settings = getSettings_();
+  const refreshResponse = postJson_(
+    `${settings.apiBaseUrl}/api/admin/shipments`,
+    settings,
+    {}
+  );
+  let refreshWarning = "";
+  if (!refreshResponse?.ok) {
+    refreshWarning =
+      `POST ${settings.apiBaseUrl}/api/admin/shipments failed (${refreshResponse?.status ?? "unknown"}): ${refreshResponse?.error || refreshResponse?.message || refreshResponse?.raw || "Unknown error"}`;
+    Logger.log("Shipment refresh warning: %s", refreshWarning);
+  }
+  const automaticLabelErrors = Array.isArray(refreshResponse?.automatic_label_errors)
+    ? refreshResponse.automatic_label_errors
+    : [];
+  if (automaticLabelErrors.length > 0) {
+    const message = automaticLabelErrors
+      .map((entry) => String(entry?.error || "Automatic label refresh failed."))
+      .join(" | ");
+    Logger.log("Shipment refresh warning: %s", message);
+    toastIfAvailable_(
+      "Shipments loaded, but one or more labels need attention. See the Label Error column or execution log.",
+      "Shipment warning",
+      8
+    );
+  }
   const response = getJson_(
-    `${settings.apiBaseUrl}/api/admin/shipments?refresh=1&limit=1000`,
+    `${settings.apiBaseUrl}/api/admin/shipments?limit=1000`,
     settings
   );
+
+  if (refreshWarning) {
+    toastIfAvailable_(
+      "Shipments were loaded, but synchronization needs attention. See the execution log.",
+      "Shipment warning",
+      8
+    );
+  }
 
   const shipments = Array.isArray(response?.shipments) ? response.shipments : [];
   const sheet = ensureShipmentsSheet_();
@@ -1102,7 +1223,7 @@ function syncShipments() {
     "Tracking",
     "Shipment ID",
     "Order ID",
-    "Payment Session",
+    "Payment ID",
     "Email",
     "Phone",
     "Units",
@@ -1170,7 +1291,7 @@ function syncShipments() {
 
     sheet
       .getRange(CONFIG.SHIPMENTS.START_ROW, 1, rows.length, rows[0].length)
-      .setValues(rows);
+      .setValues(sanitizeSheetRows_(rows));
 
     sheet
       .getRange(CONFIG.SHIPMENTS.START_ROW, 4, rows.length, 1)
@@ -1258,7 +1379,7 @@ function syncEmailSignups() {
   } else {
     sheet
       .getRange(CONFIG.EMAIL_SIGNUPS.START_ROW, 1, activeRows.length, 4)
-      .setValues(activeRows);
+      .setValues(sanitizeSheetRows_(activeRows));
 
     sheet
       .getRange(CONFIG.EMAIL_SIGNUPS.START_ROW, 1, activeRows.length, 1)
@@ -1273,7 +1394,7 @@ function syncEmailSignups() {
   } else {
     sheet
       .getRange(CONFIG.EMAIL_SIGNUPS.START_ROW, 6, suppressedRows.length, 4)
-      .setValues(suppressedRows)
+      .setValues(sanitizeSheetRows_(suppressedRows))
       .setBackground("#f4cccc");
     sheet
       .getRange(CONFIG.EMAIL_SIGNUPS.START_ROW, 6, suppressedRows.length, 1)
@@ -1461,10 +1582,6 @@ function handleRestockEdit_(sheet, row) {
       writeRow_(sheet, row, response.inventory);
     } else {
       syncInventoryRow_(sheet, row, sku, settings);
-    }
-
-    if (payload.restock > 0 && response?.preorder_ready_email_queued) {
-      schedulePreorderReadyEmails_();
     }
 
     const preorderReadyEmailCount = Number(
@@ -1747,22 +1864,6 @@ function ensureFinancialDistributionsSheet_() {
   return sheet;
 }
 
-function schedulePreorderReadyEmails_() {
-  const handlerName = "sendQueuedPreorderReadyEmails";
-  const triggers = ScriptApp.getProjectTriggers().filter((trigger) =>
-    trigger.getHandlerFunction() === handlerName
-  );
-
-  for (const trigger of triggers) {
-    ScriptApp.deleteTrigger(trigger);
-  }
-
-  ScriptApp.newTrigger(handlerName)
-    .timeBased()
-    .after(5 * 60 * 1000)
-    .create();
-}
-
 function sendQueuedPreorderReadyEmails() {
   const settings = getSettings_();
   const response = postJson_(
@@ -1772,10 +1873,9 @@ function sendQueuedPreorderReadyEmails() {
   );
 
   if (!response?.ok) {
-    // Keep unsent release events queued and try again after another debounce window.
-    schedulePreorderReadyEmails_();
+    const firstError = Array.isArray(response?.errors) ? response.errors[0]?.error : "";
     throw new Error(
-      `Preorder-ready email delivery failed: ${response?.error || response?.message || response?.raw || "unknown error"}`
+      `Preorder-ready email delivery failed: ${response?.error || firstError || response?.message || response?.raw || "unknown error"}`
     );
   }
 
@@ -1937,6 +2037,19 @@ function formatUsPhone_(digits) {
   return `(${digits.slice(0, 3)}) ${digits.slice(3, 6)}-${digits.slice(6)}`;
 }
 
+function sanitizeSheetText_(value) {
+  const text = String(value ?? "");
+  return /^[=+\-@]/.test(text) ? `'${text}` : text;
+}
+
+function sanitizeSheetRows_(rows) {
+  return (Array.isArray(rows) ? rows : []).map((row) =>
+    (Array.isArray(row) ? row : []).map((value) =>
+      typeof value === "string" ? sanitizeSheetText_(value) : value
+    )
+  );
+}
+
 function formatPhoneForSheet_(value) {
   const raw = String(value || "").trim();
   if (!raw) return "";
@@ -2095,8 +2208,7 @@ function getInventoryPreorderRows_(fallbackNamesBySku) {
 function getSettings_() {
   const props = PropertiesService.getScriptProperties();
   const apiBaseUrl = props.getProperty("API_BASE_URL");
-  const adminJwtSecret =
-    props.getProperty("ADMIN_JWT_SECRET") || props.getProperty("ADMIN_RESTOCK_SECRET");
+  const adminJwtSecret = props.getProperty("ADMIN_JWT_SECRET");
   const adminJwtIssuer = props.getProperty("ADMIN_JWT_ISSUER") || "vidaverde-admin";
   const adminJwtAudience = props.getProperty("ADMIN_JWT_AUDIENCE") || "vidaverde-admin-api";
   const adminJwtSubject =
@@ -2110,7 +2222,12 @@ function getSettings_() {
 
   if (!apiBaseUrl || !adminJwtSecret) {
     throw new Error(
-      "Missing API_BASE_URL or ADMIN_JWT_SECRET (or legacy ADMIN_RESTOCK_SECRET) script properties."
+      "Missing API_BASE_URL or ADMIN_JWT_SECRET script properties."
+    );
+  }
+  if (Utilities.newBlob(adminJwtSecret).getBytes().length < 32) {
+    throw new Error(
+      "ADMIN_JWT_SECRET must contain at least 32 bytes from a cryptographically random source."
     );
   }
 

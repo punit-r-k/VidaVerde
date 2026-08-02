@@ -24,16 +24,16 @@ Inventory is stored in Supabase and synced to the `Inventory` sheet via Apps Scr
 Column C is a restock delta; it is cleared after a successful sync to prevent double-counting.
 The same Apps Script also syncs the weekly prep, orders, shipments, email
 signup, and health-check tabs used by operations.
-When a positive restock releases preorder units, the sheet schedules one
-preorder-ready email pass five minutes after the latest restock. Releases across
-multiple products are grouped by order so each customer receives one consolidated
-market-pickup or shipping update instead of an email per product.
+When a positive restock releases preorder units, a permanent five-minute scanner
+processes the durable release events after their consolidation cutoff. Releases
+across multiple products are grouped by order so each customer receives one
+consolidated market-pickup or shipping update instead of an email per product.
 
 Apps Script file: `apps-script/inventory-sync.gs`
 
 Script properties required:
 - `API_BASE_URL` (example: `https://your-site-url`)
-- `ADMIN_JWT_SECRET` (matches your server-side JWT signing secret)
+- `ADMIN_JWT_SECRET` (matches the server; use at least 32 cryptographically random bytes)
 
 Optional script properties:
 - `ADMIN_JWT_ISSUER` (defaults to `vidaverde-admin`)
@@ -41,10 +41,9 @@ Optional script properties:
 - `ADMIN_JWT_SUBJECT` (defaults to `vidaverde-inventory-sync`)
 - `ADMIN_JWT_ROLES` (defaults to `ops_admin,inventory_admin`)
 
-The Apps Script now signs a fresh short-lived bearer JWT for each admin API request.
-For a staged rollout, the script still accepts a legacy `ADMIN_RESTOCK_SECRET` property
-as a fallback source for the signing secret, but the backend no longer accepts
-`x-admin-secret` header authentication.
+The Apps Script signs a fresh short-lived bearer JWT for each admin API request.
+Rotate `ADMIN_JWT_SECRET` if it has ever been exposed; the retired
+`ADMIN_RESTOCK_SECRET` and `x-admin-secret` fallback paths are not accepted.
 
 Sheet columns:
 - Column A: SKU (`VV1` ... `VV6`)
@@ -106,6 +105,7 @@ Preorder-specific data model:
 
 RPC functions:
 - `record_paid_order` (Stripe webhook)
+- `transition_stripe_order_state` (atomic refund, dispute, and cancellation cleanup)
 - `get_admin_prep_data` (grouped weekly prep and pickup verification data)
 - `apply_restock` (restock delta plus preorder release event creation)
 - `set_expected_restock_date`
@@ -113,14 +113,18 @@ RPC functions:
 
 ## Stripe Payments
 
-Stripe PaymentIntents are created in `app/api/order/route.js`.
-The storefront uses Stripe secure card fields on the page, so card details are
+Stripe PaymentIntents are created in `app/api/order/route.js` only after the customer submits payment.
+The storefront uses Stripe’s Payment Element, so payment details are
 collected by Stripe and never stored by this app.
 Stripe webhooks are handled in `app/api/stripe/webhook/route.js`.
-Configure your Stripe webhook endpoint to listen to `payment_intent.succeeded`.
-The webhook still accepts `checkout.session.completed` and
-`checkout.session.async_payment_succeeded` for legacy in-flight payments created
-before the PaymentIntent migration.
+Configure your Stripe webhook endpoint to listen to `payment_intent.succeeded`,
+`payment_intent.canceled`, `charge.refunded`, `charge.dispute.created`, and
+`charge.dispute.closed`.
+Only PaymentIntents marked with this app's exact checkout flow metadata are
+recorded. Active disputes pause fulfillment without discarding preorder or
+unpurchased shipping work. Won disputes restore paid fulfillment; lost disputes
+and full refunds retire outstanding work. Partial refunds preserve fulfillment
+for operator review, and already-purchased labels remain available for audit.
 
 For shipping orders, customers choose Shipping or Expedited Shipping. Shipping selects
 the fastest EasyPost rate estimated at 3–5 business days and excludes estimates
@@ -136,9 +140,9 @@ orders use one carrier for every parcel. Before an address has been rated, only
 Shipping is displayed; Expedited can appear after calculation only when it qualifies.
 Checkout recalculates the authoritative amount,
 stores the reserved quote and expected arrival with the PaymentIntent, then reuses the
-same quote to buy the prepaid label automatically after payment. Packages are handed
-to carriers on Wednesday, and carrier transit time starts when the carrier receives
-the parcel.
+same quote to buy the prepaid label automatically after payment. Preorder labels are
+deferred until every preorder item is ready. Orders ship on Wednesday, and the
+customer-facing confirmation email includes tracking when it is available.
 
 Required environment variables:
 - `NEXT_PUBLIC_SUPABASE_URL`
@@ -147,6 +151,7 @@ Required environment variables:
 - `NEXT_PUBLIC_STRIPE_PUBLISHABLE_KEY`
 - `STRIPE_WEBHOOK_SECRET`
 - `EASYPOST_API_KEY` (use a production key before purchasing real labels)
+- `EASYPOST_WEBHOOK_SECRET`
 - `EASYPOST_FROM_NAME`
 - `EASYPOST_FROM_STREET1`
 - `EASYPOST_FROM_CITY`
@@ -167,20 +172,24 @@ Optional for customer order confirmation and preorder-ready emails:
 - `ORDER_EMAIL_REPLY_TO`
 - `ORDER_EMAIL_BCC`
 - `ORDER_EMAIL_BANNER_URL`
-- `ORDER_CONFIRMATION_EMAIL_MODE=queue` to queue confirmation emails instead of
-  sending them inline during checkout/webhook work
-- `EMAIL_JOB_RETRY_DELAY_MS` to control queued email retry spacing
+- `ORDER_CONFIRMATION_EMAIL_MODE=queue` is the production default; set `inline`
+  only for local development without the Apps Script worker
+- `EMAIL_JOB_RETRY_DELAY_MS` controls SMTP retry spacing (tracking waits use a
+  separate five-minute delay and do not consume SMTP attempts)
 
 The webhook sends the customer confirmation email after a paid order is recorded.
 To avoid duplicate sends on normal webhook retries, the database now tracks
 `orders.customer_confirmation_email_sent_at`. Apply the updated
 `supabase/schema.sql` in Supabase before relying on this in production.
 The default banner image is bundled at `public/email/order-confirmation-banner.png`.
-When `ORDER_CONFIRMATION_EMAIL_MODE=queue` is enabled, confirmations are written
-to `email_jobs` and processed through `POST /api/admin/email-jobs`.
+Confirmations are queued by default, leased to one worker at a time, and processed
+through `POST /api/admin/email-jobs`. Run Apps Script `setupTriggers()` after
+installing script updates so `processEmailQueue` runs every five minutes. The
+Customer Emails menu also provides a manual retry for terminal failed jobs.
 
-Preorder-ready emails are sent separately from `lib/preorderReadyEmail.js` five
-minutes after the latest restock releases preorder units. Market-pickup emails include the current
+Preorder-ready emails are sent separately from `lib/preorderReadyEmail.js` by a
+permanent five-minute worker. The database cutoff consolidates releases for five
+minutes before a worker can claim them. Market-pickup emails include the current
 pickup date details and calendar attachment; shipping emails include the shipping
 method, ship-to address, and tracking/delivery follow-up language. Shipping
 orders also have their shipment rows synced when preorder release emails are
@@ -262,15 +271,3 @@ It does not print service-role keys, raw event rows, or raw PII.
 - Update copy in `app/page.jsx` and `app/about/page.jsx`.
 - Adjust styling in `app/globals.css`.
 - Edit product catalog in the Supabase `products` table.
-
-## Tailwind Hybrid Mode
-
-Tailwind is configured in hybrid mode so existing CSS continues to work while you
-migrate section-by-section:
-
-- Config: `tailwind.config.js` (`preflight` disabled to avoid global resets)
-- PostCSS: `postcss.config.js`
-- Layers loaded in: `app/globals.css`
-
-Current migrated example:
-- The shop allergen chip bar in `app/page.jsx` now uses Tailwind utility classes.

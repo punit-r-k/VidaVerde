@@ -1,3 +1,5 @@
+const { PHASE_DEVELOPMENT_SERVER } = require("next/constants");
+
 const splitCsv = (value) =>
   String(value || "")
     .split(",")
@@ -40,8 +42,6 @@ const assertSafeProductionCorsConfig = () => {
     .filter(Boolean);
 
   const wildcardConfigured = configuredOrigins.includes("*");
-  const allowCredentials =
-    String(process.env.CORS_ALLOW_CREDENTIALS || "").toLowerCase() === "true";
   const trustedOrigins = configuredOrigins.filter((origin) => origin !== "*");
 
   if (wildcardConfigured) {
@@ -50,24 +50,26 @@ const assertSafeProductionCorsConfig = () => {
     );
   }
 
-  if (allowCredentials && wildcardConfigured) {
-    throw new Error(
-      "Unsafe production CORS configuration: credentials cannot be enabled with wildcard origins."
-    );
-  }
-
   if (trustedOrigins.length === 0) {
     throw new Error(
       "Unsafe production CORS configuration: set an explicit trusted origin allowlist before starting the server."
+    );
+  }
+
+  const adminJwtSecret = String(process.env.ADMIN_JWT_SECRET || "");
+  if (Buffer.byteLength(adminJwtSecret, "utf8") < 32) {
+    throw new Error(
+      "Unsafe production admin authentication: ADMIN_JWT_SECRET must contain at least 32 UTF-8 bytes from a cryptographically random source."
     );
   }
 };
 
 assertSafeProductionCorsConfig();
 
-/** @type {import("next").NextConfig} */
-const nextConfig = {
+/** @param {string} phase @returns {import("next").NextConfig} */
+const createNextConfig = (phase) => ({
   reactStrictMode: true,
+  distDir: phase === PHASE_DEVELOPMENT_SERVER ? ".next-dev" : ".next",
   images: {
     formats: ["image/avif", "image/webp"],
     imageSizes: [32, 48, 64, 96, 128, 256, 384, 512],
@@ -79,6 +81,6 @@ const nextConfig = {
       }
     ]
   }
-};
+});
 
-module.exports = nextConfig;
+module.exports = createNextConfig;

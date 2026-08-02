@@ -2,9 +2,8 @@
 
 import { useMemo, useState } from "react";
 import {
-  CardElement,
   Elements,
-  ExpressCheckoutElement,
+  PaymentElement,
   useElements,
   useStripe
 } from "@stripe/react-stripe-js";
@@ -15,16 +14,16 @@ const stripePublishableKey = process.env.NEXT_PUBLIC_STRIPE_PUBLISHABLE_KEY || "
 const stripePromise = stripePublishableKey ? loadStripe(stripePublishableKey) : null;
 const ORDER_FINALIZE_MESSAGE = "Payment received. Finalizing your order...";
 const PAYMENT_FALLBACK_ERROR_MESSAGE =
-  "Payment didn't go through. Please check your card and try again.";
+  "Payment didn't go through. Please check your payment details and try again.";
 const PAYMENT_SETUP_ERROR_MESSAGE =
   "The secure payment form had trouble connecting. Please refresh the page and try again.";
 const PAYMENT_NETWORK_ERROR_MESSAGE =
   "We couldn't reach the payment service. Please check your connection and try again.";
 
 const formatCurrency = (amountInCents) => {
-  const n = Number(amountInCents);
-  if (!Number.isFinite(n)) return "$0.00";
-  return `$${(n / 100).toFixed(2)}`;
+  const amount = Number(amountInCents);
+  if (!Number.isFinite(amount)) return "$0.00";
+  return `$${(amount / 100).toFixed(2)}`;
 };
 
 const toOptional = (value) => {
@@ -35,9 +34,7 @@ const toOptional = (value) => {
 const getReturnUrl = (returnUrl) => {
   const text = String(returnUrl || "").trim();
   if (text) return text;
-
   if (typeof window === "undefined") return "";
-
   return new URL("/?checkout=success", window.location.origin).toString();
 };
 
@@ -57,11 +54,7 @@ const buildBillingDetails = (billingDetails) => ({
 
 const normalizePaymentIntentResult = (result) => {
   if (typeof result === "string") {
-    return {
-      clientSecret: result,
-      paymentIntentId: "",
-      returnUrl: ""
-    };
+    return { clientSecret: result, paymentIntentId: "", returnUrl: "" };
   }
 
   return {
@@ -83,7 +76,9 @@ const getReadablePaymentErrorMessage = (
   }
 
   if (
-    /returnUrl|return_url|confirm\(\)|Checkout Session|client_secret|client secret|integrationerror|integration error|invalid_request_error/i.test(message)
+    /returnUrl|return_url|confirm\(\)|client_secret|client secret|integrationerror|integration error|invalid_request_error/i.test(
+      message
+    )
   ) {
     return PAYMENT_SETUP_ERROR_MESSAGE;
   }
@@ -102,195 +97,17 @@ function StripePaymentForm({
   const elements = useElements();
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [paymentError, setPaymentError] = useState("");
-  const [applePayAvailability, setApplePayAvailability] = useState("checking");
   const grossTotal = Number(grossTotalCents);
   const safeGrossTotalCents =
     Number.isFinite(grossTotal) && grossTotal > 0 ? Math.round(grossTotal) : 0;
-  const hasApplePay = applePayAvailability === "available";
-  const payNowLabel =
-    safeGrossTotalCents > 0
-      ? `Pay Now | ${formatCurrency(safeGrossTotalCents)}`
-      : "Pay Now";
-  const expressCheckoutOptions = useMemo(
-    () => ({
-      business: {
-        name: "Vida Verde"
-      },
-      billingAddressRequired: true,
-      buttonHeight: 46,
-      buttonTheme: {
-        applePay: "black"
-      },
-      buttonType: {
-        applePay: "check-out"
-      },
-      layout: {
-        maxColumns: 1,
-        maxRows: 1,
-        overflow: "never"
-      },
-      lineItems: [
-        {
-          name: "Vida Verde order",
-          amount: safeGrossTotalCents
-        }
-      ],
-      paymentMethods: {
-        applePay: "always",
-        googlePay: "never",
-        link: "never",
-        paypal: "never",
-        amazonPay: "never",
-        klarna: "never"
-      },
-      paymentMethodOrder: ["applePay"]
-    }),
-    [safeGrossTotalCents]
-  );
+  const payNowLabel = safeGrossTotalCents > 0
+    ? `Pay Now | ${formatCurrency(safeGrossTotalCents)}`
+    : "Pay Now";
 
-  const handleExpressCheckoutReady = (event) => {
-    setApplePayAvailability(
-      event?.availablePaymentMethods?.applePay ? "available" : "unavailable"
-    );
-  };
-
-  const handleExpressCheckoutClick = (event) => {
-    if (isSubmitting || isLocked || safeGrossTotalCents <= 0 || !stripe || !elements) {
-      event.reject();
-      return;
-    }
-
-    event.resolve({
-      lineItems: [
-        {
-          name: "Vida Verde order",
-          amount: safeGrossTotalCents
-        }
-      ]
-    });
-  };
-
-  const handleExpressCheckoutConfirm = async (event) => {
-    trackAnalyticsEvent({
-      name: "payment_submit",
-      sectionId: "shop",
-      elementId: "payment_apple_pay",
-      checkoutStep: "payment",
-      metadata: {
-        subtotalCents: safeGrossTotalCents,
-        source: event?.expressPaymentType || "apple_pay"
-      }
-    });
-
-    if (!stripe || !elements) {
-      const message = "Payment form is still loading. Please try again.";
-      setPaymentError(message);
-      onPaymentState({ status: "error", message });
-      event.paymentFailed({ reason: "fail", message });
-      return;
-    }
-
-    setIsSubmitting(true);
-    setPaymentError("");
-    onPaymentState({
-      status: "processing",
-      message: "Processing Apple Pay securely..."
-    });
-
-    const { error: submitError } = await elements.submit();
-    if (submitError) {
-      const message = getReadablePaymentErrorMessage(submitError);
-      setPaymentError(message);
-      onPaymentState({ status: "error", message });
-      event.paymentFailed({ reason: "invalid_payment_data", message });
-      setIsSubmitting(false);
-      return;
-    }
-
-    let paymentIntentDetails;
-    try {
-      paymentIntentDetails = normalizePaymentIntentResult(await createPaymentIntent());
-    } catch (error) {
-      const message = getReadablePaymentErrorMessage(
-        error,
-        "We couldn't start payment. Please try again."
-      );
-      setPaymentError(message);
-      onPaymentState({ status: "error", message });
-      event.paymentFailed({ reason: "fail", message });
-      setIsSubmitting(false);
-      return;
-    }
-
-    if (!paymentIntentDetails.clientSecret) {
-      const message = "We couldn't start payment. Please try again.";
-      setPaymentError(message);
-      onPaymentState({ status: "error", message });
-      event.paymentFailed({ reason: "fail", message });
-      setIsSubmitting(false);
-      return;
-    }
-
-    const { error, paymentIntent } = await stripe.confirmPayment({
-      elements,
-      clientSecret: paymentIntentDetails.clientSecret,
-      confirmParams: {
-        return_url: getReturnUrl(paymentIntentDetails.returnUrl),
-        payment_method_data: {
-          billing_details: buildBillingDetails(billingDetails)
-        }
-      },
-      redirect: "if_required"
-    });
-
-    if (error) {
-      const message = getReadablePaymentErrorMessage(error);
-      setPaymentError(message);
-      onPaymentState({ status: "error", message });
-      event.paymentFailed({ reason: "fail", message });
-      setIsSubmitting(false);
-      return;
-    }
-
-    const intentStatus = paymentIntent?.status;
-    const paymentIntentId = paymentIntent?.id || paymentIntentDetails.paymentIntentId;
-    if (intentStatus === "succeeded" && paymentIntentId) {
-      onPaymentState({
-        status: "finalizing",
-        paymentIntentId,
-        message: ORDER_FINALIZE_MESSAGE
-      });
-      setIsSubmitting(false);
-      return;
-    }
-
-    if (
-      (intentStatus === "processing" || intentStatus === "requires_capture") &&
-      paymentIntentId
-    ) {
-      onPaymentState({
-        status: "finalizing",
-        paymentIntentId,
-        message:
-          "Payment is processing. We are finalizing your order as soon as Stripe confirms it. Do not submit again."
-      });
-      setIsSubmitting(false);
-      return;
-    }
-
-    if (!paymentIntent && !error) {
-      onPaymentState({
-        status: "redirecting",
-        message: "Finishing secure payment..."
-      });
-      setIsSubmitting(false);
-      return;
-    }
-
-    const message = "Payment was not completed. Please try again.";
+  const failPayment = (error, fallback) => {
+    const message = getReadablePaymentErrorMessage(error, fallback);
     setPaymentError(message);
     onPaymentState({ status: "error", message });
-    event.paymentFailed({ reason: "fail", message });
     setIsSubmitting(false);
   };
 
@@ -300,149 +117,103 @@ function StripePaymentForm({
       sectionId: "shop",
       elementId: "payment_submit",
       checkoutStep: "payment",
-      metadata: {
-        subtotalCents: Number(grossTotalCents || 0)
-      }
+      metadata: { subtotalCents: safeGrossTotalCents }
     });
 
     if (!stripe || !elements) {
-      const message = "Payment form is still loading. Please try again.";
-      setPaymentError(message);
-      onPaymentState({ status: "error", message });
-      return;
-    }
-
-    const cardElement = elements.getElement(CardElement);
-    if (!cardElement) {
-      const message = "Card input is not ready yet. Please try again.";
-      setPaymentError(message);
-      onPaymentState({ status: "error", message });
+      failPayment(null, "Payment form is still loading. Please try again.");
       return;
     }
 
     setIsSubmitting(true);
     setPaymentError("");
-    onPaymentState({
-      status: "processing",
-      message: "Processing payment securely..."
-    });
+    onPaymentState({ status: "processing", message: "Processing payment securely..." });
 
-    const { error: paymentMethodError, paymentMethod } = await stripe.createPaymentMethod({
-      type: "card",
-      card: cardElement,
-      billing_details: buildBillingDetails(billingDetails)
-    });
-
-    if (paymentMethodError || !paymentMethod?.id) {
-      const message = getReadablePaymentErrorMessage(
-        paymentMethodError,
-        "Enter valid card details to continue."
-      );
-      setPaymentError(message);
-      onPaymentState({ status: "error", message });
-      setIsSubmitting(false);
-      return;
-    }
-
-    let clientSecret;
     try {
-      const paymentIntentDetails = normalizePaymentIntentResult(await createPaymentIntent());
-      clientSecret = paymentIntentDetails.clientSecret;
-    } catch (error) {
-      const message = getReadablePaymentErrorMessage(
-        error,
-        "We couldn't start payment. Please try again."
+      const { error: submitError } = await elements.submit();
+      if (submitError) {
+        failPayment(submitError, "Enter valid payment details to continue.");
+        return;
+      }
+
+      const paymentIntentDetails = normalizePaymentIntentResult(
+        await createPaymentIntent()
       );
-      setPaymentError(message);
-      onPaymentState({ status: "error", message });
-      setIsSubmitting(false);
-      return;
-    }
+      if (!paymentIntentDetails.clientSecret) {
+        failPayment(null, "We couldn't start payment. Please try again.");
+        return;
+      }
 
-    if (!clientSecret) {
-      const message = "We couldn't start payment. Please try again.";
-      setPaymentError(message);
-      onPaymentState({ status: "error", message });
-      setIsSubmitting(false);
-      return;
-    }
-
-    const { error, paymentIntent } = await stripe.confirmCardPayment(clientSecret, {
-      payment_method: paymentMethod.id
-    });
-
-    if (error) {
-      const message = getReadablePaymentErrorMessage(error);
-      setPaymentError(message);
-      onPaymentState({ status: "error", message });
-      setIsSubmitting(false);
-      return;
-    }
-
-    const intentStatus = paymentIntent?.status;
-    if (intentStatus === "succeeded" && paymentIntent?.id) {
-      onPaymentState({
-        status: "finalizing",
-        paymentIntentId: paymentIntent.id,
-        message: ORDER_FINALIZE_MESSAGE
+      const { error, paymentIntent } = await stripe.confirmPayment({
+        elements,
+        clientSecret: paymentIntentDetails.clientSecret,
+        confirmParams: {
+          return_url: getReturnUrl(paymentIntentDetails.returnUrl),
+          payment_method_data: {
+            billing_details: buildBillingDetails(billingDetails)
+          }
+        },
+        redirect: "if_required"
       });
-      setIsSubmitting(false);
-      return;
-    }
 
-    if (
-      (intentStatus === "processing" || intentStatus === "requires_capture") &&
-      paymentIntent?.id
-    ) {
-      onPaymentState({
-        status: "finalizing",
-        paymentIntentId: paymentIntent.id,
-        message:
-          "Payment is processing. We are finalizing your order as soon as Stripe confirms it. Do not submit again."
-      });
-      setIsSubmitting(false);
-      return;
-    }
+      if (error) {
+        failPayment(error);
+        return;
+      }
 
-    const message = "Payment was not completed. Please try again.";
-    setPaymentError(message);
-    onPaymentState({ status: "error", message });
-    setIsSubmitting(false);
+      const paymentIntentId = paymentIntent?.id || paymentIntentDetails.paymentIntentId;
+      const clientSecret =
+        paymentIntent?.client_secret || paymentIntentDetails.clientSecret;
+      if (paymentIntent?.status === "succeeded" && paymentIntentId) {
+        onPaymentState({
+          status: "finalizing",
+          paymentIntentId,
+          clientSecret,
+          message: ORDER_FINALIZE_MESSAGE
+        });
+        setIsSubmitting(false);
+        return;
+      }
+
+      if (
+        ["processing", "requires_capture"].includes(paymentIntent?.status) &&
+        paymentIntentId
+      ) {
+        onPaymentState({
+          status: "finalizing",
+          paymentIntentId,
+          clientSecret,
+          message:
+            "Payment is processing. We will confirm your order as soon as Stripe finishes. Do not submit again."
+        });
+        setIsSubmitting(false);
+        return;
+      }
+
+      if (!paymentIntent && !error) {
+        onPaymentState({ status: "redirecting", message: "Finishing secure payment..." });
+        setIsSubmitting(false);
+        return;
+      }
+
+      failPayment(null, "Payment was not completed. Please try again.");
+    } catch (error) {
+      failPayment(error, "We couldn't complete payment. Please try again.");
+    }
   };
 
   return (
     <div className="payment-form">
-      <div
-        className={`wallet-checkout${
-          applePayAvailability === "unavailable" ? " wallet-checkout--hidden" : ""
-        }${isSubmitting || isLocked ? " wallet-checkout--disabled" : ""}`}
-      >
-        <ExpressCheckoutElement
-          options={expressCheckoutOptions}
-          onReady={handleExpressCheckoutReady}
-          onClick={handleExpressCheckoutClick}
-          onConfirm={handleExpressCheckoutConfirm}
-        />
-      </div>
-      {hasApplePay ? (
-        <div className="payment-divider" aria-hidden="true">
-          <span>or pay by card</span>
-        </div>
-      ) : null}
-      <div className="card-element-wrap">
-        <CardElement
+      <div className="payment-element-wrap">
+        <PaymentElement
           options={{
-            hidePostalCode: true,
-            style: {
-              base: {
-                fontSize: "16px",
-                color: "#29362f",
-                "::placeholder": {
-                  color: "rgba(41, 54, 47, 0.54)"
-                }
-              },
-              invalid: {
-                color: "#a9383c"
+            layout: { type: "tabs", defaultCollapsed: false },
+            fields: {
+              billingDetails: {
+                name: "never",
+                email: "never",
+                phone: "never",
+                address: "never"
               }
             }
           }}
@@ -454,7 +225,7 @@ function StripePaymentForm({
         </div>
       ) : null}
       <button
-        className="button button--dark"
+        className="button button--dark payment-element-submit"
         type="button"
         onClick={handleStripeSubmit}
         disabled={isSubmitting || isLocked || !stripe || !elements}

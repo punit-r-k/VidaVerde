@@ -24,11 +24,11 @@ const baseEnvironment = {
   STRIPE_SECRET_KEY: "sk_test_dummy",
   NEXT_PUBLIC_STRIPE_PUBLISHABLE_KEY: "pk_test_dummy",
   STRIPE_WEBHOOK_SECRET: "whsec_dummy",
-  STRIPE_API_VERSION: "2024-06-20",
+  STRIPE_API_VERSION: "2026-03-25.dahlia",
   SITE_URL: baseUrl,
   CORS_ALLOWED_ORIGINS: baseUrl,
   CORS_ALLOWED_ORIGINS_PRODUCTION: baseUrl,
-  ADMIN_JWT_SECRET: "test-admin-secret-please-rotate",
+  ADMIN_JWT_SECRET: "test-admin-secret-please-rotate-at-least-32-bytes",
   ADMIN_JWT_ISSUER: "vidaverde-admin",
   ADMIN_JWT_AUDIENCE: "vidaverde-admin-api",
   RATE_LIMIT_BACKEND: "memory"
@@ -37,7 +37,7 @@ const baseEnvironment = {
 const privilegedEndpoints = [
   { name: "admin orders", method: "GET", path: "/api/admin/orders" },
   { name: "admin shipments", method: "GET", path: "/api/admin/shipments" },
-  { name: "admin shipment rates", method: "POST", path: "/api/admin/shipments/00000000-0000-4000-8000-000000000000/rates", body: {} },
+  { name: "admin shipment refresh", method: "POST", path: "/api/admin/shipments", body: {} },
   { name: "admin shipment labels", method: "POST", path: "/api/admin/shipments/00000000-0000-4000-8000-000000000000/labels", body: {} },
   { name: "admin prep", method: "GET", path: "/api/admin/prep" },
   { name: "admin health", method: "GET", path: "/api/admin/health" },
@@ -58,7 +58,7 @@ const privilegedEndpoints = [
   }
 ];
 
-const createAdminJwt = ({ roles, sub = "security-test-admin" }) => {
+const createAdminJwt = ({ roles, sub = "security-test-admin", claims = {} }) => {
   const encodeBase64Url = (value) =>
     Buffer.from(JSON.stringify(value))
       .toString("base64url");
@@ -76,7 +76,8 @@ const createAdminJwt = ({ roles, sub = "security-test-admin" }) => {
     iat: now,
     nbf: now - 5,
     exp: now + 60,
-    jti: crypto.randomUUID()
+    jti: crypto.randomUUID(),
+    ...claims
   };
 
   const encodedHeader = encodeBase64Url(header);
@@ -220,6 +221,12 @@ test("security regression suite", { timeout: 300_000 }, async (t) => {
   );
   assert.match(unsafeBuild.output, /Unsafe production CORS configuration/i);
 
+  const weakAdminSecretBuild = await runNpmScript("build", {
+    ADMIN_JWT_SECRET: "too-short"
+  });
+  assert.notEqual(weakAdminSecretBuild.code, 0);
+  assert.match(weakAdminSecretBuild.output, /ADMIN_JWT_SECRET must contain at least 32/i);
+
   const safeBuild = await runNpmScript("build");
   assert.equal(safeBuild.code, 0, safeBuild.output);
 
@@ -264,6 +271,25 @@ test("security regression suite", { timeout: 300_000 }, async (t) => {
 
       assert.equal(response.status, 403, `${endpoint.name} should reject non-admin access.`);
       assert.match(String(json?.error || ""), /permission/i);
+    }
+  });
+
+  await t.test("admin JWTs require bounded integer time claims", async () => {
+    const now = Math.floor(Date.now() / 1000);
+    const invalidTokens = [
+      createAdminJwt({ roles: ["ops_admin"], claims: { iat: undefined } }),
+      createAdminJwt({ roles: ["ops_admin"], claims: { nbf: undefined } }),
+      createAdminJwt({ roles: ["ops_admin"], claims: { exp: undefined } }),
+      createAdminJwt({ roles: ["ops_admin"], claims: { iat: now - 0.5 } }),
+      createAdminJwt({ roles: ["ops_admin"], claims: { iat: now + 600, nbf: now + 600, exp: now + 660 } }),
+      createAdminJwt({ roles: ["ops_admin"], claims: { iat: now - 1_000, nbf: now - 1_000, exp: now + 60 } })
+    ];
+
+    for (const token of invalidTokens) {
+      const { response } = await requestJson("/api/admin/health", {
+        headers: { Authorization: `Bearer ${token}` }
+      });
+      assert.equal(response.status, 401);
     }
   });
 
@@ -454,7 +480,7 @@ test("security regression suite", { timeout: 300_000 }, async (t) => {
     assert.match(JSON.stringify(json), /signup|refresh/i);
   });
 
-  await t.test("public order finalization rejects injection-shaped payment intent ids", async () => {
+  await t.test("public order finalization accepts only bound PaymentIntent identifiers", async () => {
     const { response, json } = await requestJson("/api/order/finalize", {
       method: "POST",
       headers: {
@@ -469,19 +495,22 @@ test("security regression suite", { timeout: 300_000 }, async (t) => {
     assert.equal(response.status, 400);
     assert.match(JSON.stringify(json), /invalid/i);
 
-    const sessionAttempt = await requestJson("/api/order/finalize", {
+    const legacySessionAttempt = await requestJson("/api/order/finalize", {
       method: "POST",
       headers: {
         "Content-Type": "application/json",
         Origin: baseUrl
       },
       body: JSON.stringify({
-        sessionId: "cs_123'; DROP TABLE orders;--"
+        sessionId: "cs_test_legacy"
       })
     });
 
-    assert.equal(sessionAttempt.response.status, 400);
-    assert.match(JSON.stringify(sessionAttempt.json), /invalid/i);
+    assert.equal(legacySessionAttempt.response.status, 400);
+    assert.match(
+      JSON.stringify(legacySessionAttempt.json),
+      /payment|checkout|confirmation|unrecognized/i
+    );
   });
 
   await t.test("public inventory route reports backend unavailability instead of empty stock", async () => {

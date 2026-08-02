@@ -350,6 +350,7 @@ export default function Storefront({ products, inventory = null, pickupDetails =
   const cartSummarySeenRef = useRef(false);
   const cartChangeSequenceRef = useRef(0);
   const shippingPreviewRequestRef = useRef(0);
+  const checkoutAttemptIdRef = useRef("");
   const finalizingPaymentRef = useRef("");
   const emailOptInSubmittedRef = useRef("");
   const cartChangeDialogRef = useRef(null);
@@ -394,6 +395,7 @@ export default function Storefront({ products, inventory = null, pickupDetails =
 
   const resetPaymentState = useCallback(() => {
     setPreparedPayment(null);
+    checkoutAttemptIdRef.current = "";
     checkoutStepScrollPositionRef.current = null;
     checkoutStepPreviousFormHeightRef.current = 0;
     setCheckoutStep("details");
@@ -443,6 +445,7 @@ export default function Storefront({ products, inventory = null, pickupDetails =
     resetCartChangeTracking();
     checkoutStepPreviousFormHeightRef.current = 0;
     setPreparedPayment(null);
+    checkoutAttemptIdRef.current = "";
     setCheckoutStep("details");
     checkoutStartedRef.current = false;
     finalizingPaymentRef.current = "";
@@ -535,12 +538,14 @@ export default function Storefront({ products, inventory = null, pickupDetails =
   }, []);
 
   const finalizePaidOrder = useCallback(
-    async ({ paymentIntentId = "", sessionId = "" } = {}) => {
+    async ({ paymentIntentId = "", paymentIntentClientSecret = "" } = {}) => {
       const normalizedPaymentIntentId = String(paymentIntentId || "").trim();
-      const normalizedSessionId = String(sessionId || "").trim();
-      const paymentReference = normalizedSessionId || normalizedPaymentIntentId;
+      const normalizedPaymentIntentClientSecret = String(
+        paymentIntentClientSecret || ""
+      ).trim();
+      const paymentReference = normalizedPaymentIntentId;
 
-      if (!paymentReference) {
+      if (!paymentReference || !normalizedPaymentIntentClientSecret) {
         trackAnalyticsEvent({
           name: "payment_result",
           sectionId: "shop",
@@ -569,11 +574,10 @@ export default function Storefront({ products, inventory = null, pickupDetails =
             headers: {
               "Content-Type": "application/json"
             },
-            body: JSON.stringify(
-              normalizedSessionId
-                ? { sessionId: normalizedSessionId }
-                : { paymentIntentId: normalizedPaymentIntentId }
-            )
+            body: JSON.stringify({
+              paymentIntentId: normalizedPaymentIntentId,
+              paymentIntentClientSecret: normalizedPaymentIntentClientSecret
+            })
           });
           payload = await response.json().catch(() => ({}));
         } catch {
@@ -633,7 +637,7 @@ export default function Storefront({ products, inventory = null, pickupDetails =
             successContext
           );
           if (emailOptIn) {
-            void submitCheckoutEmailOptIn(payload?.customerEmail || formValues.email);
+            void submitCheckoutEmailOptIn(formValues.email);
           }
           resetCheckoutAfterSuccess();
           return;
@@ -1191,19 +1195,15 @@ export default function Storefront({ products, inventory = null, pickupDetails =
   useEffect(() => {
     const checkoutStatus = searchParams?.get("checkout");
     const paymentIntentId = searchParams?.get("payment_intent");
-    const sessionId = searchParams?.get("session_id");
+    const paymentIntentClientSecret = searchParams?.get("payment_intent_client_secret");
 
     if (!checkoutStatus) return;
 
     if (checkoutStatus === "success") {
-      if (sessionId) {
+      if (paymentIntentId && paymentIntentClientSecret) {
         setStatus("finalizing");
         setNotice(ORDER_FINALIZE_MESSAGE);
-        void finalizePaidOrder({ sessionId });
-      } else if (paymentIntentId) {
-        setStatus("finalizing");
-        setNotice(ORDER_FINALIZE_MESSAGE);
-        void finalizePaidOrder({ paymentIntentId });
+        void finalizePaidOrder({ paymentIntentId, paymentIntentClientSecret });
       } else {
         setStatus("pending_confirmation");
         setNotice(ORDER_FINALIZE_PENDING_NOTICE);
@@ -1226,7 +1226,6 @@ export default function Storefront({ products, inventory = null, pickupDetails =
     if (typeof window !== "undefined") {
       const url = new URL(window.location.href);
       url.searchParams.delete("checkout");
-      url.searchParams.delete("session_id");
       url.searchParams.delete("payment_intent");
       url.searchParams.delete("payment_intent_client_secret");
       url.searchParams.delete("redirect_status");
@@ -2297,7 +2296,10 @@ export default function Storefront({ products, inventory = null, pickupDetails =
     }
   };
 
-  const preparePaymentIntent = useCallback(async (valuesOverride = formValues) => {
+  const preparePaymentIntent = useCallback(async (
+    valuesOverride = formValues,
+    expectedCheckout = null
+  ) => {
     if (fulfillment === "market" && !pickupAcknowledged) {
       const message = "Please accept the pickup policy before proceeding to payment.";
       trackAnalyticsEvent({
@@ -2336,11 +2338,30 @@ export default function Storefront({ products, inventory = null, pickupDetails =
       throw new Error(message);
     }
 
-    const response = await fetch("/api/order", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(buildOrderPayload(valuesOverride))
-    });
+    if (!checkoutAttemptIdRef.current) {
+      const attemptId = globalThis.crypto?.randomUUID?.();
+      if (!attemptId) {
+        throw new Error("Secure checkout is not supported by this browser. Please update it and try again.");
+      }
+      checkoutAttemptIdRef.current = attemptId;
+    }
+
+    let response;
+    try {
+      response = await fetch("/api/order", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          ...buildOrderPayload(valuesOverride),
+          checkoutAttemptId: checkoutAttemptIdRef.current,
+          ...(expectedCheckout || {})
+        })
+      });
+    } catch (error) {
+      // Keep the key after an ambiguous transport failure. Stripe may have
+      // created the PaymentIntent even though this browser lost the response.
+      throw error;
+    }
 
     const responseContentType = response.headers.get("content-type") || "";
     const result = responseContentType.includes("application/json")
@@ -2348,6 +2369,43 @@ export default function Storefront({ products, inventory = null, pickupDetails =
       : {};
 
     if (!response.ok) {
+      const shouldRotateCheckoutAttempt =
+        response.status === 409 &&
+        [
+          "checkout_changed",
+          "inventory_changed",
+          "checkout_already_processed"
+        ].includes(result?.code);
+      if (shouldRotateCheckoutAttempt) {
+        checkoutAttemptIdRef.current = "";
+      }
+      if (
+        response.status === 409 &&
+        result?.code === "checkout_changed" &&
+        result?.checkout &&
+        Number.isInteger(result.checkout.subtotalCents) &&
+        Number.isInteger(result.checkout.shippingCents) &&
+        Number.isInteger(result.checkout.totalCents)
+      ) {
+        const authoritativeShippingOption = normalizeShippingOptionId(
+          result.checkout.shippingOption
+        );
+        setPreparedPayment((currentPayment) => ({
+          subtotalCents: result.checkout.subtotalCents,
+          shipping: fulfillment === "ship"
+            ? {
+                ...(currentPayment?.shipping || {}),
+                id: authoritativeShippingOption,
+                amountCents: result.checkout.shippingCents
+              }
+            : null,
+          totalCents: result.checkout.totalCents
+        }));
+        if (fulfillment === "ship") {
+          setShippingOptionId(authoritativeShippingOption);
+        }
+      }
+
       if (
         response.status === 409 &&
         result?.code === "inventory_changed" &&
@@ -2398,19 +2456,44 @@ export default function Storefront({ products, inventory = null, pickupDetails =
   ]);
 
   const createPaymentIntent = useCallback(async () => {
-    if (!preparedPayment?.clientSecret || !preparedPayment?.paymentIntentId) {
-      throw new Error("Your live shipping quote is no longer ready. Please review your details and try again.");
+    if (!preparedPayment || Number(preparedPayment.totalCents) <= 0) {
+      throw new Error("Your order total is no longer ready. Please review your details and try again.");
     }
-    const quoteExpiresAt = Date.parse(preparedPayment?.shipping?.quoteExpiresAt || "");
-    if (Number.isFinite(quoteExpiresAt) && quoteExpiresAt <= Date.now() + 60_000) {
+
+    const expectedTotal = Number(preparedPayment.totalCents);
+    const expectedShipping = Number(preparedPayment?.shipping?.amountCents || 0);
+    const expectedShippingOption = fulfillment === "ship"
+      ? normalizeShippingOptionId(preparedPayment?.shipping?.id)
+      : "";
+    const nextPreparedPayment = await preparePaymentIntent(formValues, {
+      expectedTotalCents: expectedTotal,
+      expectedShippingCents: expectedShipping,
+      expectedShippingOption
+    });
+    const confirmedTotal = Number(nextPreparedPayment.totalCents);
+    const confirmedShipping = Number(nextPreparedPayment?.shipping?.amountCents || 0);
+    const shippingOptionChanged = fulfillment === "ship" &&
+      normalizeShippingOptionId(preparedPayment?.shipping?.id) !==
+        normalizeShippingOptionId(nextPreparedPayment?.shipping?.id);
+
+    if (
+      !Number.isFinite(confirmedTotal) ||
+      confirmedTotal !== expectedTotal ||
+      confirmedShipping !== expectedShipping ||
+      shippingOptionChanged
+    ) {
       resetPaymentState();
-      throw new Error("Your live shipping quote expired. Please proceed to payment again for a fresh rate.");
+      throw new Error(
+        "Your price or shipping option changed before payment. Please review the updated total and try again."
+      );
     }
-    return preparedPayment;
-  }, [preparedPayment, resetPaymentState]);
+
+    setPreparedPayment(nextPreparedPayment);
+    return nextPreparedPayment;
+  }, [formValues, fulfillment, preparePaymentIntent, preparedPayment, resetPaymentState]);
 
   const handlePaymentState = useCallback(
-    ({ status: nextStatus, message, paymentIntentId, sessionId }) => {
+    ({ status: nextStatus, message, paymentIntentId, clientSecret }) => {
       if (nextStatus === "processing") {
         setStatus("submitting");
         setNotice(message || "Processing payment securely...");
@@ -2431,9 +2514,9 @@ export default function Storefront({ products, inventory = null, pickupDetails =
 
       if (nextStatus === "finalizing") {
         const normalizedPaymentIntentId = String(paymentIntentId || "").trim();
-        const normalizedSessionId = String(sessionId || "").trim();
-        const paymentReference = normalizedSessionId || normalizedPaymentIntentId;
-        if (!paymentReference) {
+        const normalizedClientSecret = String(clientSecret || "").trim();
+        const paymentReference = normalizedPaymentIntentId;
+        if (!paymentReference || !normalizedClientSecret) {
           setStatus("pending_confirmation");
           setNotice(ORDER_FINALIZE_PENDING_NOTICE);
           return;
@@ -2445,11 +2528,10 @@ export default function Storefront({ products, inventory = null, pickupDetails =
 
         setStatus("finalizing");
         setNotice(message || ORDER_FINALIZE_MESSAGE);
-        void finalizePaidOrder(
-          normalizedSessionId
-            ? { sessionId: normalizedSessionId }
-            : { paymentIntentId: normalizedPaymentIntentId }
-        );
+        void finalizePaidOrder({
+          paymentIntentId: normalizedPaymentIntentId,
+          paymentIntentClientSecret: normalizedClientSecret
+        });
         return;
       }
 
@@ -2573,12 +2655,21 @@ export default function Storefront({ products, inventory = null, pickupDetails =
     setStatus("submitting");
     setNotice(
       fulfillment === "ship"
-        ? `Calculating the live ${selectedShippingOption.label} rate and expected arrival date...`
+        ? `Preparing ${selectedShippingOption.label} and secure payment...`
         : "Preparing secure payment..."
     );
 
     try {
-      const nextPreparedPayment = await preparePaymentIntent(finalFormValues);
+      if (fulfillment === "ship" && !activeShippingPreview) {
+        throw new Error("Wait for the shipping price and expected arrival before continuing.");
+      }
+      const preparedShipping = fulfillment === "ship" ? activeShippingPreview : null;
+      const preparedShippingCents = Number(preparedShipping?.amountCents || 0);
+      const nextPreparedPayment = {
+        subtotalCents: subtotal,
+        totalCents: subtotal + preparedShippingCents,
+        shipping: preparedShipping
+      };
       setPreparedPayment(nextPreparedPayment);
       trackAnalyticsEvent({
         name: "checkout_submit",
@@ -2782,7 +2873,7 @@ export default function Storefront({ products, inventory = null, pickupDetails =
           <div className="shipping-schedule__content">
             <p>{SHIPPING_SCHEDULE_INTRO}</p>
             {hasActiveShippingPreview && !expeditedShippingIsDisplayed ? (
-              <p>The best available service is provided as Shipping. Its expected arrival date is shown with the rate.</p>
+              <p>Your expected arrival is shown with the shipping price.</p>
             ) : (
               <>
                 <p>{SHIPPING_SCHEDULE_STANDARD_LINE}</p>
@@ -2939,8 +3030,8 @@ export default function Storefront({ products, inventory = null, pickupDetails =
         <p id="shipping-option-hint" className="shipping-options__hint">
           Shipping is available across the {CONTINENTAL_US_SHIPPING_AREA_LABEL}.
           {hasActiveShippingPreview && !expeditedShippingIsDisplayed
-            ? " The best available service is shown as Shipping. Its final charge and expected arrival date are shown below."
-            : " Choose Shipping for a 3–5-business-day carrier estimate or Expedited Shipping for a 1–3-business-day estimate. Expedited appears only when it is a faster premium option. Both final charges and expected arrival dates are shown before payment."}
+            ? " The final price and expected arrival are shown below."
+            : " Choose Shipping for delivery in an estimated 3–5 business days or Expedited Shipping for 1–3 business days after Wednesday shipment. Final prices and expected arrival dates are shown before payment."}
         </p>
         {renderShippingScheduleNotice({ id: "checkout", showShipDate: true })}
         <div className="shipping-options__list">
@@ -3153,11 +3244,11 @@ export default function Storefront({ products, inventory = null, pickupDetails =
               <div className="order-success-popup__summary" aria-label="Shipping details">
                 <div className="order-success-popup__summary-header">
                   <span>Shipping</span>
-                  <strong>{orderSuccessContext.shippingOptionLabel || "Tracking By Email"}</strong>
+                  <strong>{orderSuccessContext.shippingOptionLabel || "Order confirmed"}</strong>
                 </div>
                 <p className="order-success-popup__instruction">
                   {orderSuccessContext.preorderUnits > 0
-                    ? "Preorder items ship after they are ready, which may take up to 15 days. The selected shipping timing starts after that ready date. "
+                    ? "Preorder items ship after they are ready, which may take up to 15 days. We’ll email tracking when the order ships. "
                     : orderSuccessContext.shippingShipDateLabel
                       ? `Estimated ship date: ${orderSuccessContext.shippingShipDateLabel}. `
                       : ""}
@@ -3166,7 +3257,7 @@ export default function Storefront({ products, inventory = null, pickupDetails =
                     : orderSuccessContext.shippingTransitLabel
                       ? `${orderSuccessContext.shippingTransitLabel} `
                       : ""}
-                  We will email tracking or delivery updates when available. Open and inspect the package when it arrives, and refrigerate after opening.
+                  Tracking is included in your confirmation email when available. Open and inspect the package when it arrives, and refrigerate after opening.
                 </p>
               </div>
             ) : null}
@@ -4044,14 +4135,11 @@ export default function Storefront({ products, inventory = null, pickupDetails =
                 </div>
                 {fulfillment === "ship" ? (
                   <ul className="pickup-policy-modal__steps">
-                    <li>Packages are taken to shipping carriers once a week, every Wednesday, after packing or production is complete.</li>
-                    <li>Shipping time starts only after the carrier receives the package.</li>
-                    <li>Shipping uses the fastest eligible 3–5-business-day EasyPost rate and excludes rates estimated under three days.</li>
-                    <li>Expedited Shipping uses the fastest eligible 1–3-business-day EasyPost rate.</li>
-                    <li>Expedited appears only when it is faster and costs more than Shipping. If its label costs less, that label is provided as Shipping.</li>
-                    <li>When an order needs multiple parcels, every parcel is sent with the same carrier.</li>
-                    <li>Your shipping charge is postage plus packaging, rounded up to the nearest dollar.</li>
-                    <li>Tracking or delivery updates will be emailed when available.</li>
+                    <li>Orders ship on Wednesdays after packing or production is complete.</li>
+                    <li>Shipping usually arrives in 3–5 business days after shipment.</li>
+                    <li>Expedited Shipping usually arrives in 1–3 business days after shipment.</li>
+                    <li>Your final shipping price and expected arrival are shown before payment.</li>
+                    <li>Your confirmation email includes tracking when it is available.</li>
                     <li>Open and inspect the package when it arrives.</li>
                     <li>Refrigerate after opening.</li>
                   </ul>
@@ -4086,7 +4174,7 @@ export default function Storefront({ products, inventory = null, pickupDetails =
                   </div>
                   <p>
                     {fulfillment === "ship"
-                      ? "Preorder items cannot be shipped until they are ready, which can take up to 15 days. They will be included in the next Wednesday carrier handoff, and transit time begins after the carrier receives the package."
+                      ? "Preorder items can take up to 15 days to become ready. They ship on the first Wednesday after they are ready, and we’ll email tracking when they ship."
                       : pickupScenario === "mixed"
                       ? "Ready items can be picked up on the date above. Preorder items will be scheduled separately when restocked, and we will email you before that pickup."
                       : "This order contains preorder items. We will email you when they are ready and confirm the pickup date before you come to market."}
@@ -4147,7 +4235,7 @@ export default function Storefront({ products, inventory = null, pickupDetails =
                 </dl>
                 <p>
                   {fulfillment === "ship"
-                    ? "The displayed shipping charge is the reserved live postage plus packaging total, rounded up to the nearest dollar."
+                    ? "The shipping charge shown above is included in the total charged today."
                     : "Pickup orders have no shipping charge. Your card will be charged today to reserve available inventory and preorder items."}
                 </p>
               </section>

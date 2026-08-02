@@ -5,16 +5,22 @@ import {
   SHIPPING_COUNTRY_CODE
 } from "@/lib/checkoutSchema";
 import { MARKET_PICKUP_POLICY_VERSION } from "@/lib/pickupDetails";
-import { getProductMap } from "@/lib/products";
+import { getAuthoritativeProductMap } from "@/lib/products";
 import { getRouteRateLimitConfig } from "@/lib/rateLimit";
+import { readBoundedJsonBody } from "@/lib/requestBody";
 import {
   getShippingOptionsForCart,
   normalizeProductType
 } from "@/lib/shippingPricing";
 import { selectCheckoutShippingQuote } from "@/lib/checkoutShippingQuote";
+import { createEasyPostRatingContext } from "@/lib/shippingQuotes";
 import { resolveCustomerShippingSelections } from "@/lib/shippingOptionPolicy";
 import { getInventoryMap } from "@/lib/stock";
 import { stripeConfig, stripeRequest } from "@/lib/stripe";
+import {
+  getStripeCheckoutIdempotencyKey,
+  isCheckoutExpectationExact
+} from "@/lib/stripeOrderIntegrity";
 import { supabaseAdmin } from "@/lib/supabaseAdmin";
 
 const ORDER_RATE_LIMIT = getRouteRateLimitConfig("ORDER_CREATE", {
@@ -25,6 +31,7 @@ const ORDER_RATE_LIMIT = getRouteRateLimitConfig("ORDER_CREATE", {
 const CHECKOUT_UNAVAILABLE_MESSAGE =
   "Checkout is not available right now. Please try again later.";
 const SHIPPING_QUOTE_LIFETIME_MS = 60 * 60 * 1000;
+const ORDER_BODY_MAX_BYTES = 64 * 1024;
 
 const getCheckoutValidationMessage = (issues) => {
   const message = issues?.[0]?.message || "";
@@ -180,12 +187,32 @@ const cancelCheckoutShippingQuote = async (quoteId) => {
       status: "cancelled",
       updated_at: new Date().toISOString()
     })
-    .eq("id", quoteId);
+    .eq("id", quoteId)
+    .eq("status", "quoted");
 
   if (error) {
     console.error("checkout shipping quote cancellation failed:", error.message);
   }
 };
+
+const getAttachedCheckoutShippingQuote = async (paymentIntentId) => {
+  if (!paymentIntentId || !supabaseAdmin) return { data: null, error: null };
+
+  return supabaseAdmin
+    .from("checkout_shipping_quotes")
+    .select(
+      "id, status, postage_cents, packaging_cents, unrounded_cents, rounding_cents, " +
+      "charged_shipping_cents, currency, service_level"
+    )
+    .eq("payment_session_id", paymentIntentId)
+    .maybeSingle();
+};
+
+const isCompatibleAttachedQuote = ({ quote, shippingAmount, shippingOption }) =>
+  quote?.status === "quoted" &&
+  Number(quote?.charged_shipping_cents) === shippingAmount &&
+  String(quote?.currency || "").trim().toUpperCase() === "USD" &&
+  String(quote?.service_level || "").trim() === String(shippingOption || "").trim();
 
 export const runtime = "nodejs";
 
@@ -208,14 +235,82 @@ export async function POST(request) {
     );
   }
 
-  let payload;
-  try {
-    payload = await request.json();
-  } catch {
+  const bodyResult = await readBoundedJsonBody(request, {
+    maxBytes: ORDER_BODY_MAX_BYTES
+  });
+  if (!bodyResult.ok) {
     return respond.json(
-      { error: "We couldn't read your checkout details. Please try again." },
-      { status: 400 }
+      {
+        error:
+          bodyResult.status === 413
+            ? "Your checkout details are too large. Please reduce the cart and try again."
+            : "We couldn't read your checkout details. Please try again."
+      },
+      { status: bodyResult.status }
     );
+  }
+
+  let payload = bodyResult.data;
+  let checkoutIdempotencyKey = "";
+  let checkoutExpectation = null;
+  if (
+    payload &&
+    typeof payload === "object" &&
+    !Array.isArray(payload)
+  ) {
+    const checkoutPayload = { ...payload };
+    checkoutIdempotencyKey = getStripeCheckoutIdempotencyKey(
+      checkoutPayload.checkoutAttemptId
+    );
+    if (!checkoutIdempotencyKey) {
+      return respond.json(
+        { error: "That checkout attempt looks invalid. Please refresh and try again." },
+        { status: 400 }
+      );
+    }
+    delete checkoutPayload.checkoutAttemptId;
+
+    const expectationFields = [
+      "expectedTotalCents",
+      "expectedShippingCents",
+      "expectedShippingOption"
+    ];
+    const suppliedExpectationFields = expectationFields.filter((field) =>
+      Object.hasOwn(checkoutPayload, field)
+    );
+    if (suppliedExpectationFields.length === expectationFields.length) {
+      const expectedTotalCents = checkoutPayload.expectedTotalCents;
+      const expectedShippingCents = checkoutPayload.expectedShippingCents;
+      const expectedShippingOption = checkoutPayload.expectedShippingOption;
+      const hasValidExpectation =
+        suppliedExpectationFields.length === expectationFields.length &&
+        Number.isSafeInteger(expectedTotalCents) &&
+        expectedTotalCents > 0 &&
+        Number.isSafeInteger(expectedShippingCents) &&
+        expectedShippingCents >= 0 &&
+        typeof expectedShippingOption === "string" &&
+        expectedShippingOption.length <= 64;
+      if (!hasValidExpectation) {
+        return respond.json(
+          { error: "Your checkout preview looks invalid. Please refresh and try again." },
+          { status: 400 }
+        );
+      }
+
+      checkoutExpectation = {
+        totalCents: expectedTotalCents,
+        shippingCents: expectedShippingCents,
+        shippingOption: expectedShippingOption.trim().toLowerCase()
+      };
+    } else {
+      return respond.json(
+        { error: "Your checkout preview looks invalid. Please refresh and try again." },
+        { status: 400 }
+      );
+    }
+
+    expectationFields.forEach((field) => delete checkoutPayload[field]);
+    payload = checkoutPayload;
   }
 
   const parsedPayload = checkoutPayloadSchema.safeParse(payload);
@@ -252,9 +347,16 @@ export async function POST(request) {
 
   const skus = normalizedItems.map((item) => item.sku);
   const [productMap, inventoryMap] = await Promise.all([
-    getProductMap(skus),
+    getAuthoritativeProductMap(skus),
     getInventoryMap()
   ]);
+
+  if (!productMap) {
+    return respond.json(
+      { error: "Checkout pricing is refreshing. Please try again in a moment." },
+      { status: 503 }
+    );
+  }
 
   if (!inventoryMap) {
     return respond.json(
@@ -355,7 +457,6 @@ export async function POST(request) {
   ) || shipping.normalOption;
   let selectedShippingOption = isPickup ? null : requestedOption;
   let checkoutShippingQuote = null;
-  let expectedArrivalDate = null;
   let expectedArrivalDateKey = "";
   let expectedArrivalLabel = "";
   let shippingCharge = {
@@ -376,6 +477,7 @@ export async function POST(request) {
       const hasPreorderItems = normalizedItems.some((item) =>
         getCurrentAllocation(item.quantity, inventoryMap?.[item.sku]).preorderUnits > 0
       );
+      const ratingContext = createEasyPostRatingContext();
       const quoteResults = await Promise.allSettled(
         shipping.options.map((option) =>
           selectCheckoutShippingQuote({
@@ -386,7 +488,8 @@ export async function POST(request) {
             itemsPayload,
             requestedOption: option,
             hasPreorderItems,
-            orderCreatedAt
+            orderCreatedAt,
+            ratingContext
           })
         )
       );
@@ -419,7 +522,6 @@ export async function POST(request) {
       shippingCharge = selection.charge;
       selectedShippingOption = selection.option;
       const deliveryDays = selection.deliveryDays;
-      expectedArrivalDate = selection.expectedArrivalDate;
       expectedArrivalDateKey = selection.expectedArrivalDateKey;
       expectedArrivalLabel = selection.expectedArrivalLabel;
 
@@ -441,7 +543,7 @@ export async function POST(request) {
           expected_arrival_date: expectedArrivalDateKey || null,
           expires_at: expiresAt
         })
-        .select("id, expires_at")
+        .select("id")
         .single();
       if (saveQuoteError || !savedQuote) {
         throw saveQuoteError || new Error("The live shipping quote could not be saved.");
@@ -478,6 +580,31 @@ export async function POST(request) {
     );
   }
 
+  const authoritativeShippingOption = isPickup
+    ? ""
+    : String(selectedShippingOption?.id || "").trim().toLowerCase();
+  if (!isCheckoutExpectationExact({
+    expectation: checkoutExpectation,
+    totalCents: estimatedTotal,
+    shippingCents: defaultShippingAmount,
+    shippingOption: authoritativeShippingOption
+  })) {
+    await cancelCheckoutShippingQuote(checkoutShippingQuote?.id);
+    return respond.json(
+      {
+        code: "checkout_changed",
+        error: "Your checkout total changed. Review the updated total and try again.",
+        checkout: {
+          subtotalCents: subtotal,
+          shippingCents: defaultShippingAmount,
+          totalCents: estimatedTotal,
+          shippingOption: authoritativeShippingOption
+        }
+      },
+      { status: 409 }
+    );
+  }
+
   const metadata = {
     checkout_flow: "payment_intent",
     fulfillment: asMetadataValue(normalizedFulfillment, 32),
@@ -488,23 +615,17 @@ export async function POST(request) {
       120
     ),
     shipping_estimate: asMetadataValue(
-      isPickup ? "" : selectedShippingOption?.transitLabel,
+      isPickup
+        ? ""
+        : selectedShippingOption?.transitLabel,
       180
     ),
     sauerkraut_count: asMetadataValue(shipping.sauerkrautCount, 32),
     hot_sauce_count: asMetadataValue(shipping.hotSauceCount, 32),
     amount_subtotal: asMetadataValue(subtotal, 32),
     amount_shipping: asMetadataValue(defaultShippingAmount, 32),
+    amount_tax: "0",
     amount_total: asMetadataValue(estimatedTotal, 32),
-    shipping_quote_id: asMetadataValue(checkoutShippingQuote?.id, 64),
-    shipping_postage_cents: asMetadataValue(shippingCharge.postageCents, 32),
-    shipping_packaging_cents: asMetadataValue(shippingCharge.packagingCents, 32),
-    shipping_unrounded_cents: asMetadataValue(shippingCharge.unroundedCents, 32),
-    shipping_rounding_cents: asMetadataValue(shippingCharge.roundingCents, 32),
-    shipping_carrier: asMetadataValue(selectedShippingOption?.carrier, 120),
-    shipping_service: asMetadataValue(selectedShippingOption?.service, 120),
-    expected_arrival_date: asMetadataValue(expectedArrivalDateKey, 32),
-    expected_arrival_label: asMetadataValue(expectedArrivalLabel, 120),
     customer_name: asMetadataValue(name, 120),
     customer_email: asMetadataValue(email, 254),
     customer_phone: asMetadataValue(customer.phone, 64),
@@ -523,7 +644,6 @@ export async function POST(request) {
   if (isPickup) {
     metadata.pickup_policy_accepted = "true";
     metadata.pickup_policy_version = asMetadataValue(MARKET_PICKUP_POLICY_VERSION, 32);
-    metadata.pickup_policy_accepted_at = asMetadataValue(new Date().toISOString(), 64);
   }
 
   const serializedItems = JSON.stringify(itemsPayload);
@@ -556,8 +676,7 @@ export async function POST(request) {
         `Vida Verde ${isPickup ? "pickup" : "shipping"} order: ${orderSummary}`,
         500
       ),
-      metadata,
-      receipt_email: asMetadataValue(email, 254)
+      metadata
     };
 
     if (!isPickup) {
@@ -566,7 +685,8 @@ export async function POST(request) {
 
     const { ok, data, error } = await stripeRequest("/v1/payment_intents", {
       method: "POST",
-      body: stripePayload
+      body: stripePayload,
+      idempotencyKey: checkoutIdempotencyKey || undefined
     });
 
     if (!ok) {
@@ -587,30 +707,92 @@ export async function POST(request) {
     }
 
     if (checkoutShippingQuote?.id) {
-      const { data: attachedQuote, error: attachQuoteError } = await supabaseAdmin
-        .from("checkout_shipping_quotes")
-        .update({
-          payment_session_id: data.id,
-          updated_at: new Date().toISOString()
-        })
-        .eq("id", checkoutShippingQuote.id)
-        .eq("status", "quoted")
-        .select("id")
-        .maybeSingle();
-
-      if (attachQuoteError || !attachedQuote) {
+      const existingResult = await getAttachedCheckoutShippingQuote(data.id);
+      if (existingResult.error) {
         console.error(
-          "checkout shipping quote attachment failed:",
-          attachQuoteError?.message || "The saved quote was no longer available."
+          "attached checkout shipping quote lookup failed:",
+          existingResult.error.message
         );
-        await stripeRequest(`/v1/payment_intents/${encodeURIComponent(data.id)}/cancel`, {
-          method: "POST"
-        });
         await cancelCheckoutShippingQuote(checkoutShippingQuote.id);
         return respond.json(
           { error: "We couldn't finish preparing shipping. Please try again." },
           { status: 500 }
         );
+      }
+
+      const existingQuote = existingResult.data;
+      if (existingQuote) {
+        await cancelCheckoutShippingQuote(checkoutShippingQuote.id);
+        if (!isCompatibleAttachedQuote({
+          quote: existingQuote,
+          shippingAmount: defaultShippingAmount,
+          shippingOption: selectedShippingOption?.id
+        })) {
+          return respond.json(
+            {
+              code: "checkout_already_processed",
+              error: "That checkout attempt was already used. Please refresh and try again."
+            },
+            { status: 409 }
+          );
+        }
+
+        checkoutShippingQuote = existingQuote;
+        shippingCharge = {
+          postageCents: Number(existingQuote.postage_cents),
+          packagingCents: Number(existingQuote.packaging_cents),
+          unroundedCents: Number(existingQuote.unrounded_cents),
+          roundingCents: Number(existingQuote.rounding_cents),
+          amountCents: Number(existingQuote.charged_shipping_cents)
+        };
+      } else {
+        const { data: attachedQuote, error: attachQuoteError } = await supabaseAdmin
+          .from("checkout_shipping_quotes")
+          .update({
+            payment_session_id: data.id,
+            updated_at: new Date().toISOString()
+          })
+          .eq("id", checkoutShippingQuote.id)
+          .eq("status", "quoted")
+          .select("id")
+          .maybeSingle();
+
+        if (attachQuoteError || !attachedQuote) {
+          const recoveryResult = await getAttachedCheckoutShippingQuote(data.id);
+          if (
+            !recoveryResult.error &&
+            isCompatibleAttachedQuote({
+              quote: recoveryResult.data,
+              shippingAmount: defaultShippingAmount,
+              shippingOption: selectedShippingOption?.id
+            })
+          ) {
+            await cancelCheckoutShippingQuote(checkoutShippingQuote.id);
+            checkoutShippingQuote = recoveryResult.data;
+            shippingCharge = {
+              postageCents: Number(recoveryResult.data.postage_cents),
+              packagingCents: Number(recoveryResult.data.packaging_cents),
+              unroundedCents: Number(recoveryResult.data.unrounded_cents),
+              roundingCents: Number(recoveryResult.data.rounding_cents),
+              amountCents: Number(recoveryResult.data.charged_shipping_cents)
+            };
+          } else {
+            console.error(
+              "checkout shipping quote attachment failed:",
+              attachQuoteError?.message || "The saved quote was no longer available."
+            );
+            if (!checkoutIdempotencyKey) {
+              await stripeRequest(`/v1/payment_intents/${encodeURIComponent(data.id)}/cancel`, {
+                method: "POST"
+              });
+            }
+            await cancelCheckoutShippingQuote(checkoutShippingQuote.id);
+            return respond.json(
+              { error: "We couldn't finish preparing shipping. Please try again." },
+              { status: 500 }
+            );
+          }
+        }
       }
     }
 
@@ -627,18 +809,8 @@ export async function POST(request) {
               id: selectedShippingOption?.id,
               label: selectedShippingOption?.label,
               amountCents: shippingCharge.amountCents,
-              postageCents: shippingCharge.postageCents,
-              packagingCents: shippingCharge.packagingCents,
-              unroundedCents: shippingCharge.unroundedCents,
-              roundingCents: shippingCharge.roundingCents,
-              carrier: selectedShippingOption?.carrier,
-              service: selectedShippingOption?.service,
               transitLabel: selectedShippingOption?.transitLabel,
-              carrierTransitLabel: selectedShippingOption?.carrierTransitLabel,
-              deliveryEstimate: selectedShippingOption?.deliveryEstimate,
-              expectedArrivalDate: expectedArrivalDateKey,
-              expectedArrivalLabel,
-              quoteExpiresAt: checkoutShippingQuote?.expires_at
+              expectedArrivalLabel
             }
       },
       { status: 200 }

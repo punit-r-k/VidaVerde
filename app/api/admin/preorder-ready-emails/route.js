@@ -3,6 +3,7 @@ import { sendPreorderReadyEmails } from "@/lib/preorderReadyEmail";
 import { getRouteRateLimitConfig } from "@/lib/rateLimit";
 
 export const runtime = "nodejs";
+export const maxDuration = 60;
 
 const RATE_LIMIT = getRouteRateLimitConfig("ADMIN_PREORDER_READY_EMAILS_POST", {
   windowMs: 60_000,
@@ -24,5 +25,13 @@ export async function POST(request) {
     console.error("preorder ready email error:", result.errors || result.error);
   }
 
-  return security.respond.json(result, { status: result.ok ? 200 : 500 });
+  return security.respond.json(
+    {
+      ...result,
+      error: result.ok
+        ? null
+        : String(result.error || result.errors?.[0]?.error || "Preorder-ready email delivery failed.")
+    },
+    { status: result.ok ? 200 : 500 }
+  );
 }

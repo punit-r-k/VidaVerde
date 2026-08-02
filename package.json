@@ -3,15 +3,17 @@
   "private": true,
   "version": "0.1.0",
   "scripts": {
-    "dev": "node -e \"try{require('fs').rmSync('.next',{recursive:true,force:true})}catch(e){}\" && next dev",
-    "dev:clean": "node -e \"try{require('fs').rmSync('.next',{recursive:true,force:true})}catch(e){}\" && next dev",
-    "build": "node -e \"try{require('fs').rmSync('.next',{recursive:true,force:true})}catch(e){}\" && next build",
+    "dev": "next dev",
+    "dev:clean": "node -e \"require('fs').rmSync('.next-dev',{recursive:true,force:true})\" && next dev",
+    "build": "next build",
+    "build:clean": "node -e \"require('fs').rmSync('.next',{recursive:true,force:true})\" && next build",
     "start": "next start",
     "lint": "eslint .",
     "analytics:report": "node scripts/analytics-report.mjs",
     "backfill:test-orders": "node scripts/backfill-test-orders.mjs",
     "sync:fallback": "node scripts/sync-fallback-products.js",
     "security:repo": "node scripts/repo-security-checks.mjs",
+    "test": "node --test --test-concurrency=1 \"tests/*.test.mjs\"",
     "test:shipping": "node --test tests/shippingPricing.test.mjs tests/shippingRateRanking.test.mjs tests/shippingCharge.test.mjs tests/shippingOptionPolicy.test.mjs",
     "test:shipping-parcels": "node --test tests/shippingParcels.test.mjs",
     "test:easypost-webhook": "node --test tests/easypostWebhook.test.mjs",
@@ -19,11 +21,11 @@
     "test:security": "node --test --test-concurrency=1 tests/security/security.test.mjs"
   },
   "dependencies": {
-    "@stripe/react-stripe-js": "^5.6.1",
-    "@stripe/stripe-js": "^8.9.0",
-    "@supabase/supabase-js": "^2.90.1",
-    "next": "^16.2.3",
-    "nodemailer": "^8.0.5",
+    "@stripe/react-stripe-js": "^6.8.0",
+    "@stripe/stripe-js": "^9.12.1",
+    "@supabase/supabase-js": "^2.111.0",
+    "next": "^16.2.12",
+    "nodemailer": "^9.0.3",
     "react": "18.3.1",
     "react-dom": "18.3.1",
     "zod": "^4.3.6"
@@ -31,8 +33,11 @@
   "devDependencies": {
     "autoprefixer": "^10.4.24",
     "eslint": "^9.39.4",
-    "eslint-config-next": "^16.2.3",
-    "postcss": "^8.5.6",
-    "tailwindcss": "^3.4.17"
+    "eslint-config-next": "^16.2.12",
+    "postcss": "^8.5.25"
+  },
+  "overrides": {
+    "postcss": "$postcss",
+    "sharp": "0.35.3"
   }
 }

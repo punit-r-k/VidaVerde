@@ -1,7 +1,10 @@
+import crypto from "node:crypto";
 import { securePublicRoute } from "@/lib/apiSecurity";
+import { getConsumerShippingDetails } from "@/lib/consumerShipping";
 import { maybeSendCustomerConfirmationEmail } from "@/lib/orderConfirmationDispatch";
 import { getAssignedPickupDateKey } from "@/lib/pickupDetails";
 import { getRouteRateLimitConfig } from "@/lib/rateLimit";
+import { readBoundedJsonBody } from "@/lib/requestBody";
 import { autoPurchaseFastestShippingLabels } from "@/lib/shipmentLabelAutomation";
 import {
   getShippingOptionsForCart,
@@ -9,6 +12,13 @@ import {
   normalizeProductType
 } from "@/lib/shippingPricing";
 import { stripeConfig, stripeRequest } from "@/lib/stripe";
+import { resolveStripePaymentIntentFinancialState } from "@/lib/stripeFinancialState";
+import {
+  getStripeChargePlacedAt,
+  isPaymentIntentCheckoutFlow,
+  parseStripeMetadataItems,
+  validatePaymentIntentOrderIntegrity
+} from "@/lib/stripeOrderIntegrity";
 import { supabaseAdmin } from "@/lib/supabaseAdmin";
 import { isFinancialTestOrder } from "@/lib/testOrders";
 import { z } from "zod";
@@ -17,6 +27,7 @@ const ORDER_FINALIZE_RATE_LIMIT = getRouteRateLimitConfig("ORDER_FINALIZE_POST",
   windowMs: 60_000,
   ipMax: 30
 });
+const ORDER_FINALIZE_BODY_MAX_BYTES = 64 * 1024;
 
 const optionalStripeIdSchema = ({ pattern, message }) =>
   z.preprocess(
@@ -33,66 +44,53 @@ const payloadSchema = z
       pattern: /^pi_[A-Za-z0-9_]+$/,
       message: "That payment link looks invalid. Please try checking out again."
     }),
-    sessionId: optionalStripeIdSchema({
-      pattern: /^cs_[A-Za-z0-9_]+$/,
-      message: "That checkout session looks invalid. Please try checking out again."
-    })
+    paymentIntentClientSecret: z.preprocess(
+      (value) => String(value || "").trim(),
+      z
+        .string()
+        .max(512, "That payment confirmation looks invalid. Please try checking out again.")
+        .refine(
+          (value) => !value || /^pi_[A-Za-z0-9_]+_secret_[A-Za-z0-9_]+$/.test(value),
+          "That payment confirmation looks invalid. Please try checking out again."
+        )
+    )
   })
   .strict()
   .superRefine((payload, context) => {
-    if (payload.paymentIntentId || payload.sessionId) return;
+    if (payload.paymentIntentId && !payload.paymentIntentClientSecret) {
+      context.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ["paymentIntentClientSecret"],
+        message: "We couldn't securely confirm that payment. Please try checking out again."
+      });
+      return;
+    }
+
+    if (payload.paymentIntentId) return;
 
     context.addIssue({
       code: z.ZodIssueCode.custom,
-      path: ["sessionId"],
+      path: ["paymentIntentId"],
       message: "We couldn't find that payment. Please try checking out again."
     });
   });
 
-const parseItemsFromMetadata = (source) => {
-  const raw = source?.metadata?.items;
-  if (!raw) return [];
-
-  try {
-    const parsed = JSON.parse(raw);
-    if (!Array.isArray(parsed)) return [];
-
-    return parsed
-      .map((item) => ({
-        sku: String(item?.sku || "").trim().toUpperCase(),
-        quantity: Number.parseInt(item?.quantity, 10) || 0,
-        price_cents: Number.parseInt(item?.price_cents, 10) || 0,
-        product_type: normalizeProductType(item?.product_type, item?.sku)
-      }))
-      .filter((item) => item.sku && item.quantity > 0);
-  } catch {
-    return [];
-  }
+const secretsMatch = (left, right) => {
+  const leftBuffer = Buffer.from(String(left || ""), "utf8");
+  const rightBuffer = Buffer.from(String(right || ""), "utf8");
+  return leftBuffer.length > 0 &&
+    leftBuffer.length === rightBuffer.length &&
+    crypto.timingSafeEqual(leftBuffer, rightBuffer);
 };
 
-const parseItemsFromStripeLineItems = (lineItems) =>
-  (lineItems || [])
-    .map((item) => {
-      const quantity = Number.parseInt(item?.quantity, 10) || 0;
-      const product = item?.price?.product;
-      const sku =
-        (typeof product === "object" && String(product?.metadata?.sku || "").trim()) ||
-        String(item?.price?.metadata?.sku || "").trim();
-      const unitAmount = Number(item?.price?.unit_amount || 0);
-      const inferredUnitAmount =
-        quantity > 0 ? Math.round(Number(item?.amount_subtotal || 0) / quantity) : 0;
+const normalizeParsedItems = (items) =>
+  items.map((item) => ({
+    ...item,
+    product_type: normalizeProductType(item.product_type, item.sku)
+  }));
 
-      return {
-        sku: sku.toUpperCase(),
-        quantity,
-        price_cents: unitAmount > 0 ? unitAmount : inferredUnitAmount,
-        product_type: normalizeProductType(
-          typeof product === "object" ? product?.metadata?.product_type : "",
-          sku
-        )
-      };
-    })
-    .filter((item) => item.sku && item.quantity > 0);
+const parseItemsFromMetadata = (source) =>
+  normalizeParsedItems(parseStripeMetadataItems(source));
 
 const toText = (value, max = 500) => String(value || "").trim().slice(0, max);
 
@@ -154,23 +152,6 @@ const toCount = (value) => {
 const toNonNegativeInteger = (value) => {
   const count = Number(value);
   return Number.isFinite(count) && count > 0 ? Math.floor(count) : 0;
-};
-
-const getStripeShippingRateMetadata = async (shippingRateId) => {
-  const normalizedId = toText(shippingRateId, 255);
-  if (!normalizedId) return {};
-
-  const { ok, data, error } = await stripeRequest(
-    `/v1/shipping_rates/${encodeURIComponent(normalizedId)}`,
-    { method: "GET" }
-  );
-
-  if (!ok) {
-    console.error("stripe shipping rate fetch error:", error);
-    return {};
-  }
-
-  return data?.metadata && typeof data.metadata === "object" ? data.metadata : {};
 };
 
 const buildShippingRecordDetails = ({
@@ -326,6 +307,25 @@ const buildInventoryShiftWarning = (orderItems, expectedPreorderMap, fulfillment
   };
 };
 
+const buildInactivePaymentWarning = (status) => status === "refunded"
+  ? {
+      code: "payment_refunded",
+      customerMessage: "This payment has already been refunded, so order preparation was stopped.",
+      popupMessage: "Payment refunded. Order preparation was stopped."
+    }
+  : {
+      code: "payment_disputed",
+      customerMessage: "This payment is under review, so order preparation is paused.",
+      popupMessage: "Payment under review. Order preparation is paused."
+    };
+
+const buildRetiredFulfillmentWarning = () => ({
+  code: "fulfillment_review_required",
+  customerMessage:
+    "Your payment status was restored. We need to review the order before preparation can resume.",
+  popupMessage: "Payment restored. Order preparation needs review."
+});
+
 const recordPaidOrder = async ({
   paymentSessionId,
   paymentReference,
@@ -339,7 +339,8 @@ const recordPaidOrder = async ({
   customer,
   items,
   placedAt,
-  isTestOrder = false
+  isTestOrder = false,
+  stripeState
 }) => {
   const pickupDate = getAssignedPickupDateKey({
     fulfillment,
@@ -352,7 +353,7 @@ const recordPaidOrder = async ({
     pickup_date: pickupDate
   };
 
-  const { data: orderId, error: recordError } = await supabaseAdmin.rpc("record_paid_order", {
+  const { data, error: recordError } = await supabaseAdmin.rpc("record_stripe_order_state", {
     p_session_id: paymentSessionId,
     p_payment_reference: paymentReference,
     p_payment_provider: "stripe",
@@ -363,21 +364,19 @@ const recordPaidOrder = async ({
     p_amount_shipping: shipping,
     p_amount_total: total,
     p_customer: customerPayload,
-    p_items: items
+    p_items: items,
+    p_is_test_order: isTestOrder === true,
+    p_target_status: stripeState.status,
+    p_state_effective_at: stripeState.effectiveAt,
+    p_state_observed_at: stripeState.observedAt,
+    p_retire_work: stripeState.retireWork === true
   });
 
-  let testOrderError = null;
-  if (!recordError && isTestOrder && typeof orderId === "string") {
-    const { error } = await supabaseAdmin
-      .from("orders")
-      .update({ is_test_order: true })
-      .eq("id", orderId);
-    testOrderError = error;
-  }
-
   return {
-    orderId: typeof orderId === "string" ? orderId : null,
-    error: recordError || testOrderError
+    orderId: typeof data?.order_id === "string" ? data.order_id : null,
+    status: typeof data?.status === "string" ? data.status : "",
+    fulfillmentRetired: data?.fulfillment_retired === true,
+    error: recordError
   };
 };
 
@@ -470,12 +469,11 @@ const finalizePaymentIntent = async (intent) => {
   }
 
   const metadata = intent?.metadata || {};
-  if (metadata.checkout_flow === "checkout_session") {
+  if (!isPaymentIntentCheckoutFlow(intent)) {
     return {
-      ok: true,
-      recorded: false,
-      paymentStatus,
-      status: 202
+      ok: false,
+      error: "That payment was not created by this checkout. Please start checkout again.",
+      status: 400
     };
   }
 
@@ -502,10 +500,7 @@ const finalizePaymentIntent = async (intent) => {
 
   const customer = {
     name: toText(metadata.customer_name || shippingDetails?.name || billing?.name, 120),
-    email: toText(
-      metadata.customer_email || intent?.receipt_email || billing?.email,
-      254
-    ),
+    email: toText(metadata.customer_email || billing?.email, 254),
     phone: toText(metadata.customer_phone || shippingDetails?.phone || billing?.phone, 64),
     address1: toText(metadata.address1 || shippingAddress?.line1 || billingAddress?.line1, 120),
     address2: toText(metadata.address2 || shippingAddress?.line2 || billingAddress?.line2, 120),
@@ -518,23 +513,58 @@ const finalizePaymentIntent = async (intent) => {
     note: toText(metadata.note, 500)
   };
 
-  const total = toNonNegativeInteger(intent?.amount_received || intent?.amount || 0);
-  const shipping = toNonNegativeInteger(metadata.amount_shipping);
-  const subtotalFromMetadata = toNonNegativeInteger(metadata.amount_subtotal);
-  const subtotal =
-    subtotalFromMetadata > 0
-      ? subtotalFromMetadata
-      : Math.max(total - shipping, 0);
-  const tax = 0;
+  const integrity = validatePaymentIntentOrderIntegrity({
+    intent,
+    charge: latestCharge,
+    items
+  });
+  if (!integrity.ok) {
+    console.error("Stripe PaymentIntent accounting check failed:", {
+      paymentIntentId: toText(intent?.id, 255),
+      code: integrity.code
+    });
+    return {
+      ok: false,
+      error: "We couldn't verify the paid order details. Please contact us for help.",
+      status: 400
+    };
+  }
+
+  const { currency, subtotal, shipping, tax, total } = integrity;
   const paymentSessionId = toText(intent?.id, 255);
   const paymentReference = toText(
     typeof intent?.latest_charge === "string" ? intent.latest_charge : latestCharge?.id,
     255
   );
-  const placedAt =
-    typeof intent?.created === "number"
-      ? new Date(intent.created * 1000).toISOString()
-      : "";
+  const placedAt = getStripeChargePlacedAt(latestCharge);
+  if (!placedAt) {
+    console.error("Stripe PaymentIntent latest charge is missing a creation time:", {
+      paymentIntentId: paymentSessionId
+    });
+    return {
+      ok: false,
+      error: "We couldn't verify when that payment completed. Please try again shortly.",
+      status: 502
+    };
+  }
+
+  const stripeState = await resolveStripePaymentIntentFinancialState({
+    intent,
+    charge: latestCharge,
+    paidEffectiveAt: placedAt
+  });
+  if (!stripeState.ok) {
+    console.error("Stripe PaymentIntent financial-state check failed:", {
+      paymentIntentId: paymentSessionId,
+      code: stripeState.code
+    });
+    return {
+      ok: false,
+      error: "We couldn't verify the current payment state. Please try again shortly.",
+      status: 502
+    };
+  }
+
   const shippingRecordDetails = buildShippingRecordDetails({
     fulfillment: toFulfillment(metadata.fulfillment),
     metadata,
@@ -548,7 +578,7 @@ const finalizePaymentIntent = async (intent) => {
     paymentSessionId,
     paymentReference,
     fulfillment: toFulfillment(metadata.fulfillment),
-    currency: String(intent?.currency || "usd").toUpperCase(),
+    currency,
     subtotal,
     tax,
     shipping,
@@ -557,7 +587,8 @@ const finalizePaymentIntent = async (intent) => {
     customer,
     items,
     placedAt,
-    isTestOrder: isFinancialTestOrder({ charge: latestCharge, customer })
+    isTestOrder: isFinancialTestOrder({ charge: latestCharge, source: intent }),
+    stripeState
   });
 
   if (recordResult.error) {
@@ -566,6 +597,24 @@ const finalizePaymentIntent = async (intent) => {
       ok: false,
       error: "We couldn't save your order after payment.",
       status: 500
+    };
+  }
+
+  if (recordResult.status !== "paid" || recordResult.fulfillmentRetired) {
+    const finalStatus = recordResult.status || stripeState.status;
+    return {
+      ok: true,
+      recorded: true,
+      paymentStatus,
+      orderId: recordResult.orderId,
+      fulfillment: toFulfillment(metadata.fulfillment),
+      shippingOptionLabel: "",
+      shippingEstimate: "",
+      automationWarnings: [
+        recordResult.fulfillmentRetired && finalStatus === "paid"
+          ? buildRetiredFulfillmentWarning()
+          : buildInactivePaymentWarning(finalStatus)
+      ]
     };
   }
 
@@ -580,7 +629,7 @@ const finalizePaymentIntent = async (intent) => {
   const sideEffectsResult = await runOrderSideEffects({
     orderId: recordResult.orderId,
     fulfillment: toFulfillment(metadata.fulfillment),
-    currency: String(intent?.currency || "usd").toUpperCase(),
+    currency,
     subtotal,
     tax,
     shipping,
@@ -600,190 +649,7 @@ const finalizePaymentIntent = async (intent) => {
     return sideEffectsResult;
   }
 
-  return {
-    ok: true,
-    recorded: true,
-    paymentStatus,
-    orderId: recordResult.orderId,
-    fulfillment: toFulfillment(metadata.fulfillment),
-    customerEmail: customer.email,
-    shippingOptionLabel: shippingRecordDetails.shipping_option_label,
-    shippingEstimate: shippingRecordDetails.shipping_estimate,
-    automationWarnings: [
-      ...(inventoryShiftWarning ? [inventoryShiftWarning] : []),
-      ...(Array.isArray(sideEffectsResult?.automationWarnings)
-        ? sideEffectsResult.automationWarnings
-        : [])
-    ]
-  };
-};
-
-const finalizeCheckoutSession = async (session) => {
-  if (!session || session.object !== "checkout.session") {
-    return {
-      ok: false,
-      error: "That checkout session looks invalid. Please try checking out again.",
-      status: 400
-    };
-  }
-
-  const paymentStatus = toText(session?.payment_status, 64).toLowerCase();
-  if (paymentStatus !== "paid") {
-    return {
-      ok: true,
-      recorded: false,
-      paymentStatus,
-      status: 202
-    };
-  }
-
-  let items = parseItemsFromMetadata(session);
-  if (items.length === 0) {
-    const { ok, data, error } = await stripeRequest(
-      `/v1/checkout/sessions/${session.id}/line_items?limit=100&expand[]=data.price.product`,
-      { method: "GET" }
-    );
-
-    if (!ok) {
-      console.error("stripe line items fetch error:", error);
-      return {
-        ok: false,
-        error: "We couldn't read the order items from Stripe.",
-        status: 500
-      };
-    }
-
-    items = parseItemsFromStripeLineItems(data?.data || []);
-  }
-
-  if (!Array.isArray(items) || items.length === 0) {
-    console.error("Missing line items for Stripe session:", session?.id);
-    return { ok: false, error: "Missing line items.", status: 400 };
-  }
-
-  const metadata = session?.metadata || {};
-  const customerDetails = session?.customer_details || {};
-  const shippingDetails = session?.shipping_details || {};
-  const customerAddress = shippingDetails?.address || customerDetails?.address || {};
-  const paymentIntent =
-    typeof session?.payment_intent === "object" ? session.payment_intent : {};
-  const latestCharge =
-    typeof paymentIntent?.latest_charge === "object"
-      ? paymentIntent.latest_charge
-      : {};
-  const receiptNumber = getChargeReceiptNumber(latestCharge);
-  const paymentMethodLabel =
-    getChargePaymentMethodLabel(latestCharge) || getFallbackPaymentMethodLabel(session);
-
-  const customer = {
-    name: toText(shippingDetails?.name || metadata.customer_name || customerDetails?.name, 120),
-    email: toText(metadata.customer_email || customerDetails?.email, 254),
-    phone: toText(shippingDetails?.phone || metadata.customer_phone || customerDetails?.phone, 64),
-    address1: toText(customerAddress?.line1 || metadata.address1, 120),
-    address2: toText(customerAddress?.line2 || metadata.address2, 120),
-    city: toText(customerAddress?.city || metadata.city, 120),
-    state: toText(customerAddress?.state || metadata.state, 64),
-    postal_code: toText(customerAddress?.postal_code || metadata.postal_code, 32),
-    note: toText(metadata.note, 500)
-  };
-
-  const totalFromSession = toNonNegativeInteger(session?.amount_total || 0);
-  const totalFromMetadata = toNonNegativeInteger(metadata.amount_total);
-  const total = totalFromSession > 0 ? totalFromSession : totalFromMetadata;
-  const hasStripeShippingCost =
-    Boolean(session?.shipping_cost) ||
-    session?.total_details?.amount_shipping !== undefined;
-  const shippingFromSession = toNonNegativeInteger(
-    session?.shipping_cost?.amount_total ?? session?.total_details?.amount_shipping ?? 0
-  );
-  const shippingFromMetadata = toNonNegativeInteger(metadata.amount_shipping);
-  const shipping = hasStripeShippingCost ? shippingFromSession : shippingFromMetadata;
-  const subtotalFromMetadata = toNonNegativeInteger(metadata.amount_subtotal);
-  const subtotal =
-    subtotalFromMetadata > 0 && !hasStripeShippingCost
-      ? subtotalFromMetadata
-      : toNonNegativeInteger(session?.amount_subtotal || 0);
-  const tax = toNonNegativeInteger(session?.total_details?.amount_tax || 0);
-  const shippingRateId =
-    typeof session?.shipping_cost?.shipping_rate === "string"
-      ? session.shipping_cost.shipping_rate
-      : "";
-  const shippingRateMetadata = await getStripeShippingRateMetadata(shippingRateId);
-  const shippingRecordDetails = buildShippingRecordDetails({
-    fulfillment: toFulfillment(metadata.fulfillment),
-    metadata,
-    items,
-    subtotal,
-    shippingAmount: shipping,
-    shippingRateMetadata
-  });
-  const paymentSessionId = toText(session?.id, 255);
-  const paymentReference = toText(
-    typeof session?.payment_intent === "string"
-      ? session.payment_intent
-      : paymentIntent?.id,
-    255
-  );
-  const placedAt =
-    typeof session?.created === "number"
-      ? new Date(session.created * 1000).toISOString()
-      : "";
-
-  const recordResult = await recordPaidOrder({
-    paymentSessionId,
-    paymentReference,
-    fulfillment: toFulfillment(metadata.fulfillment),
-    currency: String(session?.currency || "usd").toUpperCase(),
-    subtotal,
-    tax,
-    shipping,
-    total,
-    shippingRecordDetails,
-    customer,
-    items,
-    placedAt,
-    isTestOrder: isFinancialTestOrder({ charge: latestCharge, customer })
-  });
-
-  if (recordResult.error) {
-    console.error("record_paid_order error:", recordResult.error);
-    return {
-      ok: false,
-      error: "We couldn't save your order after payment.",
-      status: 500
-    };
-  }
-
-  const expectedPreorderMap = parseExpectedPreorderMap(session);
-  const recordedOrderItems = await getRecordedOrderItems(recordResult.orderId);
-  const inventoryShiftWarning = buildInventoryShiftWarning(
-    recordedOrderItems,
-    expectedPreorderMap,
-    metadata.fulfillment
-  );
-
-  const sideEffectsResult = await runOrderSideEffects({
-    orderId: recordResult.orderId,
-    fulfillment: toFulfillment(metadata.fulfillment),
-    currency: String(session?.currency || "usd").toUpperCase(),
-    subtotal,
-    tax,
-    shipping,
-    total,
-    placedAt,
-    receiptNumber,
-    paymentMethodLabel,
-    customer: {
-      ...customer,
-      ...shippingRecordDetails
-    },
-    items,
-    strictConfirmationEmailAutomation: false
-  });
-
-  if (!sideEffectsResult.ok) {
-    return sideEffectsResult;
-  }
+  const consumerShipping = getConsumerShippingDetails(shippingRecordDetails);
 
   return {
     ok: true,
@@ -791,9 +657,10 @@ const finalizeCheckoutSession = async (session) => {
     paymentStatus,
     orderId: recordResult.orderId,
     fulfillment: toFulfillment(metadata.fulfillment),
-    customerEmail: customer.email,
-    shippingOptionLabel: shippingRecordDetails.shipping_option_label,
-    shippingEstimate: shippingRecordDetails.shipping_estimate,
+    shippingOptionLabel:
+      toFulfillment(metadata.fulfillment) === "ship" ? consumerShipping.label : "",
+    shippingEstimate:
+      toFulfillment(metadata.fulfillment) === "ship" ? consumerShipping.transitLabel : "",
     automationWarnings: [
       ...(inventoryShiftWarning ? [inventoryShiftWarning] : []),
       ...(Array.isArray(sideEffectsResult?.automationWarnings)
@@ -831,15 +698,22 @@ export async function POST(request) {
     );
   }
 
-  let payload;
-  try {
-    payload = await request.json();
-  } catch {
+  const bodyResult = await readBoundedJsonBody(request, {
+    maxBytes: ORDER_FINALIZE_BODY_MAX_BYTES
+  });
+  if (!bodyResult.ok) {
     return respond.json(
-      { error: "We couldn't read that payment confirmation. Please try again." },
-      { status: 400 }
+      {
+        error:
+          bodyResult.status === 413
+            ? "That payment confirmation is too large. Please try checking out again."
+            : "We couldn't read that payment confirmation. Please try again."
+      },
+      { status: bodyResult.status }
     );
   }
+
+  const payload = bodyResult.data;
 
   const parsedPayload = payloadSchema.safeParse(payload);
   if (!parsedPayload.success) {
@@ -854,30 +728,29 @@ export async function POST(request) {
   }
 
   const paymentIntentId = parsedPayload.data.paymentIntentId;
-  const sessionId = parsedPayload.data.sessionId;
-  const stripePath = sessionId
-    ? `/v1/checkout/sessions/${encodeURIComponent(sessionId)}` +
-      "?expand[]=payment_intent.latest_charge"
-    : `/v1/payment_intents/${encodeURIComponent(paymentIntentId)}` +
-      "?expand[]=latest_charge&expand[]=charges.data";
+  const paymentIntentClientSecret = parsedPayload.data.paymentIntentClientSecret;
+  const stripePath = `/v1/payment_intents/${encodeURIComponent(paymentIntentId)}` +
+    "?expand[]=latest_charge&expand[]=charges.data";
   const { ok, data, error } = await stripeRequest(stripePath, {
     method: "GET"
   });
 
   if (!ok) {
-    console.error(
-      sessionId ? "stripe checkout_session verify error:" : "stripe payment_intent verify error:",
-      error
-    );
+    console.error("stripe payment_intent verify error:", error);
     return respond.json(
       { error: "We couldn't confirm the payment yet. Please wait a moment and try again." },
       { status: 502 }
     );
   }
 
-  const result = sessionId
-    ? await finalizeCheckoutSession(data)
-    : await finalizePaymentIntent(data);
+  if (!secretsMatch(data?.client_secret, paymentIntentClientSecret)) {
+    return respond.json(
+      { error: "We couldn't securely confirm that payment. Please try checking out again." },
+      { status: 403 }
+    );
+  }
+
+  const result = await finalizePaymentIntent(data);
   if (!result.ok) {
     return respond.json(
       { error: result.error || "We couldn't finish confirming your order. Please try again." },
@@ -901,7 +774,6 @@ export async function POST(request) {
     recorded: true,
     orderId: result.orderId || "",
     fulfillment: result.fulfillment || "",
-    customerEmail: result.customerEmail || "",
     shippingOptionLabel: result.shippingOptionLabel || "",
     shippingEstimate: result.shippingEstimate || "",
     automationWarnings: Array.isArray(result.automationWarnings)
