@@ -3,6 +3,7 @@ import crypto from "node:crypto";
 import test from "node:test";
 import {
   createAndVerifyEasyPostAddress,
+  createEasyPostShipment,
   easyPostRequest,
   getFromAddress,
   isUsdEasyPostRate,
@@ -167,6 +168,55 @@ test("destination addresses are strictly verified before rating", async (context
   assert.deepEqual(requestedBody, {
     address: { street1: "10 Main Street" }
   });
+});
+
+test("shipment creation sends a verified address as a nested EasyPost reference", async (context) => {
+  const environmentKeys = [
+    "EASYPOST_API_KEY",
+    "EASYPOST_FROM_STREET1",
+    "EASYPOST_FROM_CITY",
+    "EASYPOST_FROM_STATE",
+    "EASYPOST_FROM_ZIP",
+    "EASYPOST_FROM_PHONE",
+    "EASYPOST_FROM_EMAIL"
+  ];
+  const previousEnvironment = new Map(
+    environmentKeys.map((key) => [key, process.env[key]])
+  );
+  const previousFetch = globalThis.fetch;
+  Object.assign(process.env, {
+    EASYPOST_API_KEY: "test-api-key",
+    EASYPOST_FROM_STREET1: "7002 Sugar Oaks Ct",
+    EASYPOST_FROM_CITY: "Richmond",
+    EASYPOST_FROM_STATE: "TX",
+    EASYPOST_FROM_ZIP: "77407",
+    EASYPOST_FROM_PHONE: "+12815550100",
+    EASYPOST_FROM_EMAIL: "shipping@example.com"
+  });
+  context.after(() => {
+    for (const [key, value] of previousEnvironment) {
+      if (value === undefined) delete process.env[key];
+      else process.env[key] = value;
+    }
+    globalThis.fetch = previousFetch;
+  });
+
+  let requestedBody = null;
+  globalThis.fetch = async (_url, options) => {
+    requestedBody = JSON.parse(options.body);
+    return {
+      ok: true,
+      status: 200,
+      json: async () => ({ id: "shp_test", rates: [] })
+    };
+  };
+
+  await createEasyPostShipment({
+    toAddress: "adr_verified",
+    parcel: { length: 8, width: 6, height: 4, weight: 32 }
+  });
+
+  assert.deepEqual(requestedBody.shipment.to_address, { id: "adr_verified" });
 });
 
 test("expired quotes require evidence of an already purchased parcel", () => {
