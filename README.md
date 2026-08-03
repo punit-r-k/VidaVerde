@@ -18,6 +18,19 @@ npm install
 npm run dev
 ```
 
+### Local tests versus production credentials
+
+All payment and shipping tests run locally. Put Stripe test keys, the EasyPost
+test API key, and the secrets produced by local webhook forwarding in
+`.env.local`. Never copy `.env.local` into Vercel.
+
+Configure Vercel Production with separate live values using the same variable
+names: live Stripe secret and publishable keys, the live Stripe endpoint secret,
+the EasyPost production API key, and the secret assigned to the production
+EasyPost webhook. Production deployments fail closed if an obvious Stripe or
+EasyPost test API key is configured. Webhook secrets do not identify their mode,
+so each secret must be copied from its matching local or production endpoint.
+
 ## Inventory Sync (Google Sheets)
 
 Inventory is stored in Supabase and synced to the `Inventory` sheet via Apps Script.

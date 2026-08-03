@@ -27,6 +27,11 @@ const getSecurityEnvironmentBucket = () => {
   return "DEVELOPMENT";
 };
 
+const isHostedProduction = () =>
+  String(process.env.VERCEL_ENV || process.env.APP_ENV || "")
+    .trim()
+    .toLowerCase() === "production";
+
 const assertSafeProductionCorsConfig = () => {
   if (getSecurityEnvironmentBucket() !== "PRODUCTION") {
     return;
@@ -80,6 +85,25 @@ const assertSafeProductionCorsConfig = () => {
     throw new Error(
       `Incomplete production shipping configuration: set ${missingShippingVariables.join(", ")}.`
     );
+  }
+
+  if (isHostedProduction()) {
+    const stripeSecretKey = String(process.env.STRIPE_SECRET_KEY || "").trim();
+    const stripePublishableKey = String(
+      process.env.NEXT_PUBLIC_STRIPE_PUBLISHABLE_KEY || ""
+    ).trim();
+    const easyPostApiKey = String(process.env.EASYPOST_API_KEY || "").trim();
+
+    if (stripeSecretKey.startsWith("sk_test_") || stripePublishableKey.startsWith("pk_test_")) {
+      throw new Error(
+        "Unsafe production payments configuration: Stripe test API keys cannot be deployed to production."
+      );
+    }
+    if (easyPostApiKey.startsWith("EZTK")) {
+      throw new Error(
+        "Unsafe production shipping configuration: an EasyPost test API key cannot be deployed to production."
+      );
+    }
   }
 };
 

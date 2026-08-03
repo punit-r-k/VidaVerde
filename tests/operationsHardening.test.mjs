@@ -35,6 +35,11 @@ test("Apps Script neutralizes spreadsheet formulas in every dynamic row set", ()
   );
 });
 
+test("test shipment rows are clearly marked as ineligible for labels", () => {
+  assert.match(appsScript, /Not applicable — test order/u);
+  assert.match(appsScript, /No label — cancelled/u);
+});
+
 test("admin JWT authentication requires fresh integer claims and a strong secret", () => {
   assert.match(adminAuth, /Buffer\.byteLength\(config\.secret, "utf8"\) < 32/u);
   assert.match(adminAuth, /Number\.isSafeInteger\(issuedAt\)/u);

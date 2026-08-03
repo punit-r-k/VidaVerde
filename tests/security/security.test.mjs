@@ -227,6 +227,23 @@ test("security regression suite", { timeout: 300_000 }, async (t) => {
   assert.notEqual(weakAdminSecretBuild.code, 0);
   assert.match(weakAdminSecretBuild.output, /ADMIN_JWT_SECRET must contain at least 32/i);
 
+  const testProviderProductionBuild = await runNpmScript("build", {
+    VERCEL_ENV: "production",
+    EASYPOST_API_KEY: "EZTK_local_test_key",
+    EASYPOST_WEBHOOK_SECRET: "local-test-webhook-secret",
+    EASYPOST_FROM_STREET1: "7002 Sugar Oaks Ct",
+    EASYPOST_FROM_CITY: "Richmond",
+    EASYPOST_FROM_STATE: "TX",
+    EASYPOST_FROM_ZIP: "77407",
+    EASYPOST_FROM_PHONE: "+12815550100",
+    EASYPOST_FROM_EMAIL: "shipping@example.com"
+  });
+  assert.notEqual(testProviderProductionBuild.code, 0);
+  assert.match(
+    testProviderProductionBuild.output,
+    /test API keys cannot be deployed to production|test API key cannot be deployed to production/i
+  );
+
   const safeBuild = await runNpmScript("build");
   assert.equal(safeBuild.code, 0, safeBuild.output);
 

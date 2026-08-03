@@ -1315,11 +1315,18 @@ function syncShipments() {
 
   sheet
     .getRange(CONFIG.SHIPMENTS.HEADER_ROW, 1, 1, headerValues[0].length)
-    .setFontWeight("bold");
+    .setFontWeight("bold")
+    .setWrap(true)
+    .setVerticalAlignment("middle");
   sheet.setFrozenRows(1);
   sheet.autoResizeColumns(1, headerValues[0].length);
   sheet.getRange(CONFIG.SHIPMENTS.HEADER_ROW, 3, Math.max(sheet.getLastRow(), 1), 1).setWrap(true);
   sheet.setColumnWidth(3, 190);
+  sheet.setColumnWidth(23, 70);
+  sheet.setColumnWidth(24, 105);
+  sheet.setColumnWidth(25, 120);
+  sheet.setColumnWidth(26, 120);
+  sheet.setRowHeight(CONFIG.SHIPMENTS.HEADER_ROW, 44);
   sheet.showColumns(1, headerValues[0].length);
 }
 
@@ -1653,8 +1660,11 @@ function formatShipmentLabelText_(shipment) {
   if (links.length > 1) {
     return links.map((unused, index) => `Open label ${index + 1}`).join(" | ");
   }
+  const labelError = String(shipment?.label_purchase_error || "");
+  if (/financial test order/i.test(labelError)) return "Not applicable — test order";
+  if (shipment?.status === "cancelled") return "No label — cancelled";
   if (shipment?.status === "purchasing_label") return "Purchasing label...";
-  return shipment?.label_purchase_error ? "Automatic retry pending" : "Label pending";
+  return labelError ? "Automatic retry pending" : "Label pending";
 }
 
 function buildShipmentLabelRichText_(shipment) {

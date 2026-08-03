@@ -41,6 +41,13 @@ const stripeFinancialStateMigration = fs.readFileSync(
   ),
   "utf8"
 );
+const testShipmentReportingMigration = fs.readFileSync(
+  new URL(
+    "../supabase/migrations/20260802103000_test_shipment_reporting.sql",
+    import.meta.url
+  ),
+  "utf8"
+);
 const schema = fs.readFileSync(new URL("../supabase/schema.sql", import.meta.url), "utf8");
 
 test("preorder shipping safety repairs a missing automatic-label column dependency", () => {
@@ -106,6 +113,23 @@ test("financial test orders cannot create or reactivate unpurchased postage", ()
   assert.match(
     nonpaidBranch,
     /delete from shipments s[\s\S]*s\.status = 'pending_label'[\s\S]*s\.label_purchased_at is null[\s\S]*s\.tracking_number/u
+  );
+});
+
+test("financial test orders remain visible as cancelled shipment reporting rows", () => {
+  const normalOrderLoop = testShipmentReportingMigration.indexOf("for v_order_id in");
+  const testReportingInsert = testShipmentReportingMigration.slice(0, normalOrderLoop);
+  assert.match(testReportingInsert, /and coalesce\(o\.is_test_order, false\)/u);
+  assert.match(testReportingInsert, /o\.payment_reference,[\s\S]*'cancelled'/u);
+  assert.match(testReportingInsert, /visible for reporting only/u);
+  assert.match(testReportingInsert, /label purchase and tracking are disabled/u);
+  assert.match(
+    testShipmentReportingMigration,
+    /not coalesce\(o\.is_test_order, false\)[\s\S]*sync_shipment_for_order/u
+  );
+  assert.doesNotMatch(
+    testReportingInsert,
+    /'pending_label'/u
   );
 });
 
