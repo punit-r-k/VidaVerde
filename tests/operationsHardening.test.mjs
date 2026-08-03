@@ -119,6 +119,21 @@ test("checkout retries retain idempotency after ambiguous failures", () => {
   assert.match(source, /checkout_already_processed/u);
 });
 
+test("inventory cart changes invalidate stale payment and shipping quotes", () => {
+  const inventoryStart = storefront.indexOf("const applyInventory");
+  const inventoryEnd = storefront.indexOf("// Poll inventory", inventoryStart);
+  const inventorySource = storefront.slice(inventoryStart, inventoryEnd);
+  const quoteStart = storefront.indexOf("const shippingQuoteRequestFingerprint");
+  const quoteEnd = storefront.indexOf("const hasActiveShippingPreview", quoteStart);
+  const quoteSource = storefront.slice(quoteStart, quoteEnd);
+
+  assert.match(inventorySource, /inventoryChanges\.length > 0[\s\S]*resetPaymentState\(\)/u);
+  assert.match(quoteSource, /inventoryAllocation/u);
+  assert.match(quoteSource, /inStockUnits: item\.inStockUnits/u);
+  assert.match(quoteSource, /preorderUnits: item\.preorderUnits/u);
+  assert.match(storefront, /body: JSON\.stringify\(shippingQuoteRequestPayload\)/u);
+});
+
 test("shipment refresh reports even when synchronization returns a warning", () => {
   const functionStart = appsScript.indexOf("function syncShipments()");
   const source = appsScript.slice(functionStart, appsScript.indexOf("function ", functionStart + 25));

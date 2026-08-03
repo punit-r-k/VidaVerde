@@ -844,15 +844,12 @@ export default function Storefront({ products, inventory = null, pickupDetails =
         setPreorderAcknowledged(false);
         setPreorderTouched(false);
         setShowCartChangeModal(true);
-
-        if (checkoutStepRef.current === "payment") {
-          setCheckoutStep("details");
-        }
+        resetPaymentState();
       }
     }
 
     setLiveInventory(nextInventory);
-  }, [products]);
+  }, [products, resetPaymentState]);
 
   // Poll inventory after initial load. The server-rendered snapshot keeps the
   // first view current without holding page-load network idle open.
@@ -1339,8 +1336,15 @@ export default function Storefront({ products, inventory = null, pickupDetails =
     ]
   );
   const shippingQuoteRequestFingerprint = useMemo(
-    () => JSON.stringify(shippingQuoteRequestPayload),
-    [shippingQuoteRequestPayload]
+    () => JSON.stringify({
+      request: shippingQuoteRequestPayload,
+      inventoryAllocation: cartItems.map((item) => ({
+        sku: item.sku,
+        inStockUnits: item.inStockUnits,
+        preorderUnits: item.preorderUnits
+      }))
+    }),
+    [cartItems, shippingQuoteRequestPayload]
   );
   const hasActiveShippingPreview =
     fulfillment === "ship" &&
@@ -1443,14 +1447,13 @@ export default function Storefront({ products, inventory = null, pickupDetails =
     setShippingPreview(null);
     setShippingPreviewStatus("loading");
     setShippingPreviewError("");
-    setShippingOptionId(DEFAULT_SHIPPING_OPTION_ID);
 
     const timeoutId = window.setTimeout(async () => {
       try {
         const response = await fetch("/api/shipping/quote", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
-          body: shippingQuoteRequestFingerprint,
+          body: JSON.stringify(shippingQuoteRequestPayload),
           signal: controller.signal
         });
         const responseContentType = response.headers.get("content-type") || "";
@@ -1508,7 +1511,8 @@ export default function Storefront({ products, inventory = null, pickupDetails =
     };
   }, [
     shippingPreviewReady,
-    shippingQuoteRequestFingerprint
+    shippingQuoteRequestFingerprint,
+    shippingQuoteRequestPayload
   ]);
 
   const pickupAcknowledgementError = fulfillment === "market" &&
