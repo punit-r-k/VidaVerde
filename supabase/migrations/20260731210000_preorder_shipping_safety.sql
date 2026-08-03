@@ -1,5 +1,13 @@
 begin;
 
+-- Keep this safety migration deployable when production migration history is
+-- incomplete. These columns were first introduced by
+-- 20260731160000_automatic_fastest_shipping_labels.sql, but older databases
+-- may not have recorded or applied that migration yet.
+alter table shipments
+  add column if not exists label_purchase_started_at timestamptz,
+  add column if not exists label_purchase_error text;
+
 alter table orders drop constraint if exists orders_status_check;
 alter table orders add constraint orders_status_check
   check (status in ('paid', 'pending', 'cancelled', 'refunded', 'disputed', 'fulfilled')) not valid;

@@ -62,6 +62,25 @@ const assertSafeProductionCorsConfig = () => {
       "Unsafe production admin authentication: ADMIN_JWT_SECRET must contain at least 32 UTF-8 bytes from a cryptographically random source."
     );
   }
+
+  const requiredShippingVariables = [
+    "EASYPOST_API_KEY",
+    "EASYPOST_WEBHOOK_SECRET",
+    "EASYPOST_FROM_STREET1",
+    "EASYPOST_FROM_CITY",
+    "EASYPOST_FROM_STATE",
+    "EASYPOST_FROM_ZIP",
+    "EASYPOST_FROM_PHONE",
+    "EASYPOST_FROM_EMAIL"
+  ];
+  const missingShippingVariables = requiredShippingVariables.filter(
+    (name) => !String(process.env[name] || "").trim()
+  );
+  if (missingShippingVariables.length > 0) {
+    throw new Error(
+      `Incomplete production shipping configuration: set ${missingShippingVariables.join(", ")}.`
+    );
+  }
 };
 
 assertSafeProductionCorsConfig();

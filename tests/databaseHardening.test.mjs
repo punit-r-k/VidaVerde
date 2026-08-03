@@ -43,6 +43,13 @@ const stripeFinancialStateMigration = fs.readFileSync(
 );
 const schema = fs.readFileSync(new URL("../supabase/schema.sql", import.meta.url), "utf8");
 
+test("preorder shipping safety repairs a missing automatic-label column dependency", () => {
+  assert.match(
+    shipmentMigration,
+    /alter table shipments[\s\S]*add column if not exists label_purchase_started_at timestamptz,[\s\S]*add column if not exists label_purchase_error text/u
+  );
+});
+
 test("order and item integrity constraints are validated in the shipping safety migration", () => {
   const constraints = [
     "orders_status_check",

@@ -84,6 +84,13 @@ test("shipping tiers share one bounded EasyPost rating context", () => {
   );
   assert.match(shippingQuotes, /estimatedShipDate/u);
   assert.match(shippingQuotes, /expectedArrivalDate/u);
+  assert.match(
+    shippingQuoteRoute,
+    /Shipping rates are temporarily unavailable\. Please try again in a few minutes\./u
+  );
+  assert.match(shippingQuoteRoute, /status: noEligibleRates \? 422 : 503/u);
+  assert.match(nextConfig, /Incomplete production shipping configuration/u);
+  assert.match(nextConfig, /EASYPOST_FROM_STREET1/u);
 });
 
 test("checkout retries retain idempotency after ambiguous failures", () => {

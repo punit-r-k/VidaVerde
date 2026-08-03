@@ -184,9 +184,9 @@ export async function POST(request) {
       {
         error: noEligibleRates
           ? "We couldn't find eligible Shipping or Expedited rates for that address. Please verify it and try again."
-          : "We couldn't update shipping for that address. Please verify it and try again."
+          : "Shipping rates are temporarily unavailable. Please try again in a few minutes."
       },
-      { status: noEligibleRates ? 422 : 502 }
+      { status: noEligibleRates ? 422 : 503 }
     );
   }
 
