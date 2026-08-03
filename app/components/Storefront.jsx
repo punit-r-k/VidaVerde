@@ -108,16 +108,24 @@ const CART_STORAGE_KEY = "vidaverde-cart-v1";
 const EMAIL_POPUP_DISMISS_KEY = "vidaverde-email-popup-dismissed-v1";
 const PICKUP_PREORDER_TIMING_NOTICE =
   `Pre-orders are estimates only. Fermentation timelines vary, and preorder items may take up to 15 days before pickup is available. The next ${MARKET_NAME} date is not guaranteed for preorder items.`;
+const MIXED_PICKUP_PREORDER_TIMING_NOTICE =
+  `This order includes in-stock and preorder items. Your in-stock items can be picked up on the scheduled market date; preorder items may need to be collected on a later market day. We will email you when the preorder items are ready. ${PICKUP_PREORDER_TIMING_NOTICE}`;
 const SHIPPING_PREORDER_TIMING_NOTICE =
   "Pre-orders are estimates only. Fermentation timelines vary, and preorder items may take up to 15 days before they are ready to ship. The selected shipping timeline starts after the product is ready, not from the order date.";
+const MIXED_SHIPPING_PREORDER_TIMING_NOTICE =
+  "This order includes in-stock and preorder items. Your in-stock items will be held, and the entire order will ship together after all preorder items are ready. This avoids a second shipping charge. Preorder preparation may take up to 15 days before shipping begins.";
 const CART_CHANGE_NOTICE_SUMMARY =
   "Stock changed while you were shopping. Review the updated cart before continuing.";
 const CART_CHANGE_ACKNOWLEDGEMENT_BUTTON_LABEL =
   "Acknowledge And Review Updated Cart";
 const PICKUP_PREORDER_ACKNOWLEDGEMENT_LABEL =
   "I understand preorder timing is estimated and not guaranteed for the next market.";
+const MIXED_PICKUP_PREORDER_ACKNOWLEDGEMENT_LABEL =
+  "I understand the in-stock items can be picked up first and the preorder items may be ready on a later market day.";
 const SHIPPING_PREORDER_ACKNOWLEDGEMENT_LABEL =
   "I understand preorder items ship only after they are ready, which can take up to 15 days before the shipping timeline starts.";
+const MIXED_SHIPPING_PREORDER_ACKNOWLEDGEMENT_LABEL =
+  "I understand my in-stock items will be held and the entire order will ship together after all preorder items are ready.";
 const ORDER_FINALIZE_MESSAGE =
   "Payment received. Finalizing your order...";
 const ORDER_FINALIZE_PENDING_NOTICE =
@@ -1573,12 +1581,24 @@ export default function Storefront({ products, inventory = null, pickupDetails =
           : "mixed"
         : "standard"
       : "shipping";
+  const hasMixedInStockAndPreorderItems =
+    preorderUnitsInCart > 0 && preorderUnitsInCart < itemCount;
   const preorderTimingNotice =
-    fulfillment === "ship" ? SHIPPING_PREORDER_TIMING_NOTICE : PICKUP_PREORDER_TIMING_NOTICE;
+    fulfillment === "ship"
+      ? hasMixedInStockAndPreorderItems
+        ? MIXED_SHIPPING_PREORDER_TIMING_NOTICE
+        : SHIPPING_PREORDER_TIMING_NOTICE
+      : hasMixedInStockAndPreorderItems
+        ? MIXED_PICKUP_PREORDER_TIMING_NOTICE
+        : PICKUP_PREORDER_TIMING_NOTICE;
   const preorderAcknowledgementLabel =
     fulfillment === "ship"
-      ? SHIPPING_PREORDER_ACKNOWLEDGEMENT_LABEL
-      : PICKUP_PREORDER_ACKNOWLEDGEMENT_LABEL;
+      ? hasMixedInStockAndPreorderItems
+        ? MIXED_SHIPPING_PREORDER_ACKNOWLEDGEMENT_LABEL
+        : SHIPPING_PREORDER_ACKNOWLEDGEMENT_LABEL
+      : hasMixedInStockAndPreorderItems
+        ? MIXED_PICKUP_PREORDER_ACKNOWLEDGEMENT_LABEL
+        : PICKUP_PREORDER_ACKNOWLEDGEMENT_LABEL;
 
   checkoutSuccessContextRef.current = {
     fulfillment,

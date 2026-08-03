@@ -134,6 +134,30 @@ test("inventory cart changes invalidate stale payment and shipping quotes", () =
   assert.match(storefront, /body: JSON\.stringify\(shippingQuoteRequestPayload\)/u);
 });
 
+test("mixed preorder carts explain shipping holds and split pickup timing before payment", () => {
+  assert.match(
+    storefront,
+    /Your in-stock items will be held, and the entire order will ship together after all preorder items are ready\./u
+  );
+  assert.match(storefront, /This avoids a second shipping charge\./u);
+  assert.match(
+    storefront,
+    /Your in-stock items can be picked up on the scheduled market date; preorder items may need to be collected on a later market day\./u
+  );
+  assert.match(
+    storefront,
+    /preorderUnitsInCart > 0 && preorderUnitsInCart < itemCount/u
+  );
+  assert.match(
+    storefront,
+    /MIXED_SHIPPING_PREORDER_ACKNOWLEDGEMENT_LABEL/u
+  );
+  assert.match(
+    storefront,
+    /MIXED_PICKUP_PREORDER_ACKNOWLEDGEMENT_LABEL/u
+  );
+});
+
 test("shipment refresh reports even when synchronization returns a warning", () => {
   const functionStart = appsScript.indexOf("function syncShipments()");
   const source = appsScript.slice(functionStart, appsScript.indexOf("function ", functionStart + 25));
