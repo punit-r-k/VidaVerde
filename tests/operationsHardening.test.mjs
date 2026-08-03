@@ -35,6 +35,25 @@ test("Apps Script neutralizes spreadsheet formulas in every dynamic row set", ()
   );
 });
 
+test("shipment sheet starts with the producer's requested fulfillment columns", () => {
+  assert.match(
+    appsScript,
+    /const headerValues = \[\[\s*"Order Date \/ Time",\s*"Name",\s*"Address",\s*"Order",\s*"Prepaid Shipping Label"/u
+  );
+  assert.match(
+    appsScript,
+    /return \[\s*createdAt,\s*String\(shipment\?\.customer_name \|\| ""\),\s*formatShipmentAddress_\(shipment\),\s*formatShipmentItems_\(shipment\),\s*formatShipmentLabelText_\(shipment\)/u
+  );
+  assert.match(
+    appsScript,
+    /getRange\(CONFIG\.SHIPMENTS\.START_ROW, 1, rows\.length, 1\)\s*\.setNumberFormat\("yyyy-mm-dd hh:mm"\)/u
+  );
+  assert.match(
+    appsScript,
+    /getRange\(CONFIG\.SHIPMENTS\.START_ROW, 5, rows\.length, 1\)\s*\.setRichTextValues/u
+  );
+});
+
 test("test shipment rows are clearly marked as ineligible for labels", () => {
   assert.match(appsScript, /Not applicable — test order/u);
   assert.match(appsScript, /No label — cancelled/u);

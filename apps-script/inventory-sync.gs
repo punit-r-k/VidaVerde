@@ -1204,11 +1204,11 @@ function syncShipments() {
     .clearDataValidations();
 
   const headerValues = [[
+    "Order Date / Time",
     "Name",
     "Address",
+    "Order",
     "Prepaid Shipping Label",
-    "Created At",
-    "Items",
     "Shipping Method",
     "Shipping Tier",
     "Order Note",
@@ -1254,11 +1254,11 @@ function syncShipments() {
       const amountDollars = amountCents / 100;
 
       return [
+        createdAt,
         String(shipment?.customer_name || ""),
         formatShipmentAddress_(shipment),
-        formatShipmentLabelText_(shipment),
-        createdAt,
         formatShipmentItems_(shipment),
+        formatShipmentLabelText_(shipment),
         String(shipment?.shipping_option_label || ""),
         String(shipment?.shipping_tier || ""),
         String(shipment?.notes || ""),
@@ -1294,7 +1294,7 @@ function syncShipments() {
       .setValues(sanitizeSheetRows_(rows));
 
     sheet
-      .getRange(CONFIG.SHIPMENTS.START_ROW, 4, rows.length, 1)
+      .getRange(CONFIG.SHIPMENTS.START_ROW, 1, rows.length, 1)
       .setNumberFormat("yyyy-mm-dd hh:mm");
     sheet
       .getRange(CONFIG.SHIPMENTS.START_ROW, 23, rows.length, 1)
@@ -1309,7 +1309,7 @@ function syncShipments() {
       .getRange(CONFIG.SHIPMENTS.START_ROW, 12, rows.length, 3)
       .setNumberFormat("$#,##0.00");
     sheet
-      .getRange(CONFIG.SHIPMENTS.START_ROW, 3, rows.length, 1)
+      .getRange(CONFIG.SHIPMENTS.START_ROW, 5, rows.length, 1)
       .setRichTextValues(shipments.map((shipment) => [buildShipmentLabelRichText_(shipment)]));
   }
 
@@ -1320,8 +1320,12 @@ function syncShipments() {
     .setVerticalAlignment("middle");
   sheet.setFrozenRows(1);
   sheet.autoResizeColumns(1, headerValues[0].length);
-  sheet.getRange(CONFIG.SHIPMENTS.HEADER_ROW, 3, Math.max(sheet.getLastRow(), 1), 1).setWrap(true);
-  sheet.setColumnWidth(3, 190);
+  sheet.getRange(CONFIG.SHIPMENTS.HEADER_ROW, 3, Math.max(sheet.getLastRow(), 1), 3).setWrap(true);
+  sheet.setColumnWidth(1, 145);
+  sheet.setColumnWidth(2, 190);
+  sheet.setColumnWidth(3, 320);
+  sheet.setColumnWidth(4, 420);
+  sheet.setColumnWidth(5, 190);
   sheet.setColumnWidth(23, 70);
   sheet.setColumnWidth(24, 105);
   sheet.setColumnWidth(25, 120);
