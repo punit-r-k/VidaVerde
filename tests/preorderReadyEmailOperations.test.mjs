@@ -19,6 +19,8 @@ test("preorder-ready emails use only canonical consumer shipping wording", () =>
   assert.match(preorderEmailSource, /Estimated ship date/u);
   assert.match(preorderEmailSource, /Expected arrival/u);
   assert.match(preorderEmailSource, /Open and inspect the package/u);
+  assert.match(preorderEmailSource, /Refrigerate upon arrival/u);
+  assert.match(preorderEmailSource, /burp each jar to release any existing gas/u);
   assert.doesNotMatch(preorderEmailSource, /shipping label|postage|packaging/iu);
 });
 

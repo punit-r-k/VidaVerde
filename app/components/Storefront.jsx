@@ -3246,19 +3246,39 @@ export default function Storefront({ products, inventory = null, pickupDetails =
                   <span>Shipping</span>
                   <strong>{orderSuccessContext.shippingOptionLabel || "Order confirmed"}</strong>
                 </div>
-                <p className="order-success-popup__instruction">
-                  {orderSuccessContext.preorderUnits > 0
-                    ? "Preorder items ship after they are ready, which may take up to 15 days. We’ll email tracking when the order ships. "
-                    : orderSuccessContext.shippingShipDateLabel
-                      ? `Estimated ship date: ${orderSuccessContext.shippingShipDateLabel}. `
-                      : ""}
-                  {orderSuccessContext.preorderUnits <= 0 && orderSuccessContext.shippingTransitLabel
-                    ? `${orderSuccessContext.shippingTransitLabel} `
-                    : orderSuccessContext.shippingTransitLabel
-                      ? `${orderSuccessContext.shippingTransitLabel} `
-                      : ""}
-                  Tracking is included in your confirmation email when available. Open and inspect the package when it arrives, and refrigerate after opening.
-                </p>
+                <div className="order-success-popup__instruction">
+                  <dl className="order-success-popup__shipping-details">
+                    {orderSuccessContext.preorderUnits > 0 ? (
+                      <div>
+                        <dt>Ship timing</dt>
+                        <dd>After preorder items are ready, which may take up to 15 days</dd>
+                      </div>
+                    ) : orderSuccessContext.shippingShipDateLabel ? (
+                      <div>
+                        <dt>Estimated ship date</dt>
+                        <dd>{orderSuccessContext.shippingShipDateLabel}</dd>
+                      </div>
+                    ) : null}
+                    {orderSuccessContext.shippingTransitLabel ? (
+                      <div>
+                        <dt>Arrival</dt>
+                        <dd>{orderSuccessContext.shippingTransitLabel.replace(/^Expected arrival:\s*/i, "")}</dd>
+                      </div>
+                    ) : null}
+                    <div>
+                      <dt>Tracking</dt>
+                      <dd>
+                        {orderSuccessContext.preorderUnits > 0
+                          ? "We’ll email it when your order ships"
+                          : "Included in your confirmation email when available"}
+                      </dd>
+                    </div>
+                    <div>
+                      <dt>When it arrives</dt>
+                      <dd>Open and inspect the package. Refrigerate upon arrival, then carefully burp each jar to release any existing gas</dd>
+                    </div>
+                  </dl>
+                </div>
               </div>
             ) : null}
             <div className="order-success-popup__aftercare">
@@ -4141,7 +4161,8 @@ export default function Storefront({ products, inventory = null, pickupDetails =
                     <li>Your final shipping price and expected arrival are shown before payment.</li>
                     <li>Your confirmation email includes tracking when it is available.</li>
                     <li>Open and inspect the package when it arrives.</li>
-                    <li>Refrigerate after opening.</li>
+                    <li>Refrigerate upon arrival.</li>
+                    <li>Carefully burp each jar to release any existing gas.</li>
                   </ul>
                 ) : (
                   <ul className="pickup-policy-modal__steps">
