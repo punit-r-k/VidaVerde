@@ -40,6 +40,12 @@ test("test shipment rows are clearly marked as ineligible for labels", () => {
   assert.match(appsScript, /No label — cancelled/u);
 });
 
+test("test labels are enabled only by an EasyPost test key", () => {
+  assert.match(labelAutomation, /is_test_order === true && !isEasyPostTestMode\(\)/u);
+  assert.match(shippingQuoteRoute, /Shipping rates are temporarily unavailable/u);
+  assert.match(nextConfig, /EasyPost test API key cannot be deployed to production/u);
+});
+
 test("admin JWT authentication requires fresh integer claims and a strong secret", () => {
   assert.match(adminAuth, /Buffer\.byteLength\(config\.secret, "utf8"\) < 32/u);
   assert.match(adminAuth, /Number\.isSafeInteger\(issuedAt\)/u);

@@ -48,6 +48,13 @@ const testShipmentReportingMigration = fs.readFileSync(
   ),
   "utf8"
 );
+const easyPostTestLabelMigration = fs.readFileSync(
+  new URL(
+    "../supabase/migrations/20260803100000_easypost_test_labels.sql",
+    import.meta.url
+  ),
+  "utf8"
+);
 const schema = fs.readFileSync(new URL("../supabase/schema.sql", import.meta.url), "utf8");
 
 test("preorder shipping safety repairs a missing automatic-label column dependency", () => {
@@ -130,6 +137,22 @@ test("financial test orders remain visible as cancelled shipment reporting rows"
   assert.doesNotMatch(
     testReportingInsert,
     /'pending_label'/u
+  );
+});
+
+test("EasyPost test labels use isolated service-role-only shipment RPCs", () => {
+  assert.match(easyPostTestLabelMigration, /sync_shipment_for_order_with_test_labels/u);
+  assert.match(easyPostTestLabelMigration, /sync_test_shipments_for_labels/u);
+  assert.match(easyPostTestLabelMigration, /coalesce\(v_order\.is_test_order, false\)/u);
+  assert.match(easyPostTestLabelMigration, /status = 'pending_label'/u);
+  assert.match(easyPostTestLabelMigration, /label_purchase_error = null/u);
+  assert.match(
+    easyPostTestLabelMigration,
+    /revoke all on function public\.sync_shipment_for_order_with_test_labels\(uuid\)[\s\S]*from public, anon, authenticated/u
+  );
+  assert.match(
+    easyPostTestLabelMigration,
+    /grant execute on function public\.sync_test_shipments_for_labels\(\)[\s\S]*to service_role/u
   );
 });
 

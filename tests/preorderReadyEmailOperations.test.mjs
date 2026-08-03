@@ -45,7 +45,11 @@ test("final live preorder shipments fail closed until tracking exists", () => {
     preorderEmailSource,
     /if \(trackingResult\.numbers\.length === 0\)[\s\S]*Shipment tracking is not ready yet\./u
   );
-  assert.match(preorderEmailSource, /if \(order\.isTestOrder\)[\s\S]*order\.trackingNumbers = \[\]/u);
+  assert.match(
+    preorderEmailSource,
+    /if \(order\.isTestOrder && !isEasyPostTestMode\(\)\)[\s\S]*order\.trackingNumbers = \[\]/u
+  );
+  assert.match(preorderEmailSource, /sync_shipment_for_order_with_test_labels/u);
   assert.match(preorderEmailSource, /Not generated for this test order\./u);
   assert.match(preorderEmailSource, /Changes may no longer be possible\./u);
 });

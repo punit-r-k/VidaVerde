@@ -243,6 +243,23 @@ test("tracking states produce explicit preorder, test, and available behavior", 
     ORDER_CONFIRMATION_TRACKING_STATES.TEST_NOT_APPLICABLE
   );
   assert.equal(
+    resolveOrderConfirmationTrackingState({
+      fulfillment: "ship",
+      isTestOrder: true,
+      allowTestShipping: true,
+      trackingNumbers: ["TEST-TRACKING-1"]
+    }),
+    ORDER_CONFIRMATION_TRACKING_STATES.AVAILABLE
+  );
+  assert.equal(
+    resolveOrderConfirmationTrackingState({
+      fulfillment: "ship",
+      isTestOrder: true,
+      allowTestShipping: true
+    }),
+    null
+  );
+  assert.equal(
     resolveOrderConfirmationTrackingState({ fulfillment: "ship" }),
     null
   );

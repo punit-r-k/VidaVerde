@@ -19,6 +19,7 @@ import {
   parseStripeMetadataItems,
   validatePaymentIntentOrderIntegrity
 } from "@/lib/stripeOrderIntegrity";
+import { isEasyPostTestMode } from "@/lib/easypost";
 import { supabaseAdmin } from "@/lib/supabaseAdmin";
 import { isFinancialTestOrder } from "@/lib/testOrders";
 import { z } from "zod";
@@ -383,7 +384,10 @@ const recordPaidOrder = async ({
 const syncShipmentForOrder = async (orderId) => {
   if (!orderId) return { shipmentId: null, error: null };
 
-  const { data, error } = await supabaseAdmin.rpc("sync_shipment_for_order", {
+  const rpcName = isEasyPostTestMode()
+    ? "sync_shipment_for_order_with_test_labels"
+    : "sync_shipment_for_order";
+  const { data, error } = await supabaseAdmin.rpc(rpcName, {
     p_order_id: orderId
   });
 

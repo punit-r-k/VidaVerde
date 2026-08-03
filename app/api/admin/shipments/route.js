@@ -6,6 +6,7 @@ import {
 import { secureAdminRoute } from "@/lib/apiSecurity";
 import { getRouteRateLimitConfig } from "@/lib/rateLimit";
 import { autoPurchaseFastestShippingLabels } from "@/lib/shipmentLabelAutomation";
+import { isEasyPostTestMode } from "@/lib/easypost";
 import { supabaseAdmin } from "@/lib/supabaseAdmin";
 
 const ADMIN_SHIPMENTS_RATE_LIMIT = getRouteRateLimitConfig("ADMIN_SHIPMENTS_GET", {
@@ -74,31 +75,42 @@ const readShipments = async ({ limit, status }) => {
 };
 
 const refreshShipments = async () => {
+  const allowTestLabels = isEasyPostTestMode();
+  let testShipmentSyncCount = 0;
+  if (allowTestLabels) {
+    const { data, error } = await supabaseAdmin.rpc("sync_test_shipments_for_labels");
+    if (error) throw new Error("TEST_SHIPMENT_SYNC_FAILED", { cause: error });
+    testShipmentSyncCount = toInt(data, 0);
+  }
   const { data: syncCount, error: syncError } = await supabaseAdmin.rpc(
     "sync_all_shipments"
   );
   if (syncError) throw new Error("SHIPMENT_SYNC_FAILED", { cause: syncError });
 
-  let pendingResult = await supabaseAdmin
+  let pendingQuery = supabaseAdmin
     .from("shipments")
     .select("id, label_purchase_error, orders!inner(status, is_test_order)")
     .in("status", ["pending_label", "purchasing_label"])
     .eq("orders.status", "paid")
-    .eq("orders.is_test_order", false)
     .order("updated_at", { ascending: true })
     .limit(50);
+  if (!allowTestLabels) pendingQuery = pendingQuery.eq("orders.is_test_order", false);
+  let pendingResult = await pendingQuery;
 
   let automationSchemaReady = true;
   if (isMissingShipmentAutomationColumn(pendingResult.error)) {
     automationSchemaReady = false;
-    pendingResult = await supabaseAdmin
+    let legacyPendingQuery = supabaseAdmin
       .from("shipments")
       .select("id, orders!inner(status, is_test_order)")
       .in("status", ["pending_label", "purchasing_label"])
       .eq("orders.status", "paid")
-      .eq("orders.is_test_order", false)
       .order("updated_at", { ascending: true })
       .limit(50);
+    if (!allowTestLabels) {
+      legacyPendingQuery = legacyPendingQuery.eq("orders.is_test_order", false);
+    }
+    pendingResult = await legacyPendingQuery;
   }
 
   const automaticLabelErrors = [];
@@ -115,7 +127,8 @@ const refreshShipments = async () => {
     let attemptedLabels = 0;
     const eligiblePendingShipments = (pendingResult.data || []).filter(
       (pendingShipment) =>
-        !String(pendingShipment.label_purchase_error || "").includes("financial test order") &&
+        (allowTestLabels ||
+          !String(pendingShipment.label_purchase_error || "").toLowerCase().includes("financial test order")) &&
         !String(pendingShipment.label_purchase_error || "").includes("preorder items are ready")
     );
     const workerDeadlineAt = Date.now() + AUTOMATIC_LABEL_WORKER_BUDGET_MS;
@@ -141,7 +154,7 @@ const refreshShipments = async () => {
   }
 
   return {
-    refreshed_count: toInt(syncCount, 0),
+    refreshed_count: toInt(syncCount, 0) + testShipmentSyncCount,
     automatic_labels_purchased: automaticLabelsPurchased,
     automatic_labels_deferred: automaticLabelsDeferred,
     automatic_label_errors: automaticLabelErrors,

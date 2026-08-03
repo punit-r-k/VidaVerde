@@ -6,9 +6,23 @@ import {
   createEasyPostShipment,
   easyPostRequest,
   getFromAddress,
+  isEasyPostTestMode,
   isUsdEasyPostRate,
   verifyEasyPostWebhook
 } from "../lib/easypost.js";
+
+test("EasyPost test mode is derived only from the server API key", () => {
+  const previous = process.env.EASYPOST_API_KEY;
+  try {
+    process.env.EASYPOST_API_KEY = "EZTK_local_test_key";
+    assert.equal(isEasyPostTestMode(), true);
+    process.env.EASYPOST_API_KEY = "EZAK_live_key";
+    assert.equal(isEasyPostTestMode(), false);
+  } finally {
+    if (previous === undefined) delete process.env.EASYPOST_API_KEY;
+    else process.env.EASYPOST_API_KEY = previous;
+  }
+});
 import {
   getAggregateTrackingStatus,
   getMonotonicTrackingStatus,
