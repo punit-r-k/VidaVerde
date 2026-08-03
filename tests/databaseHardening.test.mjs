@@ -55,12 +55,34 @@ const easyPostTestLabelMigration = fs.readFileSync(
   ),
   "utf8"
 );
+const shipmentStatusRepairMigration = fs.readFileSync(
+  new URL(
+    "../supabase/migrations/20260803110000_repair_shipments_status_constraint.sql",
+    import.meta.url
+  ),
+  "utf8"
+);
 const schema = fs.readFileSync(new URL("../supabase/schema.sql", import.meta.url), "utf8");
 
 test("preorder shipping safety repairs a missing automatic-label column dependency", () => {
   assert.match(
     shipmentMigration,
     /alter table shipments[\s\S]*add column if not exists label_purchase_started_at timestamptz,[\s\S]*add column if not exists label_purchase_error text/u
+  );
+});
+
+test("shipment label workers can enter and recover from the purchase lease state", () => {
+  assert.match(
+    shipmentStatusRepairMigration,
+    /drop constraint if exists shipments_status_check/u
+  );
+  assert.match(
+    shipmentStatusRepairMigration,
+    /check \(status in \([\s\S]*'pending_label',[\s\S]*'purchasing_label',[\s\S]*'label_purchased',[\s\S]*'shipped',[\s\S]*'delivered',[\s\S]*'cancelled'[\s\S]*\)\) not valid/u
+  );
+  assert.match(
+    shipmentStatusRepairMigration,
+    /validate constraint shipments_status_check\s*;/u
   );
 });
 
