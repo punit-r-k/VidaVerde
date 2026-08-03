@@ -464,6 +464,7 @@ export async function POST(request) {
     packagingCents: 0,
     unroundedCents: 0,
     roundingCents: 0,
+    discountCents: 0,
     amountCents: 0
   };
 
@@ -536,6 +537,7 @@ export async function POST(request) {
           packaging_cents: shippingCharge.packagingCents,
           unrounded_cents: shippingCharge.unroundedCents,
           rounding_cents: shippingCharge.roundingCents,
+          discount_cents: shippingCharge.discountCents,
           charged_shipping_cents: shippingCharge.amountCents,
           currency: "USD",
           delivery_days: Number.isFinite(deliveryDays) ? deliveryDays : null,

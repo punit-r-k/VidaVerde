@@ -62,6 +62,13 @@ const shipmentStatusRepairMigration = fs.readFileSync(
   ),
   "utf8"
 );
+const singleItemShippingCapMigration = fs.readFileSync(
+  new URL(
+    "../supabase/migrations/20260803111000_single_item_shipping_cap.sql",
+    import.meta.url
+  ),
+  "utf8"
+);
 const schema = fs.readFileSync(new URL("../supabase/schema.sql", import.meta.url), "utf8");
 
 test("preorder shipping safety repairs a missing automatic-label column dependency", () => {
@@ -83,6 +90,21 @@ test("shipment label workers can enter and recover from the purchase lease state
   assert.match(
     shipmentStatusRepairMigration,
     /validate constraint shipments_status_check\s*;/u
+  );
+});
+
+test("single-item shipping subsidies preserve actual costs and exact customer charges", () => {
+  assert.match(
+    singleItemShippingCapMigration,
+    /add column if not exists discount_cents integer not null default 0/u
+  );
+  assert.match(
+    singleItemShippingCapMigration,
+    /charged_shipping_cents\s*=\s*unrounded_cents \+ rounding_cents - discount_cents/u
+  );
+  assert.match(
+    singleItemShippingCapMigration,
+    /discount_cents <= unrounded_cents \+ rounding_cents/u
   );
 });
 
