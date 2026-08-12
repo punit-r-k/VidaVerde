@@ -23,6 +23,7 @@ Vida Verde does **not** currently send:
 - These are service emails, not marketing emails.
 - The goal is to give customers order and pickup information they need.
 - If an order-confirmation email automation fails after payment succeeds, checkout still confirms the order and shows a fallback notice telling the customer how to contact Vida Verde.
+- The `Email List` spreadsheet tab includes a separate pending-email panel. It shows the recipient, what the email is for, its current status, why it is waiting, and the related order ID without adding order customers to the marketing subscriber list.
 
 ## 1. Order Confirmation
 

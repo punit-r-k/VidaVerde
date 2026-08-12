@@ -92,6 +92,11 @@ Email signup sheet:
   `Confirm Changes` control to apply the whole batch together.
 - Both lists appear on the same `Email List` sheet, and suppressed rows are
   shaded red so they are easy to distinguish.
+- A separate pending-email panel on the same sheet shows every queued service
+  email, including recipients who are not marketing subscribers. `Email For`
+  explains the message purpose, while `Status` and `Pending For` explain whether
+  it is sending, consolidating pre-order updates, awaiting an automatic retry,
+  or needs manual attention.
 - Submitting the website signup form again is treated as renewed consent: the
   address leaves `Do Not Market` and returns to the active `Email List`.
 - The Apps Script checks replies to `vvsauerkraut@gmail.com` every five minutes;

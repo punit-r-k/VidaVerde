@@ -1349,6 +1349,9 @@ function syncEmailSignups() {
   const doNotMarket = Array.isArray(response?.do_not_market)
     ? response.do_not_market
     : [];
+  const pendingEmails = Array.isArray(response?.pending_emails)
+    ? response.pending_emails
+    : [];
   const sheet = ensureEmailSignupsSheet_();
   sheet.getDataRange().clearDataValidations();
   sheet.clear();
@@ -1364,8 +1367,21 @@ function syncEmailSignups() {
     "Reason",
     "Add Back",
     "",
-    "Confirm Changes"
+    "Confirm Changes",
+    "",
+    "Queued At",
+    "Recipient",
+    "Email For",
+    "Status",
+    "Pending For",
+    "Order ID"
   ]];
+  if (sheet.getMaxColumns() < headerValues[0].length) {
+    sheet.insertColumnsAfter(
+      sheet.getMaxColumns(),
+      headerValues[0].length - sheet.getMaxColumns()
+    );
+  }
   sheet
     .getRange(CONFIG.EMAIL_SIGNUPS.HEADER_ROW, 1, 1, headerValues[0].length)
     .setValues(headerValues);
@@ -1383,6 +1399,14 @@ function syncEmailSignups() {
       ? "STOP reply"
       : "Removed from Email List",
     false
+  ]));
+  const pendingEmailRows = pendingEmails.map((entry) => ([
+    entry?.queued_at ? new Date(entry.queued_at) : "",
+    String(entry?.recipient || ""),
+    String(entry?.email_for || "Service email"),
+    String(entry?.status || "Pending"),
+    String(entry?.pending_for || "Waiting for automatic processing."),
+    String(entry?.order_id || "")
   ]));
 
   if (activeRows.length === 0) {
@@ -1415,9 +1439,35 @@ function syncEmailSignups() {
       .insertCheckboxes();
   }
 
+  if (pendingEmailRows.length === 0) {
+    sheet.getRange(CONFIG.EMAIL_SIGNUPS.START_ROW, 13).setValue("No pending emails.");
+  } else {
+    sheet
+      .getRange(CONFIG.EMAIL_SIGNUPS.START_ROW, 13, pendingEmailRows.length, 6)
+      .setValues(sanitizeSheetRows_(pendingEmailRows));
+    sheet
+      .getRange(CONFIG.EMAIL_SIGNUPS.START_ROW, 13, pendingEmailRows.length, 1)
+      .setNumberFormat("yyyy-mm-dd hh:mm");
+    sheet
+      .getRange(CONFIG.EMAIL_SIGNUPS.START_ROW, 13, pendingEmailRows.length, 6)
+      .setBackgrounds(pendingEmails.map((entry) => {
+        const status = String(entry?.status || "").toLowerCase();
+        const color = status === "needs attention"
+          ? "#f4cccc"
+          : status === "sending now"
+            ? "#d9ead3"
+            : "#fff2cc";
+        return [color, color, color, color, color, color];
+      }));
+  }
+
   sheet
-    .getRange(CONFIG.EMAIL_SIGNUPS.HEADER_ROW, 1, 1, 11)
+    .getRange(CONFIG.EMAIL_SIGNUPS.HEADER_ROW, 1, 1, headerValues[0].length)
     .setFontWeight("bold");
+  sheet
+    .getRange(CONFIG.EMAIL_SIGNUPS.HEADER_ROW, 13, 1, 6)
+    .setBackground("#fff2cc")
+    .setWrap(true);
   sheet
     .getRange(CONFIG.EMAIL_SIGNUPS.CONFIRM_ROW, CONFIG.EMAIL_SIGNUPS.CONFIRM_COL)
     .insertCheckboxes()
@@ -1425,9 +1475,20 @@ function syncEmailSignups() {
     .setBackground("#b6d7a8")
     .setNote("Select all Remove and Add Back checkboxes first, then check here to apply every change together.");
   sheet.setFrozenRows(1);
-  sheet.autoResizeColumns(1, 11);
+  sheet.autoResizeColumns(1, headerValues[0].length);
   sheet.setColumnWidth(5, 30);
   sheet.setColumnWidth(10, 30);
+  sheet.setColumnWidth(12, 30);
+  sheet.setColumnWidth(13, 145);
+  sheet.setColumnWidth(14, 220);
+  sheet.setColumnWidth(15, 230);
+  sheet.setColumnWidth(16, 130);
+  sheet.setColumnWidth(17, 420);
+  sheet.setColumnWidth(18, 280);
+  sheet
+    .getRange(1, 13, Math.max(sheet.getLastRow(), 1), 6)
+    .setWrap(true)
+    .setVerticalAlignment("top");
   removeLegacyDoNotMarketSheet_();
 }
 

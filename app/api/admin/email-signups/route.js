@@ -1,4 +1,5 @@
 import { secureAdminRoute } from "@/lib/apiSecurity";
+import { buildPendingEmailQueueRows } from "@/lib/pendingEmailQueue";
 import { getRouteRateLimitConfig } from "@/lib/rateLimit";
 import { supabaseAdmin } from "@/lib/supabaseAdmin";
 import { z } from "zod";
@@ -66,7 +67,12 @@ export async function GET(request) {
   const params = new URL(request.url).searchParams;
   const limit = Math.min(Math.max(toInt(params.get("limit"), DEFAULT_LIMIT), 1), DEFAULT_LIMIT);
 
-  const [signupsResult, suppressionsResult] = await Promise.all([
+  const [
+    signupsResult,
+    suppressionsResult,
+    confirmationJobsResult,
+    preorderReleaseEventsResult
+  ] = await Promise.all([
     supabaseAdmin
       .from("email_signups")
       .select("id, email, source, created_at")
@@ -76,16 +82,39 @@ export async function GET(request) {
       .from("do_not_market")
       .select("email, reason, unsubscribed_at")
       .order("unsubscribed_at", { ascending: false })
+      .limit(limit),
+    supabaseAdmin
+      .from("email_jobs")
+      .select(
+        "id, type, status, order_id, attempts, max_attempts, available_at, claimed_at, last_error_code, created_at, orders!inner(customer_email, is_test_order)"
+      )
+      .eq("type", "order_confirmation")
+      .in("status", ["pending", "processing", "failed"])
+      .order("created_at", { ascending: true })
+      .limit(limit),
+    supabaseAdmin
+      .from("preorder_release_events")
+      .select(
+        "id, order_id, created_at, ready_pickup_email_claim_token, ready_pickup_email_claimed_at, orders!inner(id, status, fulfillment, customer_email, is_test_order)"
+      )
+      .eq("orders.status", "paid")
+      .is("ready_pickup_email_sent_at", null)
+      .order("created_at", { ascending: true })
       .limit(limit)
   ]);
 
-  if (signupsResult.error || suppressionsResult.error) {
+  const readError =
+    signupsResult.error ||
+    suppressionsResult.error ||
+    confirmationJobsResult.error ||
+    preorderReleaseEventsResult.error;
+  if (readError) {
     console.error(
       "email signups admin read error:",
-      signupsResult.error || suppressionsResult.error
+      readError
     );
     return respond.json(
-      { error: "We couldn't load email signups right now." },
+      { error: "We couldn't load the email list or pending queue right now." },
       { status: 500 }
     );
   }
@@ -103,7 +132,11 @@ export async function GET(request) {
       email: String(row?.email || ""),
       reason: String(row?.reason || "manual"),
       unsubscribed_at: row?.unsubscribed_at || null
-    }))
+    })),
+    pending_emails: buildPendingEmailQueueRows({
+      confirmationJobs: confirmationJobsResult.data || [],
+      preorderReleaseEvents: preorderReleaseEventsResult.data || []
+    })
   });
 }
 
