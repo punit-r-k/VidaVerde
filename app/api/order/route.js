@@ -457,6 +457,8 @@ export async function POST(request) {
   ) || shipping.normalOption;
   let selectedShippingOption = isPickup ? null : requestedOption;
   let checkoutShippingQuote = null;
+  let estimatedShipDateKey = "";
+  let estimatedShipDateLabel = "";
   let expectedArrivalDateKey = "";
   let expectedArrivalLabel = "";
   let shippingCharge = {
@@ -478,7 +480,7 @@ export async function POST(request) {
       const hasPreorderItems = normalizedItems.some((item) =>
         getCurrentAllocation(item.quantity, inventoryMap?.[item.sku]).preorderUnits > 0
       );
-      const ratingContext = createEasyPostRatingContext();
+      const ratingContext = createEasyPostRatingContext({ startedAt: orderCreatedAt });
       const quoteResults = await Promise.allSettled(
         shipping.options.map((option) =>
           selectCheckoutShippingQuote({
@@ -523,6 +525,8 @@ export async function POST(request) {
       shippingCharge = selection.charge;
       selectedShippingOption = selection.option;
       const deliveryDays = selection.deliveryDays;
+      estimatedShipDateKey = selection.estimatedShipDateKey;
+      estimatedShipDateLabel = selection.estimatedShipDateLabel;
       expectedArrivalDateKey = selection.expectedArrivalDateKey;
       expectedArrivalLabel = selection.expectedArrivalLabel;
 
@@ -812,6 +816,8 @@ export async function POST(request) {
               label: selectedShippingOption?.label,
               amountCents: shippingCharge.amountCents,
               transitLabel: selectedShippingOption?.transitLabel,
+              estimatedShipDate: estimatedShipDateKey,
+              estimatedShipDateLabel,
               expectedArrivalLabel
             }
       },

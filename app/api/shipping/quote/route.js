@@ -38,6 +38,8 @@ const serializeShippingSelection = (selection) => ({
   amountCents: selection.charge.amountCents,
   transitLabel: selection.option.transitLabel,
   deliveryEstimate: selection.option.deliveryEstimate,
+  estimatedShipDate: selection.estimatedShipDateKey,
+  estimatedShipDateLabel: selection.estimatedShipDateLabel,
   expectedArrivalDate: selection.expectedArrivalDateKey,
   expectedArrivalLabel: selection.expectedArrivalLabel
 });
@@ -143,7 +145,7 @@ export async function POST(request) {
   });
 
   const orderCreatedAt = new Date();
-  const ratingContext = createEasyPostRatingContext();
+  const ratingContext = createEasyPostRatingContext({ startedAt: orderCreatedAt });
   const results = await Promise.allSettled(
     shipping.options.map((option) =>
       selectCheckoutShippingQuote({

@@ -32,6 +32,8 @@ import {
   getEstimatedShipDate,
   getLatestExpectedDeliveryDate,
   getShippingOptionsForCart,
+  SHIPPING_CUTOFF_LABEL,
+  SHIPPING_SCHEDULE_DAY_LABEL,
   SHIPPING_SCHEDULE_EXPEDITED_LINE,
   SHIPPING_SCHEDULE_EXPEDITED_NOTE,
   SHIPPING_SCHEDULE_INTRO,
@@ -1434,10 +1436,9 @@ export default function Storefront({ products, inventory = null, pickupDetails =
         orderDate: shippingScheduleNow
       })
       : "";
-  const estimatedShipDateText = formatExpectedDeliveryDate(
-    estimatedShipDate,
-    shippingScheduleNow
-  );
+  const estimatedShipDateText = fulfillment === "ship" && displayedShipping?.estimatedShipDateLabel
+    ? displayedShipping.estimatedShipDateLabel
+    : formatExpectedDeliveryDate(estimatedShipDate, shippingScheduleNow);
 
   useEffect(() => {
     const requestId = shippingPreviewRequestRef.current + 1;
@@ -2909,8 +2910,8 @@ export default function Storefront({ products, inventory = null, pickupDetails =
               <p className="shipping-schedule__ship-date">
                 <span>
                   {hasPreorderItems
-                    ? "Estimated ship date after preorder window"
-                    : "Estimated ship date"}
+                    ? "Estimated carrier-handoff date after preorder window"
+                    : "Estimated carrier-handoff date"}
                 </span>
                 <strong>{estimatedShipDateText}</strong>
               </p>
@@ -3055,7 +3056,7 @@ export default function Storefront({ products, inventory = null, pickupDetails =
           Shipping is available across the {CONTINENTAL_US_SHIPPING_AREA_LABEL}.
           {hasActiveShippingPreview && !expeditedShippingIsDisplayed
             ? " The final price and expected arrival are shown below."
-            : " Choose Shipping for delivery in an estimated 3–5 business days or Expedited Shipping for 1–3 business days after Wednesday shipment. Final prices and expected arrival dates are shown before payment."}
+            : " Choose Shipping for delivery in an estimated 3–5 business days or Expedited Shipping for 1–3 business days after the estimated carrier-handoff date. Final prices and expected arrival dates are shown before payment."}
         </p>
         {renderShippingScheduleNotice({ id: "checkout", showShipDate: true })}
         <div className="shipping-options__list">
@@ -3176,7 +3177,7 @@ export default function Storefront({ products, inventory = null, pickupDetails =
           {
             label: "Shipping timing",
             value: estimatedShipDateText
-              ? `Packed and shipped on ${estimatedShipDateText}`
+              ? `Estimated carrier handoff on ${estimatedShipDateText}`
               : selectedShippingOption.transitLabel
           },
           ...(selectedExpectedDeliveryText
@@ -3279,7 +3280,7 @@ export default function Storefront({ products, inventory = null, pickupDetails =
                       </div>
                     ) : orderSuccessContext.shippingShipDateLabel ? (
                       <div>
-                        <dt>Estimated ship date</dt>
+                        <dt>Estimated carrier-handoff date</dt>
                         <dd>{orderSuccessContext.shippingShipDateLabel}</dd>
                       </div>
                     ) : null}
@@ -4141,8 +4142,8 @@ export default function Storefront({ products, inventory = null, pickupDetails =
                       <article>
                         <span>
                           {hasPreorderItems
-                            ? "Estimated Ship Date After Preorder Window"
-                            : "Estimated Ship Date"}
+                            ? "Estimated Carrier-Handoff Date After Preorder Window"
+                            : "Estimated Carrier-Handoff Date"}
                         </span>
                         <strong>{estimatedShipDateText}</strong>
                       </article>
@@ -4179,9 +4180,9 @@ export default function Storefront({ products, inventory = null, pickupDetails =
                 </div>
                 {fulfillment === "ship" ? (
                   <ul className="pickup-policy-modal__steps">
-                    <li>Orders ship on Wednesdays after packing or production is complete.</li>
-                    <li>Shipping usually arrives in 3–5 business days after shipment.</li>
-                    <li>Expedited Shipping usually arrives in 1–3 business days after shipment.</li>
+                    <li>{SHIPPING_SCHEDULE_INTRO}</li>
+                    <li>Shipping usually arrives in 3–5 business days after the estimated carrier handoff.</li>
+                    <li>Expedited Shipping usually arrives in 1–3 business days after the estimated carrier handoff.</li>
                     <li>Your final shipping price and expected arrival are shown before payment.</li>
                     <li>Your confirmation email includes tracking when it is available.</li>
                     <li>Open and inspect the package when it arrives.</li>
@@ -4219,7 +4220,7 @@ export default function Storefront({ products, inventory = null, pickupDetails =
                   </div>
                   <p>
                     {fulfillment === "ship"
-                      ? "Preorder items can take up to 15 days to become ready. They ship on the first Wednesday after they are ready, and we’ll email tracking when they ship."
+                      ? `Preorder items can take up to 15 days to become ready. They are estimated to be handed to the carrier on the first configured shipping day (${SHIPPING_SCHEDULE_DAY_LABEL}) after they are ready. Same-day handoff requires readiness before ${SHIPPING_CUTOFF_LABEL}. We’ll email tracking when available.`
                       : pickupScenario === "mixed"
                       ? "Ready items can be picked up on the date above. Preorder items will be scheduled separately when restocked, and we will email you before that pickup."
                       : "This order contains preorder items. We will email you when they are ready and confirm the pickup date before you come to market."}
@@ -4267,8 +4268,8 @@ export default function Storefront({ products, inventory = null, pickupDetails =
                     <div>
                       <dt>
                         {hasPreorderItems
-                          ? "Estimated ship date after preorder window"
-                          : "Estimated ship date"}
+                          ? "Estimated carrier-handoff date after preorder window"
+                          : "Estimated carrier-handoff date"}
                       </dt>
                       <dd>{estimatedShipDateText}</dd>
                     </div>

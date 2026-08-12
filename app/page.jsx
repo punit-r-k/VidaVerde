@@ -21,6 +21,7 @@ import {
   getPickupDetails
 } from "@/lib/pickupDetails";
 import { getInventoryMap } from "@/lib/stock";
+import { SHIPPING_SCHEDULE_INTRO } from "@/lib/shippingPricing";
 import {
   GOOGLE_REVIEW_URL,
   SITE_ALTERNATE_NAMES,
@@ -244,7 +245,7 @@ export default async function Home() {
     },
     {
       q: "Do you offer shipping?",
-      a: "Yes. Shipping is available within the United States, and market pickup is still available for local customers."
+      a: `Yes. Shipping is available within the continental United States, and market pickup is still available for local customers. ${SHIPPING_SCHEDULE_INTRO}`
     }
   ];
 

@@ -159,8 +159,12 @@ Shipping is displayed; Expedited can appear after calculation only when it quali
 Checkout recalculates the authoritative amount,
 stores the reserved quote and expected arrival with the PaymentIntent, then reuses the
 same quote to buy the prepaid label automatically after payment. Preorder labels are
-deferred until every preorder item is ready. Orders ship on Wednesday, and the
-customer-facing confirmation email includes tracking when it is available.
+deferred until every preorder item is ready. Carrier handoff is estimated for the
+next configured shipping day. With the current schedule, orders completed strictly
+before 7:00 AM Central on Saturday are estimated to be handed to the carrier that
+Saturday; orders completed at or after 7:00 AM use the next shipping cycle. Delivery
+timing is calculated from that estimated carrier-handoff date. The customer-facing
+confirmation email includes tracking when it is available.
 
 Required environment variables:
 - `NEXT_PUBLIC_SUPABASE_URL`
@@ -179,6 +183,13 @@ Required environment variables:
 - `EASYPOST_FROM_PHONE`
 - `EASYPOST_FROM_EMAIL`
 - `SITE_URL`
+- `NEXT_PUBLIC_SHIPPING_DAYS` is a comma-separated weekday list and is the single
+  source for every shipping cycle (currently `Saturday`; future example:
+  `Wednesday,Saturday`)
+- `NEXT_PUBLIC_SHIPPING_CUTOFF_TIME` is the shared strict cutoff in 24-hour
+  `HH:mm` format (currently `07:00`; orders at exactly this time roll forward)
+- `NEXT_PUBLIC_SHIPPING_TIME_ZONE` is the IANA timezone used by every shipping
+  calculation and displayed cutoff (currently `America/Chicago`)
 
 Optional for customer order confirmation and preorder-ready emails:
 - `SMTP_HOST`

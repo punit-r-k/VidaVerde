@@ -93,11 +93,11 @@ test("shipping tiers share one bounded EasyPost rating context", () => {
   assert.match(shippingQuoteRoute, /ipMax: 12/u);
   assert.match(
     shippingQuoteRoute,
-    /const ratingContext = createEasyPostRatingContext\(\)[\s\S]*shipping\.options\.map[\s\S]*ratingContext/u
+    /const ratingContext = createEasyPostRatingContext\(\{ startedAt: orderCreatedAt \}\)[\s\S]*shipping\.options\.map[\s\S]*ratingContext/u
   );
   assert.match(
     checkoutRoute,
-    /const ratingContext = createEasyPostRatingContext\(\)[\s\S]*shipping\.options\.map[\s\S]*ratingContext/u
+    /const ratingContext = createEasyPostRatingContext\(\{ startedAt: orderCreatedAt \}\)[\s\S]*shipping\.options\.map[\s\S]*ratingContext/u
   );
   assert.match(shippingQuotes, /shipmentPromises: new Map\(\)/u);
   assert.match(shippingQuotes, /getParcelRatingKey\(planKey, parcelIndex, parcel, options\)/u);
@@ -114,6 +114,8 @@ test("shipping tiers share one bounded EasyPost rating context", () => {
   );
   assert.match(shippingQuotes, /estimatedShipDate/u);
   assert.match(shippingQuotes, /expectedArrivalDate/u);
+  assert.match(shippingQuoteRoute, /estimatedShipDate: selection\.estimatedShipDateKey/u);
+  assert.match(checkoutRoute, /estimatedShipDate: estimatedShipDateKey/u);
   assert.match(
     shippingQuoteRoute,
     /Shipping rates are temporarily unavailable\. Please try again in a few minutes\./u
@@ -121,6 +123,9 @@ test("shipping tiers share one bounded EasyPost rating context", () => {
   assert.match(shippingQuoteRoute, /status: noEligibleRates \? 422 : 503/u);
   assert.match(nextConfig, /Incomplete production shipping configuration/u);
   assert.match(nextConfig, /EASYPOST_FROM_STREET1/u);
+  assert.match(nextConfig, /NEXT_PUBLIC_SHIPPING_DAYS/u);
+  assert.match(nextConfig, /NEXT_PUBLIC_SHIPPING_CUTOFF_TIME/u);
+  assert.match(nextConfig, /NEXT_PUBLIC_SHIPPING_TIME_ZONE/u);
 });
 
 test("checkout retries retain idempotency after ambiguous failures", () => {

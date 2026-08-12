@@ -14,6 +14,33 @@ This document describes the current timing rules used across pickup, prep, the s
 Source:
 - `lib/pickupDetails.js`
 
+## Carrier Shipping Schedule
+
+Carrier shipping is separate from farmers-market pickup. Its single source of
+truth is the public deployment configuration:
+
+- `NEXT_PUBLIC_SHIPPING_DAYS=Saturday`
+- `NEXT_PUBLIC_SHIPPING_CUTOFF_TIME=07:00`
+- `NEXT_PUBLIC_SHIPPING_TIME_ZONE=America/Chicago`
+
+Operational meaning with the current values:
+
+- Saturday is the estimated carrier-handoff day.
+- Only an eligible in-stock order completed strictly before `7:00am` Central on
+  Saturday qualifies for an estimated handoff that Saturday.
+- An order completed at exactly `7:00am`, or any time afterward, moves to the
+  next configured shipping cycle.
+- Preorder shipping orders use the first configured shipping cycle after all
+  required items are estimated to be ready.
+- Standard and expedited delivery calculations start from the estimated
+  carrier-handoff date, not from the order date.
+- Additional weekly handoff days can be added later as a comma-separated list,
+  such as `Wednesday,Saturday`, without changing endpoint-specific logic.
+
+Source:
+- `lib/shippingPricing.js`
+- `.env.example`
+
 ## Farmers Market Schedule
 
 - Market: Fulshear Farmers Market

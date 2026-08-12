@@ -7,13 +7,13 @@ This page explains, in plain English, which emails Vida Verde sends automaticall
 Vida Verde currently sends 3 automatic customer emails:
 
 1. Order confirmation
-2. Pre-order ready for pickup
+2. Pre-order ready update
 3. Friday pickup reminder
 
 Vida Verde does **not** currently send:
 
 - a welcome email after someone joins the email list
-- a shipping update email
+- a standalone shipping-confirmation or tracking email
 - an automatic marketing newsletter from this website
 
 ## General Rules For All Automated Emails
@@ -21,7 +21,7 @@ Vida Verde does **not** currently send:
 - These emails only go out if the email system is set up and working.
 - If the email system is not set up, the website skips the email instead of crashing.
 - These are service emails, not marketing emails.
-- The goal is to give customers order and pickup information they need.
+- The goal is to give customers the order, pickup, and shipping information they need.
 - If an order-confirmation email automation fails after payment succeeds, checkout still confirms the order and shows a fallback notice telling the customer how to contact Vida Verde.
 - The `Email List` spreadsheet tab includes a separate pending-email panel. It shows the recipient, what the email is for, its current status, why it is waiting, and the related order ID without adding order customers to the marketing subscriber list.
 
@@ -49,6 +49,9 @@ Vida Verde does **not** currently send:
 - A list of what was purchased
 - The subtotal, tax, shipping, and total
 - The shipping address, if it is a shipping order
+- The estimated carrier-handoff date for shipping orders. It comes from the
+  configured shipping days, strict cutoff time, and timezone; delivery timing
+  is calculated from that handoff date.
 - The pickup details, if it is a market pickup order
 - A downloadable calendar file for market pickup orders with an assigned pickup date
 - A support text number in case the customer has questions
@@ -66,18 +69,18 @@ If the order contains pre-order items, the email explains that clearly:
 
 - This email uses the main Vida Verde email banner.
 
-## 2. Pre-Order Ready For Pickup
+## 2. Pre-Order Ready Update
 
 ### When a customer gets it
 
-- When a restock makes their pre-ordered pickup items ready
+- When a restock makes their pre-ordered pickup or shipping items ready
 
 This can happen on **any day of the week**. It is **not** limited to Fridays.
 
 ### Important rules
 
 - It is only for paid orders.
-- It is only for market pickup orders.
+- It supports both market-pickup and carrier-shipping orders.
 - It is only sent for pre-order items that have just become ready.
 - The system marks each release so the same release alert is not sent twice.
 - If the customer still has other pre-order items that are not ready yet, the email says more updates will come later.
@@ -88,11 +91,10 @@ This can happen on **any day of the week**. It is **not** limited to Fridays.
 - Which items just became ready
 - Sometimes the customer's full pickup list for that order, if other items were already ready earlier
 - Any preorder items from the same order that are still not ready yet
-- The market name
-- The pickup day
-- The market address
-- The pickup window
-- A downloadable calendar file for the full Saturday pickup window that includes ready and not-ready item notes
+- For pickup orders: the market name, pickup day, market address, pickup window,
+  and a downloadable calendar file for the full Saturday pickup window
+- For shipping orders: the estimated carrier-handoff date, expected arrival,
+  shipping address, and tracking when available
 - A reminder to text if they cannot make pickup
 
 ### Design
@@ -138,7 +140,7 @@ This reminder can also be sent manually by the team if needed.
 
 The website stores email signups, but it does not automatically send a welcome email after signup.
 
-The website also tracks orders and shipments, but it does not currently send:
+The website also tracks orders and shipments, but it does not currently send these standalone emails:
 
 - shipping confirmation emails
 - tracking emails
@@ -149,11 +151,11 @@ The website also tracks orders and shipments, but it does not currently send:
 | Email | When it sends | Main purpose |
 | --- | --- | --- |
 | Order confirmation | Right after a paid order is successfully recorded | Confirms the purchase and shows the order details |
-| Pre-order ready for pickup | Five minutes after the latest restock makes preorder items ready | Consolidates newly ready products from the same order into one customer update |
+| Pre-order ready update | Five minutes after the latest restock makes preorder items ready | Consolidates newly ready products into one pickup or shipping update |
 | Friday pickup reminder | Friday at about 12pm Central Time | Reminds the customer to pick up on Saturday |
 
 ## If You Want The Simplest Possible Mental Model
 
 - Order confirmation = "We got your paid order."
-- Pre-order ready for pickup = "Your delayed item is ready now."
+- Pre-order ready update = "Your delayed item is ready now."
 - Friday pickup reminder = "Do not forget to come tomorrow."

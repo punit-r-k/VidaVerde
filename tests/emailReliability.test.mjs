@@ -166,7 +166,7 @@ test("confirmation emails preserve only an authoritative exact expected-arrival 
       shipping_option: "normal",
       shipping_estimate: "Estimated 1 business day after carrier receipt"
     }).expectedArrivalText,
-    "Estimated delivery in 3–5 business days after Wednesday shipment."
+    "Estimated delivery in 3–5 business days after the estimated carrier-handoff date."
   );
   assert.doesNotMatch(rendered, /\bUPSDAP\b|\bGround\b|carrier receipt/i);
 });
@@ -184,7 +184,7 @@ test("confirmation emails use purchased-quote timing instead of stale checkout t
   });
   const rendered = `${email.text}\n${email.html}`;
 
-  assert.match(rendered, /Estimated ship date: Wed, Aug 12/);
+  assert.match(rendered, /Estimated carrier-handoff date: Wed, Aug 12/);
   assert.match(rendered, /Expected arrival: Mon, Aug 17/);
   assert.doesNotMatch(rendered, /August 6, 2026/);
 });
@@ -216,7 +216,7 @@ test("preorder-ready shipping templates show readable timing, handling, and trac
   const liveRendered = `${live.text}\n${live.html}`;
 
   assert.match(live.text, /Method: Shipping/);
-  assert.match(live.text, /Estimated ship date:/);
+  assert.match(live.text, /Estimated carrier-handoff date:/);
   assert.match(live.text, /Expected arrival:/);
   assert.match(liveRendered, /Open and inspect the package/);
   assert.match(liveRendered, /TRACK-123/);

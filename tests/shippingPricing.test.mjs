@@ -6,6 +6,7 @@ import {
   EXPEDITED_SHIPPING_OPTION_ID,
   getCustomerShippingOptions,
   getEstimatedShipDate,
+  getExpectedDeliveryDateFromShipDate,
   getLatestExpectedDeliveryDate,
   getNextPackingDate,
   getShippingOptionsForCart,
@@ -14,6 +15,10 @@ import {
   isContinentalUnitedStatesShippingAddressEligible,
   NORMAL_SHIPPING_OPTION_ID,
   normalizeShippingOptionId,
+  parseShippingCutoffTime,
+  parseShippingScheduleDays,
+  SHIPPING_CUTOFF_LABEL,
+  SHIPPING_SCHEDULE_DAY_LABEL,
   SHIPPING_SCHEDULE_TIME_ZONE
 } from "../lib/shippingPricing.js";
 
@@ -80,12 +85,14 @@ test("shipping option IDs normalize to Normal or Expedited", () => {
   });
 });
 
-test("both shipping options include Wednesday shipment and their delivery windows", () => {
+test("both shipping options calculate delivery after the configured carrier handoff", () => {
   const shipping = getShippingOptionsForCart(buildCart({ sauerkrautQty: 1 }));
-  assert.match(shipping.normalOption.transitLabel, /Wednesday shipment/i);
+  assert.match(shipping.normalOption.transitLabel, /estimated carrier-handoff date/i);
   assert.match(shipping.normalOption.transitLabel, /3–5 business days/i);
-  assert.match(shipping.expeditedOption.transitLabel, /Wednesday shipment/i);
+  assert.match(shipping.expeditedOption.transitLabel, /estimated carrier-handoff date/i);
   assert.match(shipping.expeditedOption.transitLabel, /1–3 business days/i);
+  assert.equal(SHIPPING_SCHEDULE_DAY_LABEL, "Saturday");
+  assert.equal(SHIPPING_CUTOFF_LABEL, "7:00 AM Central Time");
 });
 
 test("carrier shipping eligibility includes only the continental United States", () => {
@@ -98,12 +105,13 @@ test("carrier shipping eligibility includes only the continental United States",
   assert.match(CONTINENTAL_US_SHIPPING_AREA_ERROR_MESSAGE, /continental United States/i);
 });
 
-test("next shipping date follows the weekly Wednesday 8 AM cutoff", () => {
+test("next shipping date uses the strict Saturday 7 AM cutoff", () => {
   const cases = [
-    ["Monday", "2026-06-08T15:00:00-05:00", "2026-06-10"],
-    ["Wednesday cutoff", "2026-06-10T08:00:00-05:00", "2026-06-10"],
-    ["After cutoff", "2026-06-10T08:01:00-05:00", "2026-06-17"],
-    ["Sunday", "2026-06-14T12:00:00-05:00", "2026-06-17"]
+    ["Monday", "2026-06-08T15:00:00-05:00", "2026-06-13"],
+    ["Before cutoff", "2026-06-13T06:59:59-05:00", "2026-06-13"],
+    ["Exact cutoff", "2026-06-13T07:00:00-05:00", "2026-06-20"],
+    ["After cutoff", "2026-06-13T07:01:00-05:00", "2026-06-20"],
+    ["Sunday", "2026-06-14T12:00:00-05:00", "2026-06-20"]
   ];
 
   for (const [label, orderDateInput, expectedDate] of cases) {
@@ -111,28 +119,28 @@ test("next shipping date follows the weekly Wednesday 8 AM cutoff", () => {
   }
 });
 
-test("delivery timing starts from the Wednesday handoff", () => {
+test("delivery timing starts from the configured Saturday handoff", () => {
   const shipping = getShippingOptionsForCart(buildCart({ sauerkrautQty: 1 }));
   const orderDate = new Date("2026-06-08T12:00:00-05:00");
 
-  assert.equal(formatDateKey(getEstimatedShipDate({ orderDate })), "2026-06-10");
+  assert.equal(formatDateKey(getEstimatedShipDate({ orderDate })), "2026-06-13");
   assert.equal(
     formatDateKey(getLatestExpectedDeliveryDate({
       orderDate,
       shippingOption: shipping.normalOption
     })),
-    "2026-06-17"
+    "2026-06-19"
   );
   assert.equal(
     formatDateKey(getLatestExpectedDeliveryDate({
       orderDate,
       shippingOption: shipping.expeditedOption
     })),
-    "2026-06-15"
+    "2026-06-17"
   );
 });
 
-test("preorder readiness precedes the Wednesday handoff and carrier transit", () => {
+test("preorder readiness precedes the configured handoff and carrier transit", () => {
   const shipping = getShippingOptionsForCart(buildCart({ sauerkrautQty: 1 }));
   assert.equal(
     formatDateKey(getLatestExpectedDeliveryDate({
@@ -140,8 +148,62 @@ test("preorder readiness precedes the Wednesday handoff and carrier transit", ()
       shippingOption: shipping.normalOption,
       hasPreorderItems: true
     })),
-    "2026-07-01"
+    "2026-07-03"
   );
+});
+
+test("delivery can be calculated directly from a frozen carrier-handoff date", () => {
+  const shipping = getShippingOptionsForCart(buildCart({ sauerkrautQty: 1 }));
+  assert.equal(
+    formatDateKey(getExpectedDeliveryDateFromShipDate({
+      shipDate: new Date("2026-06-13T07:00:00-05:00"),
+      shippingOption: shipping.normalOption
+    })),
+    "2026-06-19"
+  );
+});
+
+test("shipping schedule configuration supports multiple days and rejects invalid values", () => {
+  assert.deepEqual(parseShippingScheduleDays("Wednesday, Saturday,Wednesday"), [
+    { index: 3, name: "Wednesday" },
+    { index: 6, name: "Saturday" }
+  ]);
+  assert.deepEqual(parseShippingCutoffTime("07:00"), {
+    hour: 7,
+    minute: 0,
+    value: "07:00"
+  });
+  assert.throws(() => parseShippingScheduleDays("Funday"), /Invalid shipping day/u);
+  assert.throws(() => parseShippingCutoffTime("7:00"), /Invalid shipping cutoff/u);
+});
+
+test("multiple configured ship days drive the actual cutoff calculation", async () => {
+  const previousDays = process.env.NEXT_PUBLIC_SHIPPING_DAYS;
+  const previousCutoff = process.env.NEXT_PUBLIC_SHIPPING_CUTOFF_TIME;
+  const previousTimeZone = process.env.NEXT_PUBLIC_SHIPPING_TIME_ZONE;
+
+  process.env.NEXT_PUBLIC_SHIPPING_DAYS = "Wednesday,Saturday";
+  process.env.NEXT_PUBLIC_SHIPPING_CUTOFF_TIME = "07:00";
+  process.env.NEXT_PUBLIC_SHIPPING_TIME_ZONE = "America/Chicago";
+
+  try {
+    const configured = await import(`../lib/shippingPricing.js?multi-day=${Date.now()}`);
+    assert.equal(
+      formatDateKey(configured.getNextPackingDate(new Date("2026-06-10T06:59:59-05:00"))),
+      "2026-06-10"
+    );
+    assert.equal(
+      formatDateKey(configured.getNextPackingDate(new Date("2026-06-10T07:00:00-05:00"))),
+      "2026-06-13"
+    );
+  } finally {
+    if (previousDays === undefined) delete process.env.NEXT_PUBLIC_SHIPPING_DAYS;
+    else process.env.NEXT_PUBLIC_SHIPPING_DAYS = previousDays;
+    if (previousCutoff === undefined) delete process.env.NEXT_PUBLIC_SHIPPING_CUTOFF_TIME;
+    else process.env.NEXT_PUBLIC_SHIPPING_CUTOFF_TIME = previousCutoff;
+    if (previousTimeZone === undefined) delete process.env.NEXT_PUBLIC_SHIPPING_TIME_ZONE;
+    else process.env.NEXT_PUBLIC_SHIPPING_TIME_ZONE = previousTimeZone;
+  }
 });
 
 test("historical fastest metadata resolves to Expedited while retaining recorded labels", () => {

@@ -76,7 +76,10 @@ const assertSafeProductionCorsConfig = () => {
     "EASYPOST_FROM_STATE",
     "EASYPOST_FROM_ZIP",
     "EASYPOST_FROM_PHONE",
-    "EASYPOST_FROM_EMAIL"
+    "EASYPOST_FROM_EMAIL",
+    "NEXT_PUBLIC_SHIPPING_DAYS",
+    "NEXT_PUBLIC_SHIPPING_CUTOFF_TIME",
+    "NEXT_PUBLIC_SHIPPING_TIME_ZONE"
   ];
   const missingShippingVariables = requiredShippingVariables.filter(
     (name) => !String(process.env[name] || "").trim()
@@ -84,6 +87,61 @@ const assertSafeProductionCorsConfig = () => {
   if (missingShippingVariables.length > 0) {
     throw new Error(
       `Incomplete production shipping configuration: set ${missingShippingVariables.join(", ")}.`
+    );
+  }
+
+  const shippingDays = splitCsv(process.env.NEXT_PUBLIC_SHIPPING_DAYS);
+  const validShippingDays = new Set([
+    "sun",
+    "sunday",
+    "mon",
+    "monday",
+    "tue",
+    "tues",
+    "tuesday",
+    "wed",
+    "weds",
+    "wednesday",
+    "thu",
+    "thur",
+    "thurs",
+    "thursday",
+    "fri",
+    "friday",
+    "sat",
+    "saturday"
+  ]);
+  if (
+    shippingDays.length === 0 ||
+    shippingDays.some((day) => !validShippingDays.has(day.toLowerCase()))
+  ) {
+    throw new Error(
+      "Invalid production shipping schedule: NEXT_PUBLIC_SHIPPING_DAYS must contain comma-separated weekday names."
+    );
+  }
+
+  const shippingCutoff = String(
+    process.env.NEXT_PUBLIC_SHIPPING_CUTOFF_TIME || ""
+  ).trim();
+  const cutoffMatch = /^(?<hour>\d{2}):(?<minute>\d{2})$/.exec(shippingCutoff);
+  if (
+    !cutoffMatch ||
+    Number(cutoffMatch.groups.hour) > 23 ||
+    Number(cutoffMatch.groups.minute) > 59
+  ) {
+    throw new Error(
+      "Invalid production shipping schedule: NEXT_PUBLIC_SHIPPING_CUTOFF_TIME must use 24-hour HH:mm format."
+    );
+  }
+
+  const shippingTimeZone = String(
+    process.env.NEXT_PUBLIC_SHIPPING_TIME_ZONE || ""
+  ).trim();
+  try {
+    new Intl.DateTimeFormat("en-US", { timeZone: shippingTimeZone }).format();
+  } catch {
+    throw new Error(
+      "Invalid production shipping schedule: NEXT_PUBLIC_SHIPPING_TIME_ZONE must be a valid IANA time zone."
     );
   }
 

@@ -14,9 +14,9 @@ const appsScriptSource = fs.readFileSync(
 test("preorder-ready emails use only canonical consumer shipping wording", () => {
   assert.doesNotMatch(preorderEmailSource, /shipping_option_label/u);
   assert.doesNotMatch(preorderEmailSource, /shippingOptionLabel/u);
-  assert.doesNotMatch(preorderEmailSource, /\bcarrier\b|\bservice\b/iu);
+  assert.doesNotMatch(preorderEmailSource, /\bUPSDAP\b|carrier receipt|\bservice\b/iu);
   assert.match(preorderEmailSource, /getConsumerShippingDetails/u);
-  assert.match(preorderEmailSource, /Estimated ship date/u);
+  assert.match(preorderEmailSource, /Estimated carrier-handoff date/u);
   assert.match(preorderEmailSource, /Expected arrival/u);
   assert.match(preorderEmailSource, /Open and inspect the package/u);
   assert.match(preorderEmailSource, /Refrigerate upon arrival/u);
