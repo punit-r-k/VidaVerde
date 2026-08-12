@@ -417,6 +417,23 @@ const runOrderSideEffects = async ({
     };
   }
 
+  const confirmationResult = await maybeSendCustomerConfirmationEmail({
+    orderId,
+    fulfillment,
+    currency,
+    subtotal,
+    tax,
+    shipping,
+    total,
+    placedAt,
+    receiptNumber,
+    paymentMethodLabel,
+    customer,
+    items
+  }, {
+    failOnAutomationError: strictConfirmationEmailAutomation
+  });
+
   const { shipmentId, error: shipmentError } = await syncShipmentForOrder(orderId);
   if (shipmentError) {
     console.error("sync_shipment_for_order error:", shipmentError);
@@ -435,22 +452,7 @@ const runOrderSideEffects = async ({
     }
   }
 
-  return maybeSendCustomerConfirmationEmail({
-    orderId,
-    fulfillment,
-    currency,
-    subtotal,
-    tax,
-    shipping,
-    total,
-    placedAt,
-    receiptNumber,
-    paymentMethodLabel,
-    customer,
-    items
-  }, {
-    failOnAutomationError: strictConfirmationEmailAutomation
-  });
+  return confirmationResult;
 };
 
 const finalizePaymentIntent = async (intent) => {
@@ -675,6 +677,7 @@ const finalizePaymentIntent = async (intent) => {
 };
 
 export const runtime = "nodejs";
+export const maxDuration = 60;
 
 export async function POST(request) {
   const security = await securePublicRoute(request, {

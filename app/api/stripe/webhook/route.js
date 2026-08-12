@@ -29,6 +29,7 @@ import { supabaseAdmin } from "@/lib/supabaseAdmin";
 import { isFinancialTestOrder } from "@/lib/testOrders";
 
 export const runtime = "nodejs";
+export const maxDuration = 60;
 
 const STRIPE_WEBHOOK_RATE_LIMIT = getRouteRateLimitConfig("STRIPE_WEBHOOK_POST", {
   windowMs: 60_000,
@@ -391,6 +392,23 @@ const runOrderSideEffects = async ({
     };
   }
 
+  const confirmationResult = await maybeSendCustomerConfirmationEmail({
+    orderId,
+    fulfillment,
+    currency,
+    subtotal,
+    tax,
+    shipping,
+    total,
+    placedAt,
+    receiptNumber,
+    paymentMethodLabel,
+    customer,
+    items
+  }, {
+    failOnAutomationError: strictConfirmationEmailAutomation
+  });
+
   const { shipmentId, error: shipmentError } = await syncShipmentForOrder(orderId);
   if (shipmentError) {
     console.error("sync_shipment_for_order error:", shipmentError);
@@ -409,22 +427,7 @@ const runOrderSideEffects = async ({
     }
   }
 
-  return maybeSendCustomerConfirmationEmail({
-    orderId,
-    fulfillment,
-    currency,
-    subtotal,
-    tax,
-    shipping,
-    total,
-    placedAt,
-    receiptNumber,
-    paymentMethodLabel,
-    customer,
-    items
-  }, {
-    failOnAutomationError: strictConfirmationEmailAutomation
-  });
+  return confirmationResult;
 };
 
 const handlePaymentIntentSucceeded = async (eventIntent, effectiveAt) => {

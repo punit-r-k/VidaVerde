@@ -70,6 +70,8 @@ test("Apps Script installs one permanent trigger for each email worker", () => {
 });
 
 test("preorder scanning and producer error reporting are bounded and structured", () => {
+  assert.match(preorderEmailSource, /PREORDER_READY_EMAIL_DELAY_MS = 5 \* 60 \* 1000/u);
+  assert.match(preorderEmailSource, /const cutoff = nowMs - PREORDER_READY_EMAIL_DELAY_MS/u);
   assert.match(preorderEmailSource, /PREORDER_READY_EMAIL_ORDER_LIMIT = 4/u);
   assert.match(preorderEmailSource, /PREORDER_READY_EMAIL_MAX_EVENTS_PER_ORDER = 200/u);
   assert.match(preorderEmailSource, /PREORDER_READY_EMAIL_WORKER_BUDGET_MS = 45_000/u);

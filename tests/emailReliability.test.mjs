@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import fs from "node:fs";
 import { register } from "node:module";
 import test from "node:test";
 
@@ -41,19 +42,23 @@ register(`data:text/javascript,${encodeURIComponent(loaderSource)}`);
 
 const {
   buildEmailContent,
+  ORDER_CONFIRMATION_BCC_RECIPIENTS,
   ORDER_CONFIRMATION_TRACKING_STATES,
   resolveOrderConfirmationTrackingState
 } = await import("../lib/orderConfirmationEmail.js?email-reliability-test");
 const {
   buildOrderConfirmationMessageId,
-  getEmailJobDeliveryPolicy,
-  shouldQueueOrderConfirmationEmail
+  getEmailJobDeliveryPolicy
 } = await import("../lib/emailJobQueue.js?email-reliability-test");
 const { getConsumerShippingDetails } = await import(
   "../lib/consumerShipping.js?email-reliability-test"
 );
 const { buildReadyEmailContent } = await import(
   "../lib/preorderReadyEmail.js?email-reliability-test"
+);
+const confirmationDispatchSource = fs.readFileSync(
+  new URL("../lib/orderConfirmationDispatch.js", import.meta.url),
+  "utf8"
 );
 
 const BASE_PREORDER_STATUS = {
@@ -96,6 +101,18 @@ const buildShippingEmail = ({
   trackingState,
   pickupContext: { pickupScenario: "shipping" },
   hasPickupCalendarAttachment: false
+});
+
+test("order confirmations always BCC the three required business addresses", () => {
+  assert.deepEqual([...ORDER_CONFIRMATION_BCC_RECIPIENTS], [
+    "punit@peridotkonda.com",
+    "vidaverdemicrogreens@gmail.com",
+    "vvsauerkraut@gmail.com"
+  ]);
+  assert.match(
+    fs.readFileSync(new URL("../lib/orderConfirmationEmail.js", import.meta.url), "utf8"),
+    /bcc: ORDER_CONFIRMATION_BCC_RECIPIENTS/u
+  );
 });
 
 test("confirmation emails replace legacy carrier metadata with canonical consumer details", () => {
@@ -257,11 +274,11 @@ test("tracking states produce explicit preorder, test, and available behavior", 
       isTestOrder: true,
       allowTestShipping: true
     }),
-    null
+    ORDER_CONFIRMATION_TRACKING_STATES.PENDING
   );
   assert.equal(
     resolveOrderConfirmationTrackingState({ fulfillment: "ship" }),
-    null
+    ORDER_CONFIRMATION_TRACKING_STATES.PENDING
   );
   assert.equal(
     resolveOrderConfirmationTrackingState({ fulfillment: "market" }),
@@ -274,6 +291,13 @@ test("tracking states produce explicit preorder, test, and available behavior", 
   });
   assert.match(preorderEmail.text, /Pending until your pre-order is ready/);
 
+  const pendingEmail = buildShippingEmail({
+    trackingState: ORDER_CONFIRMATION_TRACKING_STATES.PENDING,
+    trackingNumbers: []
+  });
+  assert.match(pendingEmail.text, /email the tracking number when the shipment is prepared/i);
+  assert.doesNotMatch(pendingEmail.text, /until your pre-order is ready/i);
+
   const testEmail = buildShippingEmail({
     trackingState: ORDER_CONFIRMATION_TRACKING_STATES.TEST_NOT_APPLICABLE,
     trackingNumbers: []
@@ -282,31 +306,17 @@ test("tracking states produce explicit preorder, test, and available behavior", 
   assert.match(testEmail.html, /Not applicable/);
 });
 
-test("email queue is the fail-safe default and inline requires an explicit override", () => {
-  const previous = process.env.ORDER_CONFIRMATION_EMAIL_MODE;
-  const previousNodeEnv = process.env.NODE_ENV;
-  try {
-    process.env.NODE_ENV = "development";
-    delete process.env.ORDER_CONFIRMATION_EMAIL_MODE;
-    assert.equal(shouldQueueOrderConfirmationEmail(), true);
+test("confirmation delivery is attempted immediately after its durable job is created", () => {
+  const dispatch = confirmationDispatchSource.slice(
+    confirmationDispatchSource.indexOf("export async function maybeSendCustomerConfirmationEmail"),
+    confirmationDispatchSource.length
+  );
+  const enqueueIndex = dispatch.indexOf("await enqueueOrderConfirmationEmail(emailPayload)");
+  const processIndex = dispatch.indexOf("await processOrderConfirmationEmailJob(queueResult.jobId)");
 
-    process.env.ORDER_CONFIRMATION_EMAIL_MODE = "queue";
-    assert.equal(shouldQueueOrderConfirmationEmail(), true);
-
-    process.env.ORDER_CONFIRMATION_EMAIL_MODE = "unexpected-value";
-    assert.equal(shouldQueueOrderConfirmationEmail(), true);
-
-    process.env.ORDER_CONFIRMATION_EMAIL_MODE = "inline";
-    assert.equal(shouldQueueOrderConfirmationEmail(), false);
-
-    process.env.NODE_ENV = "production";
-    assert.equal(shouldQueueOrderConfirmationEmail(), true);
-  } finally {
-    if (previous === undefined) delete process.env.ORDER_CONFIRMATION_EMAIL_MODE;
-    else process.env.ORDER_CONFIRMATION_EMAIL_MODE = previous;
-    if (previousNodeEnv === undefined) delete process.env.NODE_ENV;
-    else process.env.NODE_ENV = previousNodeEnv;
-  }
+  assert.ok(enqueueIndex >= 0, "confirmation delivery must retain a durable job");
+  assert.ok(processIndex > enqueueIndex, "the durable job must be processed immediately");
+  assert.doesNotMatch(dispatch, /ORDER_CONFIRMATION_EMAIL_MODE|shouldQueueOrderConfirmationEmail/u);
 });
 
 test("message identity is deterministic and scoped to the configured sender domain", () => {
@@ -334,17 +344,6 @@ test("only actual SMTP failures consume the five-attempt delivery budget", () =>
   const previous = process.env.EMAIL_JOB_RETRY_DELAY_MS;
   delete process.env.EMAIL_JOB_RETRY_DELAY_MS;
   try {
-    assert.deepEqual(getEmailJobDeliveryPolicy({
-      ok: false,
-      code: "tracking_pending"
-    }), {
-      outcome: "deferred",
-      code: "tracking_pending",
-      consumeAttempt: false,
-      terminal: false,
-      retryDelayMs: 5 * 60 * 1000
-    });
-
     assert.deepEqual(getEmailJobDeliveryPolicy({
       ok: false,
       code: "smtp_failed"

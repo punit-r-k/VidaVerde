@@ -243,8 +243,9 @@ test("checkout protection is mandatory and retains exact expected arrival metada
   );
 });
 
-test("producer email processing exposes structured outcomes and production always queues", () => {
-  assert.match(emailQueue, /process\.env\.NODE_ENV === "production" \|\| mode !== "inline"/u);
+test("producer email recovery exposes bounded structured outcomes", () => {
+  assert.doesNotMatch(emailQueue, /ORDER_CONFIRMATION_EMAIL_MODE|shouldQueueOrderConfirmationEmail/u);
+  assert.match(emailQueue, /process\.env\.EMAIL_JOB_RETRY_DELAY_MS/u);
   assert.match(emailQueue, /const outcomes = \[\]/u);
   assert.match(emailQueue, /EMAIL_JOB_WORKER_LIMIT = 5/u);
   assert.match(emailQueue, /EMAIL_JOB_WORKER_BUDGET_MS = 25_000/u);

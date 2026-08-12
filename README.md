@@ -185,20 +185,20 @@ Optional for customer order confirmation and preorder-ready emails:
 - `ORDER_EMAIL_REPLY_TO`
 - `ORDER_EMAIL_BCC`
 - `ORDER_EMAIL_BANNER_URL`
-- `ORDER_CONFIRMATION_EMAIL_MODE=queue` is the production default; set `inline`
-  only for local development without the Apps Script worker
-- `EMAIL_JOB_RETRY_DELAY_MS` controls SMTP retry spacing (tracking waits use a
-  separate five-minute delay and do not consume SMTP attempts)
+- `EMAIL_JOB_RETRY_DELAY_MS` controls SMTP retry spacing after an immediate
+  confirmation delivery attempt fails
 
-The webhook sends the customer confirmation email after a paid order is recorded.
+The verified-payment request sends the customer confirmation email immediately
+after a paid order is recorded, before shipment and label automation runs.
 To avoid duplicate sends on normal webhook retries, the database now tracks
 `orders.customer_confirmation_email_sent_at`. Apply the updated
 `supabase/schema.sql` in Supabase before relying on this in production.
 The default banner image is bundled at `public/email/order-confirmation-banner.png`.
-Confirmations are queued by default, leased to one worker at a time, and processed
-through `POST /api/admin/email-jobs`. Run Apps Script `setupTriggers()` after
-installing script updates so `processEmailQueue` runs every five minutes. The
-Customer Emails menu also provides a manual retry for terminal failed jobs.
+Confirmations are written to a durable job first, then leased and sent immediately
+in the verified-payment request. `POST /api/admin/email-jobs` and the Apps Script
+`processEmailQueue` trigger remain as recovery paths for temporary SMTP or
+dependency failures. The Customer Emails menu also provides a manual retry for
+terminal failed jobs.
 
 Preorder-ready emails are sent separately from `lib/preorderReadyEmail.js` by a
 permanent five-minute worker. The database cutoff consolidates releases for five

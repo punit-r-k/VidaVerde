@@ -33,6 +33,25 @@ test("succeeded reconciliation records current Stripe state before side effects"
   }
 });
 
+test("verified payments attempt confirmation delivery before shipment automation", () => {
+  for (const source of [finalizeRoute, webhookRoute]) {
+    const sideEffectsStart = source.indexOf("const runOrderSideEffects");
+    const sideEffectsEnd = source.indexOf("const handlePaymentIntentSucceeded", sideEffectsStart) >= 0
+      ? source.indexOf("const handlePaymentIntentSucceeded", sideEffectsStart)
+      : source.indexOf("const finalizePaymentIntent", sideEffectsStart);
+    const sideEffects = source.slice(sideEffectsStart, sideEffectsEnd);
+    const confirmationIndex = sideEffects.indexOf("await maybeSendCustomerConfirmationEmail({");
+    const shipmentIndex = sideEffects.indexOf("await syncShipmentForOrder(orderId)");
+
+    assert.ok(confirmationIndex >= 0, "confirmation delivery must be attempted");
+    assert.ok(
+      shipmentIndex > confirmationIndex,
+      "confirmation delivery must not wait for shipment or label automation"
+    );
+    assert.match(source, /export const maxDuration = 60/u);
+  }
+});
+
 test("event time is preserved independently from lookup completion time", () => {
   assert.match(financialStateHelper, /effectiveAt: normalizedPaidEffectiveAt/u);
   assert.match(financialStateHelper, /observedAt/u);

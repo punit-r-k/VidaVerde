@@ -33,6 +33,9 @@ Vida Verde does **not** currently send:
 ### Important rules
 
 - It should only be sent once per order.
+- Its first delivery attempt happens immediately after Stripe verifies the payment and the paid order is recorded.
+- It does not wait for the email worker, shipment tracking, or preorder-update consolidation.
+- Each confirmation BCCs `punit@peridotkonda.com`, `vidaverdemicrogreens@gmail.com`, and `vvsauerkraut@gmail.com`.
 - If the customer's email address is missing, it cannot be sent.
 - If the order details are incomplete, it cannot be sent.
 - If the confirmation email automation has a temporary problem, the paid order still completes and the customer sees a fallback message with support instructions.
