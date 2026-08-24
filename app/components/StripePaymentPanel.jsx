@@ -20,6 +20,40 @@ const PAYMENT_SETUP_ERROR_MESSAGE =
 const PAYMENT_NETWORK_ERROR_MESSAGE =
   "We couldn't reach the payment service. Please check your connection and try again.";
 
+function AcceptedPaymentMethods() {
+  return (
+    <div className="accepted-payments" aria-label="Accepted payment methods">
+      <span className="accepted-payments__label">Accepted payment methods</span>
+      <ul className="accepted-payments__list">
+        <li className="payment-method-badge payment-method-badge--amex" aria-label="American Express">
+          <span aria-hidden="true">AM<br />EX</span>
+        </li>
+        <li className="payment-method-badge payment-method-badge--apple-pay" aria-label="Apple Pay">
+          <span className="payment-method-badge__apple" aria-hidden="true" />
+          <span aria-hidden="true">Pay</span>
+        </li>
+        <li className="payment-method-badge payment-method-badge--discover" aria-label="Discover">
+          <span aria-hidden="true">DISC<span>O</span>VER</span>
+        </li>
+        <li className="payment-method-badge payment-method-badge--google-pay" aria-label="Google Pay">
+          <span className="payment-method-badge__google" aria-hidden="true">G</span>
+          <span aria-hidden="true">Pay</span>
+        </li>
+        <li className="payment-method-badge payment-method-badge--mastercard" aria-label="Mastercard">
+          <span className="payment-method-badge__mastercard" aria-hidden="true">
+            <i />
+            <i />
+          </span>
+        </li>
+        <li className="payment-method-badge payment-method-badge--visa" aria-label="Visa">
+          <span aria-hidden="true">VISA</span>
+        </li>
+      </ul>
+      <span className="accepted-payments__note">Wallet options appear on supported devices.</span>
+    </div>
+  );
+}
+
 const formatCurrency = (amountInCents) => {
   const amount = Number(amountInCents);
   if (!Number.isFinite(amount)) return "$0.00";
@@ -204,6 +238,7 @@ function StripePaymentForm({
 
   return (
     <div className="payment-form">
+      <AcceptedPaymentMethods />
       <div className="payment-element-wrap">
         <PaymentElement
           options={{

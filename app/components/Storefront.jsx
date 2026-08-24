@@ -34,10 +34,7 @@ import {
   getShippingOptionsForCart,
   SHIPPING_CUTOFF_LABEL,
   SHIPPING_SCHEDULE_DAY_LABEL,
-  SHIPPING_SCHEDULE_EXPEDITED_LINE,
-  SHIPPING_SCHEDULE_EXPEDITED_NOTE,
   SHIPPING_SCHEDULE_INTRO,
-  SHIPPING_SCHEDULE_STANDARD_LINE,
   SHIPPING_SCHEDULE_TIME_ZONE,
   SHIPPING_SCHEDULE_TITLE
 } from "@/lib/shippingPricing";
@@ -2899,13 +2896,7 @@ export default function Storefront({ products, inventory = null, pickupDetails =
             <p>{SHIPPING_SCHEDULE_INTRO}</p>
             {hasActiveShippingPreview && !expeditedShippingIsDisplayed ? (
               <p>Your expected arrival is shown with the shipping price.</p>
-            ) : (
-              <>
-                <p>{SHIPPING_SCHEDULE_STANDARD_LINE}</p>
-                <p>{SHIPPING_SCHEDULE_EXPEDITED_LINE}</p>
-                <p>{SHIPPING_SCHEDULE_EXPEDITED_NOTE}</p>
-              </>
-            )}
+            ) : null}
             {showShipDate && estimatedShipDateText ? (
               <p className="shipping-schedule__ship-date">
                 <span>
