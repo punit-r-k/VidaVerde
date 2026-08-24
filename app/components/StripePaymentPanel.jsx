@@ -1,5 +1,6 @@
 "use client";
 
+import Image from "next/image";
 import { useMemo, useState } from "react";
 import {
   Elements,
@@ -20,34 +21,25 @@ const PAYMENT_SETUP_ERROR_MESSAGE =
 const PAYMENT_NETWORK_ERROR_MESSAGE =
   "We couldn't reach the payment service. Please check your connection and try again.";
 
+const ACCEPTED_PAYMENT_METHODS = [
+  { name: "American Express", src: "/payment-methods/american-express.svg" },
+  { name: "Apple Pay", src: "/payment-methods/apple-pay.svg" },
+  { name: "Discover", src: "/payment-methods/discover.svg" },
+  { name: "Google Pay", src: "/payment-methods/google-pay.svg" },
+  { name: "Mastercard", src: "/payment-methods/mastercard.svg" },
+  { name: "Visa", src: "/payment-methods/visa.svg" }
+];
+
 function AcceptedPaymentMethods() {
   return (
     <div className="accepted-payments" aria-label="Accepted payment methods">
       <span className="accepted-payments__label">Accepted payment methods</span>
       <ul className="accepted-payments__list">
-        <li className="payment-method-badge payment-method-badge--amex" aria-label="American Express">
-          <span aria-hidden="true">AM<br />EX</span>
-        </li>
-        <li className="payment-method-badge payment-method-badge--apple-pay" aria-label="Apple Pay">
-          <span className="payment-method-badge__apple" aria-hidden="true" />
-          <span aria-hidden="true">Pay</span>
-        </li>
-        <li className="payment-method-badge payment-method-badge--discover" aria-label="Discover">
-          <span aria-hidden="true">DISC<span>O</span>VER</span>
-        </li>
-        <li className="payment-method-badge payment-method-badge--google-pay" aria-label="Google Pay">
-          <span className="payment-method-badge__google" aria-hidden="true">G</span>
-          <span aria-hidden="true">Pay</span>
-        </li>
-        <li className="payment-method-badge payment-method-badge--mastercard" aria-label="Mastercard">
-          <span className="payment-method-badge__mastercard" aria-hidden="true">
-            <i />
-            <i />
-          </span>
-        </li>
-        <li className="payment-method-badge payment-method-badge--visa" aria-label="Visa">
-          <span aria-hidden="true">VISA</span>
-        </li>
+        {ACCEPTED_PAYMENT_METHODS.map((method) => (
+          <li key={method.name} className="payment-method-badge" aria-label={method.name}>
+            <Image src={method.src} alt="" width={60} height={40} aria-hidden="true" />
+          </li>
+        ))}
       </ul>
       <span className="accepted-payments__note">Wallet options appear on supported devices.</span>
     </div>

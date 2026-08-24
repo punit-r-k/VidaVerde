@@ -2356,140 +2356,16 @@ select:focus {
 .payment-method-badge {
   width: 51px;
   height: 34px;
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  border: 1px solid rgba(41, 54, 47, 0.16);
-  border-radius: 5px;
-  background: #fff;
-  box-shadow: 0 1px 3px rgba(41, 54, 47, 0.12);
-  color: #111;
-  line-height: 1;
+  display: block;
+  border-radius: 6px;
+  filter: drop-shadow(0 1px 2px rgba(41, 54, 47, 0.16));
   overflow: hidden;
 }
 
-.payment-method-badge--amex {
-  border-color: #0877bf;
-  background: #0877bf;
-  color: #fff;
-  font-size: 0.82rem;
-  font-style: italic;
-  font-weight: 900;
-  letter-spacing: -0.08em;
-  line-height: 0.68;
-  text-align: right;
-}
-
-.payment-method-badge--apple-pay {
-  gap: 3px;
-  font-size: 0.9rem;
-  font-weight: 600;
-}
-
-.payment-method-badge__apple {
-  position: relative;
-  width: 13px;
-  height: 16px;
-}
-
-.payment-method-badge__apple::before {
-  content: "";
-  position: absolute;
-  left: 1px;
-  bottom: 0;
-  width: 12px;
-  height: 12px;
-  border-radius: 48% 48% 52% 52% / 58% 58% 43% 43%;
-  background: #111;
-}
-
-.payment-method-badge__apple::after {
-  content: "";
-  position: absolute;
-  top: 0;
-  left: 7px;
-  width: 6px;
-  height: 4px;
-  border-radius: 90% 10% 90% 10%;
-  background: #111;
-  transform: rotate(-27deg);
-}
-
-.payment-method-badge--discover {
-  position: relative;
-  font-size: 0.56rem;
-  font-weight: 700;
-  letter-spacing: -0.04em;
-}
-
-.payment-method-badge--discover::after {
-  content: "";
-  position: absolute;
-  right: 4px;
-  bottom: 5px;
-  width: 31px;
-  height: 4px;
-  border-radius: 50%;
-  background: #f58220;
-  transform: rotate(-7deg);
-}
-
-.payment-method-badge--discover span span {
-  display: inline-flex;
-  width: 9px;
-  height: 9px;
-  align-items: center;
-  justify-content: center;
-  border-radius: 50%;
-  background: #f58220;
-  color: transparent;
-}
-
-.payment-method-badge--google-pay {
-  gap: 2px;
-  color: #5f6368;
-  font-size: 0.75rem;
-  font-weight: 500;
-}
-
-.payment-method-badge__google {
-  background: conic-gradient(from -45deg, #4285f4 0 25%, #34a853 0 50%, #fbbc05 0 75%, #ea4335 0);
-  background-clip: text;
-  color: transparent;
-  font-size: 1rem;
-  font-weight: 800;
-}
-
-.payment-method-badge__mastercard {
-  position: relative;
-  width: 35px;
-  height: 22px;
-}
-
-.payment-method-badge__mastercard i {
-  position: absolute;
-  top: 0;
-  width: 22px;
-  height: 22px;
-  border-radius: 50%;
-  background: #eb001b;
-}
-
-.payment-method-badge__mastercard i:first-child {
-  left: 0;
-}
-
-.payment-method-badge__mastercard i:last-child {
-  right: 0;
-  background: rgba(247, 158, 27, 0.88);
-}
-
-.payment-method-badge--visa {
-  color: #1434cb;
-  font-size: 0.94rem;
-  font-style: italic;
-  font-weight: 900;
-  letter-spacing: -0.06em;
+.payment-method-badge img {
+  width: 100%;
+  height: 100%;
+  display: block;
 }
 
 .accepted-payments__note {
@@ -2536,10 +2412,13 @@ select:focus {
   background: var(--surface-elevated);
   padding: 12px 14px;
   min-height: 46px;
-  display: flex;
-  align-items: center;
+  display: block;
   color: rgba(41, 54, 47, 0.76);
   font-size: 0.85rem;
+}
+
+.payment-element-wrap > div {
+  width: 100%;
 }
 
 .payment-element-submit {
