@@ -3291,7 +3291,7 @@ export default function Storefront({ products, inventory = null, pickupDetails =
                     </div>
                     <div>
                       <dt>When it arrives</dt>
-                      <dd>Open and inspect the package. Refrigerate upon arrival, then carefully burp each jar to release any existing gas</dd>
+                      <dd>Open and inspect the package. Carefully burp each jar to release any existing gas, then refrigerate</dd>
                     </div>
                   </dl>
                 </div>
@@ -4177,8 +4177,8 @@ export default function Storefront({ products, inventory = null, pickupDetails =
                     <li>Your final shipping price and expected arrival are shown before payment.</li>
                     <li>Your confirmation email includes tracking when it is available.</li>
                     <li>Open and inspect the package when it arrives.</li>
-                    <li>Refrigerate upon arrival.</li>
                     <li>Carefully burp each jar to release any existing gas.</li>
+                    <li>Refrigerate the jars.</li>
                   </ul>
                 ) : (
                   <ul className="pickup-policy-modal__steps">

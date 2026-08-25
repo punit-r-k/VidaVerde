@@ -129,8 +129,7 @@ test("confirmation emails replace legacy carrier metadata with canonical consume
   assert.match(email.text, /Expected arrival: Estimated delivery in 3–5 business days/);
   assert.match(email.text, /Shipment tracking:\n- TRACK-123/);
   assert.match(rendered, /Open and inspect the package/);
-  assert.match(rendered, /refrigerate upon arrival/i);
-  assert.match(rendered, /burp each jar to release any existing gas/i);
+  assert.match(rendered, /burp each jar to release any existing gas, then refrigerate/i);
   assert.doesNotMatch(rendered, /\bUPSDAP\b|\bGround\b|carrier receipt|EasyPost/i);
 });
 
