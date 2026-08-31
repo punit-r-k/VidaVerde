@@ -1158,16 +1158,25 @@ function syncShipments() {
   ensureSettingsSheet_();
 
   const settings = getSettings_();
-  const refreshResponse = postJson_(
-    `${settings.apiBaseUrl}/api/admin/shipments`,
-    settings,
-    {}
-  );
+  let refreshResponse = null;
   let refreshWarning = "";
-  if (!refreshResponse?.ok) {
+  try {
+    refreshResponse = postJson_(
+      `${settings.apiBaseUrl}/api/admin/shipments`,
+      settings,
+      {}
+    );
+  } catch (error) {
     refreshWarning =
-      `POST ${settings.apiBaseUrl}/api/admin/shipments failed (${refreshResponse?.status ?? "unknown"}): ${refreshResponse?.error || refreshResponse?.message || refreshResponse?.raw || "Unknown error"}`;
+      `POST ${settings.apiBaseUrl}/api/admin/shipments did not finish in time: ${error && error.message ? error.message : String(error)}`;
     Logger.log("Shipment refresh warning: %s", refreshWarning);
+  }
+  if (!refreshResponse?.ok) {
+    if (!refreshWarning) {
+      refreshWarning =
+        `POST ${settings.apiBaseUrl}/api/admin/shipments failed (${refreshResponse?.status ?? "unknown"}): ${refreshResponse?.error || refreshResponse?.message || refreshResponse?.raw || "Unknown error"}`;
+      Logger.log("Shipment refresh warning: %s", refreshWarning);
+    }
   }
   const automaticLabelErrors = Array.isArray(refreshResponse?.automatic_label_errors)
     ? refreshResponse.automatic_label_errors
@@ -1208,6 +1217,7 @@ function syncShipments() {
     "Name",
     "Address",
     "Order",
+    "Boxes Needed",
     "Prepaid Shipping Label",
     "Shipping Method",
     "Shipping Tier",
@@ -1258,6 +1268,7 @@ function syncShipments() {
         String(shipment?.customer_name || ""),
         formatShipmentAddress_(shipment),
         formatShipmentItems_(shipment),
+        formatShipmentBoxes_(shipment),
         formatShipmentLabelText_(shipment),
         String(shipment?.shipping_option_label || ""),
         String(shipment?.shipping_tier || ""),
@@ -1293,23 +1304,42 @@ function syncShipments() {
       .getRange(CONFIG.SHIPMENTS.START_ROW, 1, rows.length, rows[0].length)
       .setValues(sanitizeSheetRows_(rows));
 
+    // clearContents() intentionally preserves the sheet layout, but it also
+    // preserves stale blue/underlined hyperlink formatting. Reset every data
+    // column except the actual prepaid-label column before rebuilding links.
+    const nonLabelRanges = [
+      sheet.getRange(CONFIG.SHIPMENTS.START_ROW, 1, rows.length, 5),
+      sheet.getRange(
+        CONFIG.SHIPMENTS.START_ROW,
+        7,
+        rows.length,
+        headerValues[0].length - 6
+      )
+    ];
+    nonLabelRanges.forEach((range) =>
+      range
+        .setFontColor("#000000")
+        .setFontLine("none")
+        .setShowHyperlink(false)
+    );
+
     sheet
       .getRange(CONFIG.SHIPMENTS.START_ROW, 1, rows.length, 1)
       .setNumberFormat("yyyy-mm-dd hh:mm");
     sheet
-      .getRange(CONFIG.SHIPMENTS.START_ROW, 23, rows.length, 1)
-      .setNumberFormat("0");
-    sheet
       .getRange(CONFIG.SHIPMENTS.START_ROW, 24, rows.length, 1)
-      .setNumberFormat("$#,##0.00");
-    sheet
-      .getRange(CONFIG.SHIPMENTS.START_ROW, 25, rows.length, 2)
       .setNumberFormat("0");
     sheet
-      .getRange(CONFIG.SHIPMENTS.START_ROW, 12, rows.length, 3)
+      .getRange(CONFIG.SHIPMENTS.START_ROW, 25, rows.length, 1)
       .setNumberFormat("$#,##0.00");
     sheet
-      .getRange(CONFIG.SHIPMENTS.START_ROW, 5, rows.length, 1)
+      .getRange(CONFIG.SHIPMENTS.START_ROW, 26, rows.length, 2)
+      .setNumberFormat("0");
+    sheet
+      .getRange(CONFIG.SHIPMENTS.START_ROW, 13, rows.length, 3)
+      .setNumberFormat("$#,##0.00");
+    sheet
+      .getRange(CONFIG.SHIPMENTS.START_ROW, 6, rows.length, 1)
       .setRichTextValues(shipments.map((shipment) => [buildShipmentLabelRichText_(shipment)]));
   }
 
@@ -1320,16 +1350,17 @@ function syncShipments() {
     .setVerticalAlignment("middle");
   sheet.setFrozenRows(1);
   sheet.autoResizeColumns(1, headerValues[0].length);
-  sheet.getRange(CONFIG.SHIPMENTS.HEADER_ROW, 3, Math.max(sheet.getLastRow(), 1), 3).setWrap(true);
+  sheet.getRange(CONFIG.SHIPMENTS.HEADER_ROW, 3, Math.max(sheet.getLastRow(), 1), 4).setWrap(true);
   sheet.setColumnWidth(1, 145);
   sheet.setColumnWidth(2, 190);
   sheet.setColumnWidth(3, 320);
   sheet.setColumnWidth(4, 420);
-  sheet.setColumnWidth(5, 190);
-  sheet.setColumnWidth(23, 70);
-  sheet.setColumnWidth(24, 105);
-  sheet.setColumnWidth(25, 120);
+  sheet.setColumnWidth(5, 260);
+  sheet.setColumnWidth(6, 190);
+  sheet.setColumnWidth(24, 70);
+  sheet.setColumnWidth(25, 105);
   sheet.setColumnWidth(26, 120);
+  sheet.setColumnWidth(27, 120);
   sheet.setRowHeight(CONFIG.SHIPMENTS.HEADER_ROW, 44);
   sheet.showColumns(1, headerValues[0].length);
 }
@@ -1709,6 +1740,36 @@ function formatShipmentParcels_(parcels) {
   }).join(" | ");
 }
 
+function formatShipmentBoxes_(shipment) {
+  const sauerkrautUnits = Math.max(0, Math.trunc(Number(shipment?.sauerkraut_count || 0)));
+  const hotSauceUnits = Math.max(0, Math.trunc(Number(shipment?.hot_sauce_count || 0)));
+  const boxes = [];
+
+  if (sauerkrautUnits > 0) {
+    const twelveCountBoxes = Math.floor(sauerkrautUnits / 12);
+    const remainder = sauerkrautUnits % 12;
+    if (twelveCountBoxes > 0) boxes.push(`${twelveCountBoxes} × Box 12x SKT`);
+    if (remainder === 1) {
+      boxes.push("1 × Box 1x SKT");
+    } else if (remainder >= 2 && remainder <= 3) {
+      boxes.push("1 × Box 3x SKT");
+    } else if (remainder >= 4) {
+      boxes.push("1 × Box 12x SKT");
+    }
+  }
+
+  if (hotSauceUnits > 0) {
+    const fiveCountBoxes = Math.floor(hotSauceUnits / 5);
+    const remainder = hotSauceUnits % 5;
+    if (fiveCountBoxes > 0) {
+      boxes.push(`${fiveCountBoxes} × Hot Sauce Box — 5 Count with Handle`);
+    }
+    if (remainder > 0) boxes.push(`1 × Hot Sauce Box — ${remainder} Count`);
+  }
+
+  return boxes.join("; ");
+}
+
 function getShipmentLabelLinks_(shipment) {
   const parcels = Array.isArray(shipment?.parcels) ? shipment.parcels : [];
   const links = parcels.map((parcel) =>
@@ -1941,11 +2002,22 @@ function ensureFinancialDistributionsSheet_() {
 
 function sendQueuedPreorderReadyEmails() {
   const settings = getSettings_();
-  const response = postJson_(
-    `${settings.apiBaseUrl}/api/admin/preorder-ready-emails`,
-    settings,
-    {}
-  );
+  let response;
+  try {
+    response = postJson_(
+      `${settings.apiBaseUrl}/api/admin/preorder-ready-emails`,
+      settings,
+      {}
+    );
+  } catch (error) {
+    // The remote worker claims each email batch before doing irreversible work.
+    // A slow response can finish remotely without failing and retrying this trigger.
+    Logger.log(
+      "Preorder-ready email worker response timed out; the claimed batch will finish or its lease will expire safely: %s",
+      error && error.message ? error.message : String(error)
+    );
+    return;
+  }
 
   if (!response?.ok) {
     const firstError = Array.isArray(response?.errors) ? response.errors[0]?.error : "";

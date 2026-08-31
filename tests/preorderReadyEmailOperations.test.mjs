@@ -80,14 +80,16 @@ test("preorder scanning and producer error reporting are bounded and structured"
   assert.doesNotMatch(preorderEmailSource, /\.lte\("created_at", cutoffIso\)/u);
   assert.match(preorderEmailSource, /error: errors\[0\]\?\.error \|\| null/u);
 
-  const refreshPost = appsScriptSource.indexOf(
-    "postJson_(\n    `${settings.apiBaseUrl}/api/admin/shipments`"
+  const refreshPost = appsScriptSource.search(
+    /postJson_\(\s*`\$\{settings\.apiBaseUrl\}\/api\/admin\/shipments`/u
   );
   const reportGet = appsScriptSource.indexOf(
     "getJson_(\n    `${settings.apiBaseUrl}/api/admin/shipments?limit=1000`"
   );
   assert.ok(refreshPost >= 0 && reportGet > refreshPost);
   assert.match(appsScriptSource, /let refreshWarning = ""/u);
+  assert.match(appsScriptSource, /did not finish in time/u);
+  assert.match(appsScriptSource, /Preorder-ready email worker response timed out/u);
   assert.match(appsScriptSource, /toastIfAvailable_\(/u);
   assert.match(appsScriptSource, /const firstError = Array\.isArray\(response\?\.errors\)/u);
 });

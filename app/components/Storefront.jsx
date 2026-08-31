@@ -3726,41 +3726,43 @@ export default function Storefront({ products, inventory = null, pickupDetails =
 
                 {requiresAddress ? (
                   <>
-                    <label className={`form-field${hasFieldError("address1") ? " form-field--error" : ""}`}>
-                      Address line 1 *
-                      <input
-                        ref={setFieldRef("address1")}
-                        type="text"
-                        name="address1"
-                        value={formValues.address1}
-                        placeholder="Street address"
-                        autoComplete="address-line1"
-                        onChange={handleFieldChange}
-                        onBlur={handleFieldBlur}
-                        aria-invalid={hasFieldError("address1")}
-                        aria-describedby={hasFieldError("address1") ? "address1-error" : undefined}
-                        required
-                      />
-                      {hasFieldError("address1") ? (
-                        <span id="address1-error" className="form-field__error" role="alert">
-                          {getFieldError("address1")}
-                        </span>
-                      ) : null}
-                    </label>
-                    <label className="form-field">
-                      Address line 2
-                      <input
-                        ref={setFieldRef("address2")}
-                        type="text"
-                        name="address2"
-                        value={formValues.address2}
-                        placeholder="Apt, suite"
-                        autoComplete="address-line2"
-                        onChange={handleFieldChange}
-                        onBlur={handleFieldBlur}
-                      />
-                    </label>
-                    <div className="form__row form__row--city-state">
+                    <div className="form__row">
+                      <label className={`form-field${hasFieldError("address1") ? " form-field--error" : ""}`}>
+                        Address line 1 *
+                        <input
+                          ref={setFieldRef("address1")}
+                          type="text"
+                          name="address1"
+                          value={formValues.address1}
+                          placeholder="Street address"
+                          autoComplete="address-line1"
+                          onChange={handleFieldChange}
+                          onBlur={handleFieldBlur}
+                          aria-invalid={hasFieldError("address1")}
+                          aria-describedby={hasFieldError("address1") ? "address1-error" : undefined}
+                          required
+                        />
+                        {hasFieldError("address1") ? (
+                          <span id="address1-error" className="form-field__error" role="alert">
+                            {getFieldError("address1")}
+                          </span>
+                        ) : null}
+                      </label>
+                      <label className="form-field">
+                        Address line 2
+                        <input
+                          ref={setFieldRef("address2")}
+                          type="text"
+                          name="address2"
+                          value={formValues.address2}
+                          placeholder="Apt, suite"
+                          autoComplete="address-line2"
+                          onChange={handleFieldChange}
+                          onBlur={handleFieldBlur}
+                        />
+                      </label>
+                    </div>
+                    <div className="form__row form__row--city-state-postal">
                       <label className={`form-field${hasFieldError("city") ? " form-field--error" : ""}`}>
                         City *
                         <input
@@ -3839,29 +3841,29 @@ export default function Storefront({ products, inventory = null, pickupDetails =
                           </span>
                         ) : null}
                       </label>
+                      <label className={`form-field${hasFieldError("postalCode") ? " form-field--error" : ""}`}>
+                        Postal code *
+                        <input
+                          ref={setFieldRef("postalCode")}
+                          type="text"
+                          name="postalCode"
+                          value={formValues.postalCode}
+                          autoComplete="postal-code"
+                          inputMode="numeric"
+                          maxLength={10}
+                          onChange={handleFieldChange}
+                          onBlur={handleFieldBlur}
+                          aria-invalid={hasFieldError("postalCode")}
+                          aria-describedby={hasFieldError("postalCode") ? "postalCode-error" : undefined}
+                          required
+                        />
+                        {hasFieldError("postalCode") ? (
+                          <span id="postalCode-error" className="form-field__error" role="alert">
+                            {getFieldError("postalCode")}
+                          </span>
+                        ) : null}
+                      </label>
                     </div>
-                    <label className={`form-field${hasFieldError("postalCode") ? " form-field--error" : ""}`}>
-                      Postal code *
-                      <input
-                        ref={setFieldRef("postalCode")}
-                        type="text"
-                        name="postalCode"
-                        value={formValues.postalCode}
-                        autoComplete="postal-code"
-                        inputMode="numeric"
-                        maxLength={10}
-                        onChange={handleFieldChange}
-                        onBlur={handleFieldBlur}
-                        aria-invalid={hasFieldError("postalCode")}
-                        aria-describedby={hasFieldError("postalCode") ? "postalCode-error" : undefined}
-                        required
-                      />
-                      {hasFieldError("postalCode") ? (
-                        <span id="postalCode-error" className="form-field__error" role="alert">
-                          {getFieldError("postalCode")}
-                        </span>
-                      ) : null}
-                    </label>
                     {renderShippingOptions()}
                   </>
                 ) : (
