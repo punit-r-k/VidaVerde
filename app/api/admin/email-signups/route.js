@@ -86,9 +86,9 @@ export async function GET(request) {
     supabaseAdmin
       .from("email_jobs")
       .select(
-        "id, type, status, order_id, attempts, max_attempts, available_at, claimed_at, last_error_code, created_at, orders!inner(customer_email, is_test_order)"
+        "id, type, status, order_id, shipment_id, attempts, max_attempts, available_at, claimed_at, last_error_code, created_at, orders!inner(customer_email, is_test_order)"
       )
-      .eq("type", "order_confirmation")
+      .in("type", ["order_confirmation", "shipment_tracking"])
       .in("status", ["pending", "processing", "failed"])
       .order("created_at", { ascending: true })
       .limit(limit),

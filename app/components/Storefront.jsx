@@ -139,7 +139,6 @@ const ORDER_SHIPPING_SUCCESS_POPUP_MESSAGE =
   "Your payment was received. Watch your email for your receipt and shipping updates.";
 const SHIPPING_CHECKOUT_VISIBLE = true;
 const DEFAULT_FULFILLMENT = "ship";
-const SHIPPING_QUOTE_DEBOUNCE_MS = 700;
 const formatFinalCheckoutValues = (values) =>
   Object.keys(INITIAL_FORM_VALUES).reduce((nextValues, name) => {
     nextValues[name] = formatCheckoutInputValue(name, values?.[name], { final: true });
@@ -357,6 +356,10 @@ export default function Storefront({ products, inventory = null, pickupDetails =
   const cartSummarySeenRef = useRef(false);
   const cartChangeSequenceRef = useRef(0);
   const shippingPreviewRequestRef = useRef(0);
+  const shippingQuoteSessionTokenRef = useRef("");
+  if (!shippingQuoteSessionTokenRef.current) {
+    shippingQuoteSessionTokenRef.current = globalThis.crypto?.randomUUID?.() || "";
+  }
   const checkoutAttemptIdRef = useRef("");
   const finalizingPaymentRef = useRef("");
   const emailOptInSubmittedRef = useRef("");
@@ -1319,7 +1322,8 @@ export default function Storefront({ products, inventory = null, pickupDetails =
     SHIPPING_FIELDS.every((fieldName) => !shippingAddressErrors[fieldName]);
   const shippingQuoteRequestPayload = useMemo(
     () => ({
-      shippingOption: DEFAULT_SHIPPING_OPTION_ID,
+      checkoutSessionToken: shippingQuoteSessionTokenRef.current,
+      shippingOption: normalizedShippingOptionId,
       customer: {
         address1: String(formValues.address1 || "").trim(),
         address2: String(formValues.address2 || "").trim(),
@@ -1339,7 +1343,8 @@ export default function Storefront({ products, inventory = null, pickupDetails =
       formValues.address2,
       formValues.city,
       formValues.postalCode,
-      formValues.state
+      formValues.state,
+      normalizedShippingOptionId
     ]
   );
   const shippingQuoteRequestFingerprint = useMemo(
@@ -1360,15 +1365,7 @@ export default function Storefront({ products, inventory = null, pickupDetails =
     hasActiveShippingPreview && Array.isArray(shippingPreview?.options)
       ? shippingPreview.options
       : [];
-  const displayedCustomerShippingOptions = hasActiveShippingPreview
-    ? customerShippingOptions.filter((option) =>
-        activeShippingPreviewOptions.some(
-          (preview) => normalizeShippingOptionId(preview?.id) === option.id
-        )
-      )
-    : customerShippingOptions.filter(
-        (option) => option.id === DEFAULT_SHIPPING_OPTION_ID
-      );
+  const displayedCustomerShippingOptions = customerShippingOptions;
   const expeditedShippingIsDisplayed = displayedCustomerShippingOptions.some(
     (option) => option.id === "expedited"
   );
@@ -1437,85 +1434,50 @@ export default function Storefront({ products, inventory = null, pickupDetails =
     ? displayedShipping.estimatedShipDateLabel
     : formatExpectedDeliveryDate(estimatedShipDate, shippingScheduleNow);
 
-  useEffect(() => {
+  const calculateShipping = useCallback(async () => {
     const requestId = shippingPreviewRequestRef.current + 1;
     shippingPreviewRequestRef.current = requestId;
-
-    if (!shippingPreviewReady) {
-      setShippingPreview(null);
-      setShippingPreviewStatus("idle");
-      setShippingPreviewError("");
-      setShippingOptionId(DEFAULT_SHIPPING_OPTION_ID);
-      return undefined;
+    if (!shippingPreviewReady || hasActiveShippingPreview || shippingPreviewStatus === "loading") {
+      return;
     }
-
-    const controller = new AbortController();
-    setShippingPreview(null);
     setShippingPreviewStatus("loading");
     setShippingPreviewError("");
-
-    const timeoutId = window.setTimeout(async () => {
-      try {
-        const response = await fetch("/api/shipping/quote", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify(shippingQuoteRequestPayload),
-          signal: controller.signal
-        });
-        const responseContentType = response.headers.get("content-type") || "";
-        const result = responseContentType.includes("application/json")
-          ? await response.json().catch(() => ({}))
-          : {};
-
-        if (!response.ok) {
-          throw new Error(result?.error || "We couldn't update shipping. Please try again.");
-        }
-        const quotedOptions = Array.isArray(result?.shippingOptions)
-          ? result.shippingOptions
-          : [];
-        if (!quotedOptions.some((option) => Number(option?.amountCents) > 0)) {
-          throw new Error("We couldn't update shipping. Please try again.");
-        }
-        if (controller.signal.aborted || shippingPreviewRequestRef.current !== requestId) {
-          return;
-        }
-
-        setShippingPreview({
-          options: quotedOptions,
-          requestFingerprint: shippingQuoteRequestFingerprint
-        });
-        const quotedOptionIds = new Set(
-          quotedOptions
-            .filter((option) => Number(option?.amountCents) > 0)
-            .map((option) => normalizeShippingOptionId(option.id))
-        );
-        setShippingOptionId((currentOptionId) =>
-          quotedOptionIds.has(normalizeShippingOptionId(currentOptionId))
-            ? currentOptionId
-            : DEFAULT_SHIPPING_OPTION_ID
-        );
-        setShippingPreviewStatus("ready");
-        setShippingPreviewError("");
-      } catch (error) {
-        if (controller.signal.aborted || shippingPreviewRequestRef.current !== requestId) {
-          return;
-        }
-
-        setShippingPreview(null);
-        setShippingPreviewStatus("error");
-        setShippingPreviewError(
-          error instanceof Error && error.message
-            ? error.message
-            : "We couldn't update shipping. Please try again."
-        );
+    try {
+      const response = await fetch("/api/shipping/quote", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(shippingQuoteRequestPayload)
+      });
+      const responseContentType = response.headers.get("content-type") || "";
+      const result = responseContentType.includes("application/json")
+        ? await response.json().catch(() => ({}))
+        : {};
+      if (!response.ok) {
+        throw new Error(result?.error || "We couldn't update shipping. Please try again.");
       }
-    }, SHIPPING_QUOTE_DEBOUNCE_MS);
-
-    return () => {
-      window.clearTimeout(timeoutId);
-      controller.abort();
-    };
+      const quotedOptions = Array.isArray(result?.shippingOptions) ? result.shippingOptions : [];
+      if (!quotedOptions.some((option) =>
+        Number(option?.amountCents) > 0 && typeof option?.quoteToken === "string"
+      )) {
+        throw new Error("We couldn't update shipping. Please try again.");
+      }
+      if (shippingPreviewRequestRef.current !== requestId) return;
+      setShippingPreview({ options: quotedOptions, requestFingerprint: shippingQuoteRequestFingerprint });
+      setShippingPreviewStatus("ready");
+      setShippingPreviewError("");
+    } catch (error) {
+      if (shippingPreviewRequestRef.current !== requestId) return;
+      setShippingPreview(null);
+      setShippingPreviewStatus("error");
+      setShippingPreviewError(
+        error instanceof Error && error.message
+          ? error.message
+          : "We couldn't update shipping. Please try again."
+      );
+    }
   }, [
+    hasActiveShippingPreview,
+    shippingPreviewStatus,
     shippingPreviewReady,
     shippingQuoteRequestFingerprint,
     shippingQuoteRequestPayload
@@ -1898,6 +1860,9 @@ export default function Storefront({ products, inventory = null, pickupDetails =
       shippingOption: normalizeShippingOptionId(
         selectedShippingOption?.id || shippingOptionId
       ),
+      shippingQuoteToken: fulfillment === "ship"
+        ? activeShippingPreview?.quoteToken
+        : undefined,
       customer: {
         name: String(checkoutValues.name || "").trim(),
         email: String(checkoutValues.email || "").trim(),
@@ -1932,6 +1897,7 @@ export default function Storefront({ products, inventory = null, pickupDetails =
     };
   }, [
     cartItems,
+    activeShippingPreview?.quoteToken,
     formValues,
     fulfillment,
     pickupAcknowledged,
@@ -2322,6 +2288,12 @@ export default function Storefront({ products, inventory = null, pickupDetails =
     valuesOverride = formValues,
     expectedCheckout = null
   ) => {
+    if (fulfillment === "ship" && !activeShippingPreview?.quoteToken) {
+      const message = "Click Calculate shipping for the current address and cart before payment.";
+      setStatus("error");
+      setNotice(message);
+      throw new Error(message);
+    }
     if (fulfillment === "market" && !pickupAcknowledged) {
       const message = "Please accept the pickup policy before proceeding to payment.";
       trackAnalyticsEvent({
@@ -2466,6 +2438,7 @@ export default function Storefront({ products, inventory = null, pickupDetails =
     };
   }, [
     applyInventory,
+    activeShippingPreview?.quoteToken,
     buildOrderPayload,
     focusFirstInvalidField,
     focusPickupAcknowledgement,
@@ -3050,6 +3023,22 @@ export default function Storefront({ products, inventory = null, pickupDetails =
             : " Choose Shipping for delivery in an estimated 3–5 business days or Expedited Shipping for 1–3 business days after the estimated carrier-handoff date. Final prices and expected arrival dates are shown before payment."}
         </p>
         {renderShippingScheduleNotice({ id: "checkout", showShipDate: true })}
+        <button
+          type="button"
+          className="button button--dark"
+          onClick={calculateShipping}
+          disabled={
+            !shippingPreviewReady ||
+            hasActiveShippingPreview ||
+            shippingPreviewStatus === "loading"
+          }
+        >
+          {shippingPreviewStatus === "loading"
+            ? "Calculating shipping..."
+            : shippingPreview
+              ? "Update shipping"
+              : "Calculate shipping"}
+        </button>
         <div className="shipping-options__list">
           {displayedCustomerShippingOptions.map((option) => {
             const isSelected = option.id === normalizedShippingOptionId;

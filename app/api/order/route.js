@@ -12,9 +12,11 @@ import {
   getShippingOptionsForCart,
   normalizeProductType
 } from "@/lib/shippingPricing";
-import { selectCheckoutShippingQuote } from "@/lib/checkoutShippingQuote";
-import { createEasyPostRatingContext } from "@/lib/shippingQuotes";
-import { resolveCustomerShippingSelections } from "@/lib/shippingOptionPolicy";
+import {
+  assertShippingChargeCoversCosts,
+  createShippingQuoteFingerprint
+} from "@/lib/shippingQuoteCache";
+import { buildShippingPlan } from "@/lib/shippingParcels";
 import { getInventoryMap } from "@/lib/stock";
 import { stripeConfig, stripeRequest } from "@/lib/stripe";
 import {
@@ -30,7 +32,6 @@ const ORDER_RATE_LIMIT = getRouteRateLimitConfig("ORDER_CREATE", {
 
 const CHECKOUT_UNAVAILABLE_MESSAGE =
   "Checkout is not available right now. Please try again later.";
-const SHIPPING_QUOTE_LIFETIME_MS = 60 * 60 * 1000;
 const ORDER_BODY_MAX_BYTES = 64 * 1024;
 
 const getCheckoutValidationMessage = (issues) => {
@@ -209,10 +210,19 @@ const getAttachedCheckoutShippingQuote = async (paymentIntentId) => {
 };
 
 const isCompatibleAttachedQuote = ({ quote, shippingAmount, shippingOption }) =>
-  quote?.status === "quoted" &&
+  ["quoted", "attached"].includes(quote?.status) &&
   Number(quote?.charged_shipping_cents) === shippingAmount &&
   String(quote?.currency || "").trim().toUpperCase() === "USD" &&
   String(quote?.service_level || "").trim() === String(shippingOption || "").trim();
+
+const getCheckoutShippingQuoteByToken = async (quoteToken) => {
+  if (!quoteToken || !supabaseAdmin) return { data: null, error: null };
+  return supabaseAdmin
+    .from("checkout_shipping_quotes")
+    .select("*")
+    .eq("id", quoteToken)
+    .maybeSingle();
+};
 
 export const runtime = "nodejs";
 
@@ -333,6 +343,7 @@ export async function POST(request) {
     items: normalizedItems,
     fulfillment: normalizedFulfillment,
     shippingOption: requestedShippingOption,
+    shippingQuoteToken,
     inventorySnapshot
   } = parsedPayload.data;
   const { name, email } = customer;
@@ -476,102 +487,70 @@ export async function POST(request) {
     }
 
     try {
-      const orderCreatedAt = new Date();
-      const hasPreorderItems = normalizedItems.some((item) =>
-        getCurrentAllocation(item.quantity, inventoryMap?.[item.sku]).preorderUnits > 0
-      );
-      const ratingContext = createEasyPostRatingContext({ startedAt: orderCreatedAt });
-      const quoteResults = await Promise.allSettled(
-        shipping.options.map((option) =>
-          selectCheckoutShippingQuote({
-            customer: {
-              ...customer,
-              country: SHIPPING_COUNTRY_CODE
-            },
-            itemsPayload,
-            requestedOption: option,
-            hasPreorderItems,
-            orderCreatedAt,
-            ratingContext
-          })
-        )
-      );
-      const selections = new Map();
-      quoteResults.forEach((result, index) => {
-        const option = shipping.options[index];
-        if (result.status === "fulfilled") {
-          selections.set(option.id, result.value);
-          return;
-        }
-        console.error(
-          `live EasyPost ${option.id} checkout quote failed:`,
-          result.reason?.message || result.reason
-        );
-      });
-      const policy = resolveCustomerShippingSelections({
-        normalSelection: selections.get(shipping.normalOption.id),
-        expeditedSelection: selections.get(shipping.expeditedOption.id),
-        normalOption: shipping.normalOption
-      });
-      const selection = requestedOption.id === shipping.expeditedOption.id &&
-        policy.expeditedSelection
-        ? policy.expeditedSelection
-        : policy.normalSelection;
-      if (!selection) {
-        const firstFailure = quoteResults.find((result) => result.status === "rejected");
-        throw firstFailure?.reason || new Error("EasyPost returned no shipping rates.");
+      if (!shippingQuoteToken) throw new Error("A shipping quote is required.");
+      const { data: savedQuote, error: quoteError } =
+        await getCheckoutShippingQuoteByToken(shippingQuoteToken);
+      if (quoteError) throw quoteError;
+      if (!savedQuote || !["quoted", "attached"].includes(savedQuote.status)) {
+        throw new Error("The shipping quote is no longer available.");
       }
-      const fastestQuote = selection.quote;
-      shippingCharge = selection.charge;
-      selectedShippingOption = selection.option;
-      const deliveryDays = selection.deliveryDays;
-      estimatedShipDateKey = selection.estimatedShipDateKey;
-      estimatedShipDateLabel = selection.estimatedShipDateLabel;
-      expectedArrivalDateKey = selection.expectedArrivalDateKey;
-      expectedArrivalLabel = selection.expectedArrivalLabel;
-
-      const expiresAt = new Date(Date.now() + SHIPPING_QUOTE_LIFETIME_MS).toISOString();
-      const { data: savedQuote, error: saveQuoteError } = await supabaseAdmin
-        .from("checkout_shipping_quotes")
-        .insert({
-          status: "quoted",
-          provider: "easypost",
-          quote_json: fastestQuote,
-          postage_cents: shippingCharge.postageCents,
-          packaging_cents: shippingCharge.packagingCents,
-          unrounded_cents: shippingCharge.unroundedCents,
-          rounding_cents: shippingCharge.roundingCents,
-          discount_cents: shippingCharge.discountCents,
-          charged_shipping_cents: shippingCharge.amountCents,
-          currency: "USD",
-          delivery_days: Number.isFinite(deliveryDays) ? deliveryDays : null,
-          service_level: selectedShippingOption.id,
-          expected_arrival_date: expectedArrivalDateKey || null,
-          expires_at: expiresAt
-        })
-        .select("id")
-        .single();
-      if (saveQuoteError || !savedQuote) {
-        throw saveQuoteError || new Error("The live shipping quote could not be saved.");
+      if (new Date(savedQuote.expires_at).getTime() <= Date.now()) {
+        await supabaseAdmin.from("checkout_shipping_quotes")
+          .update({ status: "expired", updated_at: new Date().toISOString() })
+          .eq("id", savedQuote.id).eq("status", "quoted");
+        return respond.json({
+          code: "shipping_quote_expired",
+          error: "Your shipping quote expired. Click Calculate shipping to request a new one."
+        }, { status: 409 });
       }
+      const parcelPlan = buildShippingPlan(itemsPayload);
+      const fingerprint = createShippingQuoteFingerprint({
+        customer: { ...customer, country: SHIPPING_COUNTRY_CODE },
+        items: itemsPayload,
+        parcelPlan,
+        plannedShipDate: savedQuote.planned_ship_date,
+        serviceLevel: requestedOption.id
+      });
+      if (
+        fingerprint !== savedQuote.fingerprint ||
+        requestedOption.id !== savedQuote.service_level
+      ) {
+        throw new Error("The address, cart, or shipping method changed after the quote.");
+      }
+      const covered = assertShippingChargeCoversCosts({
+        postageCents: savedQuote.postage_cents,
+        packagingCents: savedQuote.packaging_cents,
+        customerShippingChargeCents: savedQuote.charged_shipping_cents
+      });
       checkoutShippingQuote = savedQuote;
+      shippingCharge = {
+        postageCents: covered.postageCents,
+        packagingCents: covered.packagingCents,
+        unroundedCents: covered.postageCents + covered.packagingCents,
+        roundingCents: covered.shippingMarginCents,
+        discountCents: 0,
+        amountCents: covered.customerShippingChargeCents,
+        marginCents: covered.shippingMarginCents
+      };
+      selectedShippingOption = {
+        ...requestedOption,
+        amountCents: shippingCharge.amountCents
+      };
+      estimatedShipDateKey = String(savedQuote.planned_ship_date || "");
+      estimatedShipDateLabel = String(savedQuote.quote_json?.estimatedShipDateLabel || "");
+      expectedArrivalDateKey = String(savedQuote.expected_arrival_date || "");
+      expectedArrivalLabel = String(savedQuote.quote_json?.expectedArrivalLabel || "");
     } catch (shippingError) {
-      console.error("live EasyPost checkout quote failed:", shippingError?.message || shippingError);
-      const noEligibleRate = /No EasyPost rate was available in the/i.test(
-        String(shippingError?.message || "")
-      );
+      console.error("saved checkout shipping quote validation failed:", shippingError?.message || shippingError);
       return respond.json(
         {
-          error: noEligibleRate
-            ? `We couldn't find an eligible ${requestedOption.label} rate for that address. Try the other shipping method or verify the address.`
-            : "We couldn't calculate live shipping for that address. Please verify the address and try again.",
+          code: "shipping_quote_invalid",
+          error: "Your shipping details changed. Click Calculate shipping before continuing.",
           fieldErrors: {
-            [noEligibleRate ? "shippingOption" : "address1"]: noEligibleRate
-              ? `No ${requestedOption.label} rate is currently available for this address.`
-              : "Live shipping could not be calculated for this address."
+            shippingOption: "Calculate shipping again for the current address and cart."
           }
         },
-        { status: noEligibleRate ? 422 : 502 }
+        { status: 409 }
       );
     }
   }
@@ -595,7 +574,6 @@ export async function POST(request) {
     shippingCents: defaultShippingAmount,
     shippingOption: authoritativeShippingOption
   })) {
-    await cancelCheckoutShippingQuote(checkoutShippingQuote?.id);
     return respond.json(
       {
         code: "checkout_changed",
@@ -646,6 +624,9 @@ export async function POST(request) {
     order_skus: asMetadataValue(skuSummary, 500),
     order_item_count: asMetadataValue(totalUnits, 32)
   };
+  if (checkoutShippingQuote?.id) {
+    metadata.shipping_quote_id = asMetadataValue(checkoutShippingQuote.id, 64);
+  }
 
   if (isPickup) {
     metadata.pickup_policy_accepted = "true";
@@ -654,7 +635,6 @@ export async function POST(request) {
 
   const serializedItems = JSON.stringify(itemsPayload);
   if (serializedItems.length > 500) {
-    await cancelCheckoutShippingQuote(checkoutShippingQuote?.id);
     return respond.json(
       { error: "Cart is too large to process online. Please split into multiple orders." },
       { status: 400 }
@@ -697,7 +677,6 @@ export async function POST(request) {
 
     if (!ok) {
       console.error("stripe payment_intent error:", error);
-      await cancelCheckoutShippingQuote(checkoutShippingQuote?.id);
       return respond.json(
         { error: "We couldn't start payment. Please try again." },
         { status: 500 }
@@ -705,7 +684,6 @@ export async function POST(request) {
     }
 
     if (!data?.client_secret || !data?.id) {
-      await cancelCheckoutShippingQuote(checkoutShippingQuote?.id);
       return respond.json(
         { error: "We couldn't start payment. Please try again." },
         { status: 500 }
@@ -719,7 +697,6 @@ export async function POST(request) {
           "attached checkout shipping quote lookup failed:",
           existingResult.error.message
         );
-        await cancelCheckoutShippingQuote(checkoutShippingQuote.id);
         return respond.json(
           { error: "We couldn't finish preparing shipping. Please try again." },
           { status: 500 }
@@ -728,7 +705,9 @@ export async function POST(request) {
 
       const existingQuote = existingResult.data;
       if (existingQuote) {
-        await cancelCheckoutShippingQuote(checkoutShippingQuote.id);
+        if (existingQuote.id !== checkoutShippingQuote.id) {
+          await cancelCheckoutShippingQuote(checkoutShippingQuote.id);
+        }
         if (!isCompatibleAttachedQuote({
           quote: existingQuote,
           shippingAmount: defaultShippingAmount,
@@ -756,6 +735,7 @@ export async function POST(request) {
           .from("checkout_shipping_quotes")
           .update({
             payment_session_id: data.id,
+            status: "attached",
             updated_at: new Date().toISOString()
           })
           .eq("id", checkoutShippingQuote.id)
@@ -773,7 +753,9 @@ export async function POST(request) {
               shippingOption: selectedShippingOption?.id
             })
           ) {
-            await cancelCheckoutShippingQuote(checkoutShippingQuote.id);
+            if (recoveryResult.data.id !== checkoutShippingQuote.id) {
+              await cancelCheckoutShippingQuote(checkoutShippingQuote.id);
+            }
             checkoutShippingQuote = recoveryResult.data;
             shippingCharge = {
               postageCents: Number(recoveryResult.data.postage_cents),
@@ -792,7 +774,6 @@ export async function POST(request) {
                 method: "POST"
               });
             }
-            await cancelCheckoutShippingQuote(checkoutShippingQuote.id);
             return respond.json(
               { error: "We couldn't finish preparing shipping. Please try again." },
               { status: 500 }
@@ -825,7 +806,6 @@ export async function POST(request) {
     );
   } catch (error) {
     console.error("payment_intent create error:", error);
-    await cancelCheckoutShippingQuote(checkoutShippingQuote?.id);
     return respond.json(
       { error: "We couldn't start payment. Please try again." },
       { status: 500 }

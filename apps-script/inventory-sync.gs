@@ -70,12 +70,13 @@ function onOpen() {
   const ui = SpreadsheetApp.getUi();
   const shippingMenu = ui
     .createMenu("Shipping")
-    .addItem("Refresh Shipments and Labels", "syncShipments");
+    .addItem("Refresh Shipments", "syncShipments")
+    .addItem("Release Selected Shipments", "releaseSelectedShipments");
   const emailMenu = ui
     .createMenu("Customer Emails")
     .addItem("Send Pickup Reminders Now", "sendPickupReminders")
     .addItem("Process Pending Emails Now", "processEmailQueue")
-    .addItem("Retry Failed Confirmations", "retryFailedConfirmationEmails")
+    .addItem("Retry Failed Emails", "retryFailedConfirmationEmails")
     .addItem("Check STOP Replies Now", "processEmailUnsubscribeReplies");
   const payoutMenu = ui
     .createMenu("Payouts")
@@ -468,8 +469,8 @@ function retryFailedConfirmationEmails() {
   const retriedCount = Number(response?.retriedCount || 0);
   toastIfAvailable_(
     retriedCount > 0
-      ? `${retriedCount} failed confirmation email(s) queued again.`
-      : "No failed confirmation emails need retrying.",
+      ? `${retriedCount} failed service email(s) queued again.`
+      : "No failed service emails need retrying.",
     "Vida Verde",
     6
   );
@@ -1154,6 +1155,137 @@ function syncOrders() {
   refreshFinancialDistributionsSummary_();
 }
 
+function releaseSelectedShipments() {
+  const ui = SpreadsheetApp.getUi();
+  const sheet = SpreadsheetApp.getActive().getActiveSheet();
+  if (!sheet || sheet.getName() !== CONFIG.SHIPMENTS_SHEET_NAME) {
+    ui.alert("Open the Shipments sheet and select the orders you want to release.");
+    return;
+  }
+
+  const rangeList = sheet.getActiveRangeList();
+  const ranges = rangeList ? rangeList.getRanges() : [];
+  const selectedRows = [...new Set(ranges.flatMap((range) => {
+    const first = Math.max(range.getRow(), CONFIG.SHIPMENTS.START_ROW);
+    const last = range.getLastRow();
+    return first > last
+      ? []
+      : Array.from({ length: last - first + 1 }, (_, index) => first + index);
+  }))].sort((left, right) => left - right);
+
+  if (selectedRows.length === 0) {
+    ui.alert("Select at least one shipment data row first.");
+    return;
+  }
+  if (selectedRows.length > 10) {
+    ui.alert("Release no more than 10 shipment rows at a time.");
+    return;
+  }
+
+  const selections = selectedRows.map((row) => ({
+    row,
+    name: String(sheet.getRange(row, 2).getDisplayValue() || "Shipment").trim(),
+    shipmentId: String(sheet.getRange(row, 19).getDisplayValue() || "").trim(),
+    releaseStatus: String(sheet.getRange(row, 28).getDisplayValue() || "").trim()
+  }));
+  const skipped = selections.filter((entry) =>
+    !entry.shipmentId || !["Awaiting manual release", "Release failed - select and retry"].includes(entry.releaseStatus)
+  );
+  const eligibleSelections = selections.filter((entry) => !skipped.includes(entry));
+  if (eligibleSelections.length === 0) {
+    ui.alert(
+      "None of the selected rows can be released:\n\n" +
+      skipped.map((entry) => `${entry.name}: ${entry.releaseStatus || "Missing shipment ID"}`).join("\n")
+    );
+    return;
+  }
+
+  const settings = getSettings_();
+  const previews = [];
+  const previewErrors = [];
+  for (const entry of eligibleSelections) {
+    const response = postJson_(
+      `${settings.apiBaseUrl}/api/admin/shipments/${encodeURIComponent(entry.shipmentId)}/label-quote`,
+      settings,
+      {}
+    );
+    if (!response?.ok) {
+      previewErrors.push(`${entry.name}: ${response?.error || "Could not preview current postage."}`);
+    } else {
+      previews.push({ ...entry, preview: response });
+    }
+  }
+  if (previewErrors.length > 0) {
+    ui.alert([
+      "Nothing was purchased because one or more previews failed:",
+      "",
+      ...previewErrors,
+      ...(skipped.length > 0
+        ? ["", "Skipped:", ...skipped.map((entry) => `${entry.name}: ${entry.releaseStatus || "Missing shipment ID"}`)]
+        : [])
+    ].join("\n"));
+    return;
+  }
+
+  const postageTotal = previews.reduce(
+    (sum, entry) => sum + Number(entry.preview?.postage_cents || 0),
+    0
+  );
+  const confirmation = [
+    `Release ${previews.length} shipment(s) and purchase their labels?`,
+    "",
+    ...previews.map((entry) =>
+      `${entry.name}: ${Number(entry.preview?.parcel_count || 0)} parcel(s), ${formatMoneyFromCents_(entry.preview?.postage_cents)}`
+    ),
+    "",
+    `Quoted postage total: ${formatMoneyFromCents_(postageTotal)}`,
+    "EasyPost account fees or later carrier adjustments may be separate."
+  ].join("\n");
+  if (ui.alert("Confirm shipment release", confirmation, ui.ButtonSet.YES_NO) !== ui.Button.YES) {
+    return;
+  }
+
+  const successes = [];
+  const failures = [];
+  for (const entry of previews) {
+    const response = postJson_(
+      `${settings.apiBaseUrl}/api/admin/shipments/${encodeURIComponent(entry.shipmentId)}/labels`,
+      settings,
+      { quote_id: entry.preview.quote_id }
+    );
+    if (response?.ok && ["label_purchased", "complete"].includes(String(response?.state || ""))) {
+      const emailState = String(response?.tracking_email?.state || "");
+      const emailSummary = emailState === "sent"
+        ? "tracking emailed"
+        : emailState === "queue_failed"
+          ? "label purchased; tracking email queue needs attention"
+          : emailState === "already_queued"
+            ? "tracking email already queued"
+            : "tracking email queued";
+      successes.push(`${entry.name} (${emailSummary})`);
+    } else {
+      failures.push(`${entry.name}: ${response?.error || "Label purchase did not complete."}`);
+    }
+  }
+
+  syncShipments();
+  ui.alert([
+    `Released: ${successes.length}`,
+    ...successes,
+    "",
+    `Failed: ${failures.length}`,
+    ...failures,
+    "",
+    `Skipped: ${skipped.length}`,
+    ...skipped.map((entry) => `${entry.name}: ${entry.releaseStatus || "Missing shipment ID"}`)
+  ].join("\n"));
+}
+
+function formatMoneyFromCents_(value) {
+  const cents = Number(value || 0);
+  return `$${(Number.isFinite(cents) ? cents / 100 : 0).toFixed(2)}`;
+}
+
 function syncShipments() {
   ensureSettingsSheet_();
 
@@ -1177,20 +1309,6 @@ function syncShipments() {
         `POST ${settings.apiBaseUrl}/api/admin/shipments failed (${refreshResponse?.status ?? "unknown"}): ${refreshResponse?.error || refreshResponse?.message || refreshResponse?.raw || "Unknown error"}`;
       Logger.log("Shipment refresh warning: %s", refreshWarning);
     }
-  }
-  const automaticLabelErrors = Array.isArray(refreshResponse?.automatic_label_errors)
-    ? refreshResponse.automatic_label_errors
-    : [];
-  if (automaticLabelErrors.length > 0) {
-    const message = automaticLabelErrors
-      .map((entry) => String(entry?.error || "Automatic label refresh failed."))
-      .join(" | ");
-    Logger.log("Shipment refresh warning: %s", message);
-    toastIfAvailable_(
-      "Shipments loaded, but one or more labels need attention. See the Label Error column or execution log.",
-      "Shipment warning",
-      8
-    );
   }
   const response = getJson_(
     `${settings.apiBaseUrl}/api/admin/shipments?limit=1000`,
@@ -1239,7 +1357,9 @@ function syncShipments() {
     "Units",
     "Order Total",
     "Sauerkraut Units",
-    "Hot Sauce Units"
+    "Hot Sauce Units",
+    "Release Status",
+    "Tracking Email"
   ]];
   if (sheet.getMaxColumns() < headerValues[0].length) {
     sheet.insertColumnsAfter(
@@ -1296,7 +1416,9 @@ function syncShipments() {
         Number(shipment?.item_count || 0),
         amountDollars,
         Number(shipment?.sauerkraut_count || 0),
-        Number(shipment?.hot_sauce_count || 0)
+        Number(shipment?.hot_sauce_count || 0),
+        formatShipmentReleaseStatus_(shipment),
+        formatTrackingEmailStatus_(shipment?.tracking_email_status)
       ];
     });
 
@@ -1346,11 +1468,13 @@ function syncShipments() {
   sheet
     .getRange(CONFIG.SHIPMENTS.HEADER_ROW, 1, 1, headerValues[0].length)
     .setFontWeight("bold")
-    .setWrap(true)
+    .setWrapStrategy(SpreadsheetApp.WrapStrategy.CLIP)
     .setVerticalAlignment("middle");
   sheet.setFrozenRows(1);
   sheet.autoResizeColumns(1, headerValues[0].length);
-  sheet.getRange(CONFIG.SHIPMENTS.HEADER_ROW, 3, Math.max(sheet.getLastRow(), 1), 4).setWrap(true);
+  sheet
+    .getRange(1, 1, Math.max(sheet.getMaxRows(), 1), headerValues[0].length)
+    .setWrapStrategy(SpreadsheetApp.WrapStrategy.CLIP);
   sheet.setColumnWidth(1, 145);
   sheet.setColumnWidth(2, 190);
   sheet.setColumnWidth(3, 320);
@@ -1361,6 +1485,8 @@ function syncShipments() {
   sheet.setColumnWidth(25, 105);
   sheet.setColumnWidth(26, 120);
   sheet.setColumnWidth(27, 120);
+  sheet.setColumnWidth(28, 220);
+  sheet.setColumnWidth(29, 110);
   sheet.setRowHeight(CONFIG.SHIPMENTS.HEADER_ROW, 44);
   sheet.showColumns(1, headerValues[0].length);
 }
@@ -1787,10 +1913,31 @@ function formatShipmentLabelText_(shipment) {
     return links.map((unused, index) => `Open label ${index + 1}`).join(" | ");
   }
   const labelError = String(shipment?.label_purchase_error || "");
-  if (/financial test order/i.test(labelError)) return "Not applicable — test order";
-  if (shipment?.status === "cancelled") return "No label — cancelled";
+  if (/financial test order/i.test(labelError)) return "Not applicable - test order";
+  if (shipment?.status === "cancelled") return "No label - cancelled";
   if (shipment?.status === "purchasing_label") return "Purchasing label...";
-  return labelError ? "Automatic retry pending" : "Label pending";
+  return labelError ? "Release failed - select and retry" : "Awaiting manual release";
+}
+
+function formatShipmentReleaseStatus_(shipment) {
+  if (["label_purchased", "shipped", "delivered"].includes(String(shipment?.status || ""))) {
+    return "Label purchased";
+  }
+  if (shipment?.release_eligible === true) {
+    return String(shipment?.label_purchase_error || "").trim()
+      ? "Release failed - select and retry"
+      : "Awaiting manual release";
+  }
+  return String(shipment?.release_block_reason || "Not eligible for release");
+}
+
+function formatTrackingEmailStatus_(status) {
+  const normalized = String(status || "not_queued").toLowerCase();
+  if (normalized === "sent") return "Sent";
+  if (normalized === "failed") return "Failed - queued retry needed";
+  if (normalized === "processing") return "Sending";
+  if (normalized === "pending") return "Queued";
+  return "Not queued";
 }
 
 function buildShipmentLabelRichText_(shipment) {

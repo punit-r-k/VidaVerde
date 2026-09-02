@@ -1,10 +1,11 @@
-import { getCanonicalUrl } from "@/lib/siteMetadata";
+import { DEFAULT_OG_IMAGE, getCanonicalUrl } from "@/lib/siteMetadata";
 
 const ROUTES = [
   {
     path: "/",
     changeFrequency: "weekly",
-    priority: 1
+    priority: 1,
+    images: [DEFAULT_OG_IMAGE, "/founder-photo.avif", "/hero-poster.avif"]
   },
   {
     path: "/about",
@@ -24,12 +25,12 @@ const ROUTES = [
 ];
 
 export default function sitemap() {
-  const lastModified = new Date();
-
   return ROUTES.map((route) => ({
     url: getCanonicalUrl(route.path),
-    lastModified,
     changeFrequency: route.changeFrequency,
-    priority: route.priority
+    priority: route.priority,
+    ...(route.images
+      ? { images: route.images.map((image) => getCanonicalUrl(image)) }
+      : {})
   }));
 }

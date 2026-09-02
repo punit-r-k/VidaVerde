@@ -82,7 +82,7 @@ export async function POST(request) {
       return respond.json(
         {
           ok: false,
-          error: "We couldn't retry failed confirmation emails right now.",
+          error: "We couldn't retry failed service emails right now.",
           retriedCount: retryResult.retriedCount || 0,
           skippedCount: retryResult.skippedCount || 0
         },

@@ -28,6 +28,10 @@ export default function RootLayout({ children }) {
 
   return (
     <html lang="en" className={`${fraunces.variable} ${sora.variable}`}>
+      <head>
+        <link rel="alternate" type="text/markdown" href="/llms.txt" />
+        <link rel="describedby" href="/llms.txt" />
+      </head>
       <body>
         <script
           type="application/ld+json"

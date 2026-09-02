@@ -7,7 +7,15 @@ const AI_CRAWLER_USER_AGENTS = [
   "Google-Extended",
   "ClaudeBot",
   "Claude-SearchBot",
-  "Claude-User"
+  "Claude-User",
+  "PerplexityBot",
+  "Perplexity-User",
+  "Amazonbot",
+  "Applebot-Extended",
+  "Bytespider",
+  "CCBot",
+  "cohere-ai",
+  "Meta-ExternalAgent"
 ];
 
 export default function robots() {

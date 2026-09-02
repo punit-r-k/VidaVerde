@@ -2,8 +2,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import {
   getShippingChargeBreakdown,
-  roundUpToNearestDollarCents,
-  SINGLE_ITEM_STANDARD_DELIVERED_TOTAL_CAP_CENTS
+  roundUpToNearestDollarCents
 } from "../lib/shippingCharge.js";
 
 test("shipping plus packaging rounds up to the nearest dollar", () => {
@@ -15,20 +14,21 @@ test("shipping plus packaging rounds up to the nearest dollar", () => {
       unroundedCents: 1071,
       roundingCents: 29,
       discountCents: 0,
-      amountCents: 1100
+      amountCents: 1100,
+      marginCents: 29
     }
   );
 });
 
-test("one-unit standard shipping keeps merchandise plus shipping at $19.98 or less", () => {
+test("one-unit standard shipping never applies a loss-making cap", () => {
   const charge = getShippingChargeBreakdown(
     { postageCents: 821, boxCostCents: 250 },
     { subtotalCents: 1199, itemCount: 1, serviceLevel: "normal" }
   );
 
-  assert.equal(charge.amountCents, 799);
-  assert.equal(charge.discountCents, 301);
-  assert.equal(1199 + charge.amountCents, SINGLE_ITEM_STANDARD_DELIVERED_TOTAL_CAP_CENTS);
+  assert.equal(charge.amountCents, 1100);
+  assert.equal(charge.discountCents, 0);
+  assert.ok(charge.amountCents >= charge.postageCents + charge.packagingCents);
 });
 
 test("one-unit standard shipping keeps a lower real charge", () => {

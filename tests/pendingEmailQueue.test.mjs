@@ -67,7 +67,7 @@ test("confirmation retries and terminal failures have actionable pending reasons
   assert.match(rows[0].pending_for, /mail server did not accept/u);
   assert.equal(rows[1].status, "Needs attention");
   assert.match(rows[1].pending_for, /email service is not configured/u);
-  assert.match(rows[1].pending_for, /Retry Failed Confirmations/u);
+  assert.match(rows[1].pending_for, /Retry Failed Emails/u);
 });
 
 test("pre-order release events consolidate into one queue row per order", () => {

@@ -2,8 +2,7 @@ import assert from "node:assert/strict";
 import { performance } from "node:perf_hooks";
 import test from "node:test";
 import {
-  MAX_RATED_PARCELS_PER_QUOTE,
-  MAX_SHIPPING_PLANS,
+  buildShippingPlan,
   buildShippingPlans
 } from "../lib/shippingParcels.js";
 
@@ -21,10 +20,11 @@ test("two sauerkraut jars use the three-count parcel", () => {
   assert.equal(plans[0].parcels[0].weightOz, 53);
 });
 
-test("four sauerkraut jars retain single-box and split-box candidates", () => {
+test("four sauerkraut jars select one deterministic single-box plan", () => {
   const plans = buildShippingPlans([{ sku: "VV1", quantity: 4 }]);
-  assert.ok(plans.some((plan) => plan.parcels.length === 1 && plan.parcels[0].packageCode === "SK-12"));
-  assert.ok(plans.some((plan) => plan.parcels.length === 2));
+  assert.equal(plans.length, 1);
+  assert.equal(plans[0].parcels.length, 1);
+  assert.equal(plans[0].parcels[0].packageCode, "SK-12");
 });
 
 test("hot sauce uses its exact five-count parcel", () => {
@@ -34,11 +34,11 @@ test("hot sauce uses its exact five-count parcel", () => {
   assert.equal(plans[0].parcels[0].weightOz, 57);
 });
 
-test("bounded planner preserves small-cart candidate order", () => {
+test("planner exposes only the selected small-cart plan", () => {
   const plans = buildShippingPlans([{ sku: "VV5", quantity: 4 }]);
   assert.deepEqual(
     plans.map((plan) => plan.parcels.map((parcel) => parcel.packageCode)),
-    [["HS-4"], ["HS-5"]]
+    [["HS-4"]]
   );
 });
 
@@ -92,15 +92,14 @@ test("maximum valid cart stays fast and within provider-work budgets", () => {
   const elapsedMs = performance.now() - startedAt;
 
   assert.ok(elapsedMs < 500, `maximum cart planning took ${elapsedMs.toFixed(1)}ms`);
-  assert.ok(plans.length > 0);
-  assert.ok(plans.length <= MAX_SHIPPING_PLANS);
-  assert.ok(
-    plans.reduce((total, plan) => total + plan.parcels.length, 0) <=
-      MAX_RATED_PARCELS_PER_QUOTE
-  );
+  assert.equal(plans.length, 1);
   assert.ok(
     plans.every((plan) =>
       plan.parcels.reduce((total, parcel) => total + parcel.quantity, 0) === 48
     )
   );
+  assert.deepEqual(buildShippingPlan([
+    { sku: "VV1", quantity: 24 },
+    { sku: "VV5", quantity: 24 }
+  ]), plans[0]);
 });

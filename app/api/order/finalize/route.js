@@ -5,7 +5,6 @@ import { maybeSendCustomerConfirmationEmail } from "@/lib/orderConfirmationDispa
 import { getAssignedPickupDateKey } from "@/lib/pickupDetails";
 import { getRouteRateLimitConfig } from "@/lib/rateLimit";
 import { readBoundedJsonBody } from "@/lib/requestBody";
-import { autoPurchaseFastestShippingLabels } from "@/lib/shipmentLabelAutomation";
 import {
   getShippingOptionsForCart,
   inferSelectedShippingOption,
@@ -434,7 +433,7 @@ const runOrderSideEffects = async ({
     failOnAutomationError: strictConfirmationEmailAutomation
   });
 
-  const { shipmentId, error: shipmentError } = await syncShipmentForOrder(orderId);
+  const { error: shipmentError } = await syncShipmentForOrder(orderId);
   if (shipmentError) {
     console.error("sync_shipment_for_order error:", shipmentError);
     return {
@@ -442,14 +441,6 @@ const runOrderSideEffects = async ({
       error: "We couldn't prepare shipping for that order yet.",
       status: 500
     };
-  }
-
-  if (shipmentId) {
-    try {
-      await autoPurchaseFastestShippingLabels(shipmentId);
-    } catch (labelError) {
-      console.error("automatic EasyPost label purchase failed:", labelError?.message || labelError);
-    }
   }
 
   return confirmationResult;

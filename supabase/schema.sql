@@ -124,6 +124,7 @@ create table if not exists shipments (
   label_purchased_at timestamptz,
   label_purchase_started_at timestamptz,
   label_purchase_error text,
+  tracking_email_sent_at timestamptz,
   shipped_at timestamptz,
   created_at timestamptz not null default now(),
   updated_at timestamptz not null default now()
@@ -143,11 +144,16 @@ create table if not exists shipment_quotes (
   created_at timestamptz not null default now()
 );
 
+alter table shipments
+  add column if not exists tracking_email_sent_at timestamptz,
+  add column if not exists active_release_quote_id uuid
+    references shipment_quotes(id) on delete set null;
+
 create table if not exists checkout_shipping_quotes (
   id uuid primary key default gen_random_uuid(),
   payment_session_id text unique,
   status text not null default 'quoted'
-    check (status in ('quoted', 'label_purchased', 'cancelled')),
+    check (status in ('rating', 'quoted', 'attached', 'purchased', 'expired', 'cancelled')),
   provider text not null default 'easypost',
   quote_json jsonb not null check (jsonb_typeof(quote_json) = 'object'),
   postage_cents integer not null check (postage_cents >= 0),
@@ -164,9 +170,47 @@ create table if not exists checkout_shipping_quotes (
   delivery_days integer check (delivery_days is null or delivery_days >= 0),
   service_level text check (service_level is null or service_level in ('normal', 'expedited')),
   expected_arrival_date date,
+  fingerprint text,
+  session_fingerprint text,
+  parcel_plan jsonb not null default '{}'::jsonb check (jsonb_typeof(parcel_plan) = 'object'),
+  planned_ship_date date,
+  carrier text,
+  service text,
+  verified_address_id text,
+  financial_invariant_version integer not null default 1,
+  shipping_margin_cents integer not null default 0 check (shipping_margin_cents >= 0),
+  check (discount_cents = 0),
+  check (charged_shipping_cents >= postage_cents + packaging_cents),
+  check (shipping_margin_cents = charged_shipping_cents - postage_cents - packaging_cents),
   expires_at timestamptz not null,
   created_at timestamptz not null default now(),
   updated_at timestamptz not null default now()
+);
+
+create table if not exists easypost_usage_ledger (
+  id bigint generated always as identity primary key,
+  event_type text not null check (event_type in ('quote_reserved', 'cache_hit', 'blocked', 'quote_failed', 'label_purchased')),
+  session_fingerprint text, ip_fingerprint text, quote_fingerprint text,
+  quote_id uuid references checkout_shipping_quotes(id) on delete set null,
+  rating_operations integer not null default 0 check (rating_operations >= 0),
+  rated_shipments integer not null default 0 check (rated_shipments >= 0),
+  address_verifications integer not null default 0 check (address_verifications >= 0),
+  labels_purchased integer not null default 0 check (labels_purchased >= 0),
+  cache_hits integer not null default 0 check (cache_hits >= 0),
+  cache_misses integer not null default 0 check (cache_misses >= 0),
+  blocked_requests integer not null default 0 check (blocked_requests >= 0),
+  failed_quote_requests integer not null default 0 check (failed_quote_requests >= 0),
+  estimated_overage_cost_cents integer not null default 0 check (estimated_overage_cost_cents >= 0),
+  created_at timestamptz not null default now()
+);
+
+create table if not exists easypost_usage_alerts (
+  id bigint generated always as identity primary key,
+  billing_month date not null,
+  threshold_percent integer not null check (threshold_percent in (50, 80, 100)),
+  estimated_overage_cost_cents integer not null check (estimated_overage_cost_cents >= 0),
+  created_at timestamptz not null default now(),
+  unique (billing_month, threshold_percent)
 );
 
 create table if not exists shipment_parcels (
@@ -330,10 +374,11 @@ create table if not exists analytics_events (
 
 create table if not exists email_jobs (
   id uuid primary key default gen_random_uuid(),
-  type text not null check (type in ('order_confirmation')),
+  type text not null check (type in ('order_confirmation', 'shipment_tracking')),
   status text not null default 'pending'
     check (status in ('pending', 'processing', 'sent', 'failed')),
   order_id uuid references orders(id) on delete cascade,
+  shipment_id uuid references shipments(id) on delete cascade,
   payload jsonb not null default '{}'::jsonb check (jsonb_typeof(payload) = 'object'),
   attempts integer not null default 0 check (attempts >= 0),
   max_attempts integer not null default 5 check (max_attempts > 0),
@@ -354,7 +399,12 @@ alter table orders
 alter table email_jobs
   add column if not exists claim_token uuid,
   add column if not exists message_id text,
-  add column if not exists last_error_code text;
+  add column if not exists last_error_code text,
+  add column if not exists shipment_id uuid references shipments(id) on delete cascade;
+
+alter table email_jobs drop constraint if exists email_jobs_type_check;
+alter table email_jobs add constraint email_jobs_type_check
+  check (type in ('order_confirmation', 'shipment_tracking'));
 
 update email_jobs
 set message_id = format(
@@ -425,6 +475,10 @@ create index if not exists shipments_status_created_at_idx on shipments (status,
 create index if not exists shipments_created_at_idx on shipments (created_at desc);
 create index if not exists shipment_quotes_shipment_created_idx on shipment_quotes (shipment_id, created_at desc);
 create index if not exists checkout_shipping_quotes_status_created_idx on checkout_shipping_quotes (status, created_at desc);
+create index if not exists checkout_shipping_quotes_fingerprint_idx on checkout_shipping_quotes (fingerprint, status, expires_at desc);
+create index if not exists easypost_usage_ledger_created_idx on easypost_usage_ledger (created_at desc);
+create index if not exists easypost_usage_ledger_session_idx on easypost_usage_ledger (session_fingerprint, created_at desc);
+create index if not exists easypost_usage_ledger_quote_fingerprint_idx on easypost_usage_ledger (quote_fingerprint, created_at desc);
 create index if not exists shipment_parcels_shipment_idx on shipment_parcels (shipment_id, parcel_index);
 create index if not exists shipment_parcels_tracking_idx on shipment_parcels (tracking_number);
 create index if not exists orders_status_created_fulfillment_idx
@@ -440,6 +494,9 @@ create unique index email_jobs_order_confirmation_active_idx
     and status in ('pending', 'processing');
 create unique index if not exists email_jobs_message_id_uidx
   on email_jobs (message_id);
+create unique index if not exists email_jobs_shipment_tracking_uidx
+  on email_jobs (shipment_id, type)
+  where type = 'shipment_tracking';
 create index if not exists email_jobs_processing_claim_idx
   on email_jobs (claimed_at, created_at, id)
   where status = 'processing';
@@ -1557,7 +1614,7 @@ begin
     update shipments s
       set status = 'cancelled',
           label_purchase_started_at = null,
-          label_purchase_error = 'Automatic label purchase disabled for a financial test order.',
+          label_purchase_error = 'Manual shipment release is disabled for a financial test order.',
           updated_at = now()
       where s.order_id = v_order.id
         and s.status in ('pending_label', 'purchasing_label')
@@ -1924,7 +1981,7 @@ $$;
 update shipments s
   set status = 'cancelled',
       label_purchase_started_at = null,
-      label_purchase_error = 'Automatic label purchase disabled for a financial test order.',
+      label_purchase_error = 'Manual shipment release is disabled for a financial test order.',
       updated_at = now()
 from orders o
 where o.id = s.order_id
@@ -2432,6 +2489,130 @@ begin
         customer_confirmation_email_claim_token = v_claim_token
     where id = v_order_id;
 
+  return true;
+end;
+$$;
+
+create or replace function enqueue_shipment_tracking_email(
+  p_shipment_id uuid, p_payload jsonb, p_claim_token uuid, p_message_id text
+) returns uuid language plpgsql security definer set search_path = public as $$
+declare
+  v_now timestamptz := clock_timestamp(); v_message_id text := trim(coalesce(p_message_id, ''));
+  v_shipment shipments%rowtype; v_order orders%rowtype; v_order_id uuid;
+  v_existing email_jobs%rowtype; v_job_id uuid;
+begin
+  if p_shipment_id is null or p_claim_token is null then raise exception 'A shipment id and claim token are required.'; end if;
+  if p_payload is null or jsonb_typeof(p_payload) <> 'object' then raise exception 'The shipment tracking payload must be a JSON object.'; end if;
+  if length(v_message_id) not between 3 and 320 or v_message_id ~ E'[\r\n]' then raise exception 'The shipment tracking Message-ID is invalid.'; end if;
+  select order_id into v_order_id from shipments where id = p_shipment_id;
+  if not found then return null; end if;
+  select * into v_order from orders where id = v_order_id for update;
+  if not found then return null; end if;
+  select * into v_shipment from shipments where id = p_shipment_id for update;
+  if not found or v_order.status <> 'paid' or v_order.fulfillment <> 'ship'
+     or coalesce(v_order.is_test_order, false)
+     or v_shipment.status not in ('label_purchased', 'shipped', 'delivered')
+     or nullif(trim(coalesce(v_shipment.tracking_number, '')), '') is null then return null; end if;
+  select * into v_existing from email_jobs
+    where shipment_id = p_shipment_id and type = 'shipment_tracking'
+    order by created_at, id limit 1 for update;
+  if found then return v_existing.id; end if;
+  if v_shipment.tracking_email_sent_at is not null then return null; end if;
+  insert into email_jobs (type,status,order_id,shipment_id,payload,available_at,claimed_at,claim_token,message_id)
+  values ('shipment_tracking','pending',v_shipment.order_id,p_shipment_id,
+    p_payload || jsonb_build_object('shipmentId',p_shipment_id::text),v_now,v_now,p_claim_token,v_message_id)
+  returning id into v_job_id;
+  return v_job_id;
+end;
+$$;
+
+create or replace function claim_shipment_tracking_email_job(
+  p_job_id uuid, p_stale_before timestamptz, p_claim_token uuid
+) returns jsonb language plpgsql security definer set search_path = public as $$
+declare
+  v_now timestamptz := clock_timestamp(); v_job email_jobs%rowtype;
+  v_shipment shipments%rowtype; v_order orders%rowtype; v_shipment_id uuid; v_order_id uuid;
+begin
+  if p_job_id is null or p_claim_token is null or p_stale_before is null then return null; end if;
+  select shipment_id,order_id into v_shipment_id,v_order_id from email_jobs
+    where id=p_job_id and type='shipment_tracking';
+  if not found or v_shipment_id is null or v_order_id is null then return null; end if;
+  select * into v_order from orders where id=v_order_id for update;
+  if not found then return null; end if;
+  select * into v_shipment from shipments where id=v_shipment_id for update;
+  if not found then return null; end if;
+  select * into v_job from email_jobs where id=p_job_id for update;
+  if not found or v_job.type <> 'shipment_tracking' or v_job.shipment_id is null
+     or v_job.attempts >= v_job.max_attempts then return null; end if;
+  if v_shipment.tracking_email_sent_at is not null then
+    update email_jobs set status='sent',processed_at=coalesce(processed_at,v_shipment.tracking_email_sent_at),
+      claimed_at=null,claim_token=null,last_error_code=null,last_error=null where id=v_job.id;
+    return null;
+  end if;
+  if v_order.status <> 'paid' or v_order.fulfillment <> 'ship' or coalesce(v_order.is_test_order,false)
+     or v_shipment.status not in ('label_purchased','shipped','delivered')
+     or nullif(trim(coalesce(v_shipment.tracking_number,'')),'') is null then
+    update email_jobs set status='failed',processed_at=v_now,claimed_at=null,claim_token=null,
+      last_error_code='order_ineligible',last_error='The shipment is no longer eligible for tracking delivery.'
+    where id=v_job.id;
+    return null;
+  end if;
+  if not ((v_job.status='pending' and v_job.available_at<=v_now)
+    or (v_job.status='processing' and v_job.claimed_at<=p_stale_before)) then return null; end if;
+  update email_jobs set status='processing',claim_token=p_claim_token,claimed_at=v_now,
+    processed_at=null,last_error_code=null,last_error=null where id=v_job.id returning * into v_job;
+  return jsonb_build_object('id',v_job.id,'type',v_job.type,'order_id',v_job.order_id,
+    'shipment_id',v_job.shipment_id,'payload',v_job.payload,'attempts',v_job.attempts,
+    'max_attempts',v_job.max_attempts,'message_id',v_job.message_id,'claim_token',v_job.claim_token);
+end;
+$$;
+
+create or replace function complete_shipment_tracking_email_job(
+  p_job_id uuid, p_claim_token uuid, p_sent_at timestamptz
+) returns boolean language plpgsql security definer set search_path = public as $$
+declare
+  v_sent_at timestamptz := coalesce(p_sent_at,clock_timestamp()); v_job email_jobs%rowtype;
+  v_shipment_id uuid; v_order_id uuid;
+begin
+  if p_job_id is null or p_claim_token is null then return false; end if;
+  select shipment_id,order_id into v_shipment_id,v_order_id from email_jobs
+    where id=p_job_id and type='shipment_tracking';
+  if not found or v_shipment_id is null or v_order_id is null then return false; end if;
+  perform id from orders where id=v_order_id for update;
+  if not found then return false; end if;
+  perform id from shipments where id=v_shipment_id for update;
+  if not found then return false; end if;
+  select * into v_job from email_jobs where id=p_job_id for update;
+  if not found or v_job.type<>'shipment_tracking' or v_job.shipment_id is null
+    or v_job.status<>'processing' or v_job.claim_token is distinct from p_claim_token then return false; end if;
+  update shipments set tracking_email_sent_at=coalesce(tracking_email_sent_at,v_sent_at) where id=v_job.shipment_id;
+  update email_jobs set status='sent',processed_at=v_sent_at,claimed_at=null,claim_token=null,
+    last_error_code=null,last_error=null where id=v_job.id;
+  return true;
+end;
+$$;
+
+create or replace function retry_failed_shipment_tracking_email_job(
+  p_job_id uuid, p_available_at timestamptz
+) returns boolean language plpgsql security definer set search_path = public as $$
+declare
+  v_now timestamptz:=clock_timestamp(); v_job email_jobs%rowtype;
+  v_shipment shipments%rowtype; v_order orders%rowtype; v_shipment_id uuid; v_order_id uuid;
+begin
+  select shipment_id,order_id into v_shipment_id,v_order_id from email_jobs
+    where id=p_job_id and type='shipment_tracking';
+  if not found or v_shipment_id is null or v_order_id is null then return false; end if;
+  select * into v_order from orders where id=v_order_id for update;
+  if not found then return false; end if;
+  select * into v_shipment from shipments where id=v_shipment_id for update;
+  if not found or v_shipment.tracking_email_sent_at is not null
+    or v_shipment.status not in ('label_purchased','shipped','delivered') then return false; end if;
+  select * into v_job from email_jobs where id=p_job_id for update;
+  if not found or v_job.type<>'shipment_tracking' or v_job.status<>'failed' or v_job.shipment_id is null then return false; end if;
+  if v_order.status<>'paid' or v_order.fulfillment<>'ship' or coalesce(v_order.is_test_order,false) then return false; end if;
+  update email_jobs set status='pending',attempts=0,
+    available_at=greatest(coalesce(p_available_at,v_now),v_now),processed_at=null,
+    claimed_at=null,claim_token=null,last_error_code=null,last_error=null where id=v_job.id;
   return true;
 end;
 $$;
@@ -3222,6 +3403,8 @@ begin
     'shipments',
     'shipment_quotes',
     'checkout_shipping_quotes',
+    'easypost_usage_ledger',
+    'easypost_usage_alerts',
     'shipment_parcels',
     'email_signups',
     'do_not_market',
@@ -3283,6 +3466,10 @@ begin
     'public.reschedule_or_fail_email_job(uuid,uuid,text,text,boolean,timestamptz)',
     'public.complete_email_job(uuid,uuid,timestamptz)',
     'public.retry_failed_email_job(uuid,timestamptz)',
+    'public.enqueue_shipment_tracking_email(uuid,jsonb,uuid,text)',
+    'public.claim_shipment_tracking_email_job(uuid,timestamptz,uuid)',
+    'public.complete_shipment_tracking_email_job(uuid,uuid,timestamptz)',
+    'public.retry_failed_shipment_tracking_email_job(uuid,timestamptz)',
     'public.claim_preorder_ready_email_events(uuid,uuid[],uuid,timestamptz,timestamptz)',
     'public.release_preorder_ready_email_events(uuid[],uuid)',
     'public.complete_preorder_ready_email_events(uuid[],uuid,timestamptz)',
@@ -3452,6 +3639,337 @@ on conflict (sku) do nothing;
 
 insert into site_settings (id, show_stock)
 values (true, true)
-on conflict (id) do nothing;
+ on conflict (id) do nothing;
 
 commit;
+
+-- EasyPost quote cache, usage ledger, and financial circuit breakers.
+alter table public.checkout_shipping_quotes
+  drop constraint if exists checkout_shipping_quotes_status_check;
+
+update public.checkout_shipping_quotes
+  set status = 'purchased'
+  where status = 'label_purchased';
+
+alter table public.checkout_shipping_quotes
+  add column if not exists fingerprint text,
+  add column if not exists session_fingerprint text,
+  add column if not exists parcel_plan jsonb not null default '{}'::jsonb
+    check (jsonb_typeof(parcel_plan) = 'object'),
+  add column if not exists planned_ship_date date,
+  add column if not exists carrier text,
+  add column if not exists service text,
+  add column if not exists verified_address_id text,
+  add column if not exists financial_invariant_version integer,
+  add column if not exists shipping_margin_cents integer not null default 0
+    check (shipping_margin_cents >= 0);
+
+update public.checkout_shipping_quotes
+  set financial_invariant_version = 0
+  where financial_invariant_version is null;
+alter table public.checkout_shipping_quotes
+  alter column financial_invariant_version set default 1,
+  alter column financial_invariant_version set not null;
+
+alter table public.checkout_shipping_quotes
+  add constraint checkout_shipping_quotes_status_check
+  check (status in ('rating', 'quoted', 'attached', 'purchased', 'expired', 'cancelled'));
+
+alter table public.checkout_shipping_quotes
+  drop constraint if exists checkout_shipping_quotes_charged_shipping_check,
+  drop constraint if exists checkout_shipping_quotes_discount_cents_check,
+  drop constraint if exists checkout_shipping_quotes_no_hidden_subsidy,
+  drop constraint if exists checkout_shipping_quotes_cost_coverage,
+  drop constraint if exists checkout_shipping_quotes_margin_matches;
+
+alter table public.checkout_shipping_quotes
+  add constraint checkout_shipping_quotes_no_hidden_subsidy
+    check (financial_invariant_version = 0 or discount_cents = 0),
+  add constraint checkout_shipping_quotes_cost_coverage
+    check (financial_invariant_version = 0 or charged_shipping_cents >= postage_cents + packaging_cents),
+  add constraint checkout_shipping_quotes_margin_matches
+    check (financial_invariant_version = 0 or shipping_margin_cents = charged_shipping_cents - postage_cents - packaging_cents);
+
+create index if not exists checkout_shipping_quotes_fingerprint_idx
+  on public.checkout_shipping_quotes (fingerprint, status, expires_at desc);
+
+create table if not exists public.easypost_usage_ledger (
+  id bigint generated always as identity primary key,
+  event_type text not null check (event_type in (
+    'quote_reserved', 'cache_hit', 'blocked', 'quote_failed', 'label_purchased'
+  )),
+  session_fingerprint text,
+  ip_fingerprint text,
+  quote_fingerprint text,
+  quote_id uuid references public.checkout_shipping_quotes(id) on delete set null,
+  rating_operations integer not null default 0 check (rating_operations >= 0),
+  rated_shipments integer not null default 0 check (rated_shipments >= 0),
+  address_verifications integer not null default 0 check (address_verifications >= 0),
+  labels_purchased integer not null default 0 check (labels_purchased >= 0),
+  cache_hits integer not null default 0 check (cache_hits >= 0),
+  cache_misses integer not null default 0 check (cache_misses >= 0),
+  blocked_requests integer not null default 0 check (blocked_requests >= 0),
+  failed_quote_requests integer not null default 0 check (failed_quote_requests >= 0),
+  estimated_overage_cost_cents integer not null default 0
+    check (estimated_overage_cost_cents >= 0),
+  created_at timestamptz not null default now()
+);
+
+create index if not exists easypost_usage_ledger_created_idx
+  on public.easypost_usage_ledger (created_at desc);
+create index if not exists easypost_usage_ledger_session_idx
+  on public.easypost_usage_ledger (session_fingerprint, created_at desc);
+create index if not exists easypost_usage_ledger_quote_fingerprint_idx
+  on public.easypost_usage_ledger (quote_fingerprint, created_at desc);
+
+create table if not exists public.easypost_usage_alerts (
+  id bigint generated always as identity primary key,
+  billing_month date not null,
+  threshold_percent integer not null check (threshold_percent in (50, 80, 100)),
+  estimated_overage_cost_cents integer not null check (estimated_overage_cost_cents >= 0),
+  created_at timestamptz not null default now(),
+  unique (billing_month, threshold_percent)
+);
+
+alter table public.easypost_usage_ledger enable row level security;
+alter table public.easypost_usage_alerts enable row level security;
+revoke all on public.easypost_usage_ledger from public, anon, authenticated;
+revoke all on public.easypost_usage_alerts from public, anon, authenticated;
+
+create or replace function public.reserve_easypost_quote(
+  p_fingerprint text,
+  p_session_fingerprint text,
+  p_ip_fingerprint text,
+  p_service_level text,
+  p_parcel_plan jsonb,
+  p_planned_ship_date date,
+  p_expires_at timestamptz,
+  p_parcel_count integer,
+  p_daily_rating_limit integer,
+  p_daily_verification_limit integer,
+  p_monthly_overage_limit_cents integer,
+  p_estimated_overage_cost_cents integer
+) returns table(state text, quote_id uuid)
+language plpgsql
+security definer
+set search_path = public
+as $$
+declare
+  v_now timestamptz := now();
+  v_quote_id uuid;
+  v_daily_ratings bigint;
+  v_daily_verifications bigint;
+  v_monthly_overage bigint;
+  v_session_misses bigint;
+  v_fingerprint_misses bigint;
+  v_month_start date := date_trunc('month', v_now)::date;
+  v_percent numeric;
+begin
+  if coalesce(length(p_fingerprint), 0) <> 64
+     or coalesce(length(p_session_fingerprint), 0) <> 64
+     or coalesce(length(p_ip_fingerprint), 0) <> 64
+     or p_service_level not in ('normal', 'expedited')
+     or p_parcel_count < 1
+     or p_expires_at <= v_now then
+    raise exception 'Invalid EasyPost quote reservation.';
+  end if;
+
+  perform pg_advisory_xact_lock(hashtextextended(p_fingerprint, 0));
+
+  update checkout_shipping_quotes
+    set status = 'expired', updated_at = v_now
+    where fingerprint = p_fingerprint
+      and status = 'quoted'
+      and expires_at <= v_now;
+
+  select id into v_quote_id
+  from checkout_shipping_quotes
+  where fingerprint = p_fingerprint
+    and status = 'quoted'
+    and payment_session_id is null
+    and expires_at > v_now
+  order by created_at desc
+  limit 1;
+
+  if v_quote_id is not null then
+    insert into easypost_usage_ledger (
+      event_type, session_fingerprint, ip_fingerprint, quote_fingerprint,
+      quote_id, cache_hits
+    ) values (
+      'cache_hit', p_session_fingerprint, p_ip_fingerprint, p_fingerprint,
+      v_quote_id, 1
+    );
+    return query select 'cache_hit'::text, v_quote_id;
+    return;
+  end if;
+
+  select id into v_quote_id
+  from checkout_shipping_quotes
+  where fingerprint = p_fingerprint
+    and status = 'rating'
+    and created_at > v_now - interval '2 minutes'
+  order by created_at desc
+  limit 1;
+  if v_quote_id is not null then
+    return query select 'in_progress'::text, v_quote_id;
+    return;
+  end if;
+
+  update checkout_shipping_quotes
+    set status = 'cancelled', updated_at = v_now
+    where fingerprint = p_fingerprint and status = 'rating';
+
+  select
+    coalesce(sum(rating_operations), 0),
+    coalesce(sum(address_verifications), 0)
+  into v_daily_ratings, v_daily_verifications
+  from easypost_usage_ledger
+  where created_at >= date_trunc('day', v_now);
+
+  select coalesce(sum(estimated_overage_cost_cents), 0)
+  into v_monthly_overage
+  from easypost_usage_ledger
+  where created_at >= date_trunc('month', v_now);
+
+  select coalesce(sum(cache_misses), 0) into v_session_misses
+  from easypost_usage_ledger
+  where session_fingerprint = p_session_fingerprint
+    and created_at >= v_now - interval '10 minutes';
+
+  select coalesce(sum(cache_misses), 0) into v_fingerprint_misses
+  from easypost_usage_ledger
+  where quote_fingerprint = p_fingerprint
+    and created_at >= v_now - interval '10 minutes';
+
+  if v_session_misses >= 2
+     or v_fingerprint_misses >= 2
+     or v_daily_ratings + 1 > p_daily_rating_limit
+     or v_daily_verifications + 1 > p_daily_verification_limit
+     or v_monthly_overage + p_estimated_overage_cost_cents > p_monthly_overage_limit_cents then
+    insert into easypost_usage_ledger (
+      event_type, session_fingerprint, ip_fingerprint, quote_fingerprint,
+      blocked_requests
+    ) values (
+      'blocked', p_session_fingerprint, p_ip_fingerprint, p_fingerprint, 1
+    );
+    return query select 'blocked'::text, null::uuid;
+    return;
+  end if;
+
+  insert into checkout_shipping_quotes (
+    status, provider, quote_json, postage_cents, packaging_cents,
+    unrounded_cents, rounding_cents, discount_cents, charged_shipping_cents,
+    shipping_margin_cents, currency, expires_at, fingerprint,
+    session_fingerprint, service_level, parcel_plan, planned_ship_date
+  ) values (
+    'rating', 'easypost', '{}'::jsonb, 0, 0, 0, 0, 0, 0, 0, 'USD',
+    p_expires_at, p_fingerprint, p_session_fingerprint, p_service_level,
+    p_parcel_plan, p_planned_ship_date
+  ) returning id into v_quote_id;
+
+  insert into easypost_usage_ledger (
+    event_type, session_fingerprint, ip_fingerprint, quote_fingerprint,
+    quote_id, rating_operations, rated_shipments, address_verifications,
+    cache_misses, estimated_overage_cost_cents
+  ) values (
+    'quote_reserved', p_session_fingerprint, p_ip_fingerprint, p_fingerprint,
+    v_quote_id, 1, p_parcel_count, 1, 1, p_estimated_overage_cost_cents
+  );
+
+  if p_monthly_overage_limit_cents > 0 then
+    v_percent := 100.0 * (v_monthly_overage + p_estimated_overage_cost_cents)
+      / p_monthly_overage_limit_cents;
+    if v_percent >= 50 then
+      insert into easypost_usage_alerts (billing_month, threshold_percent, estimated_overage_cost_cents)
+      values (v_month_start, 50, v_monthly_overage + p_estimated_overage_cost_cents)
+      on conflict do nothing;
+    end if;
+    if v_percent >= 80 then
+      insert into easypost_usage_alerts (billing_month, threshold_percent, estimated_overage_cost_cents)
+      values (v_month_start, 80, v_monthly_overage + p_estimated_overage_cost_cents)
+      on conflict do nothing;
+    end if;
+    if v_percent >= 100 then
+      insert into easypost_usage_alerts (billing_month, threshold_percent, estimated_overage_cost_cents)
+      values (v_month_start, 100, v_monthly_overage + p_estimated_overage_cost_cents)
+      on conflict do nothing;
+    end if;
+  end if;
+
+  return query select 'reserved'::text, v_quote_id;
+end;
+$$;
+
+create or replace function public.fail_easypost_quote(p_quote_id uuid)
+returns void
+language plpgsql
+security definer
+set search_path = public
+as $$
+begin
+  update checkout_shipping_quotes
+    set status = 'cancelled', updated_at = now()
+    where id = p_quote_id and status = 'rating';
+  insert into easypost_usage_ledger (event_type, quote_id, failed_quote_requests)
+    values ('quote_failed', p_quote_id, 1);
+end;
+$$;
+
+create or replace function public.get_easypost_usage_summary()
+returns table(
+  billing_month date,
+  rating_operations bigint,
+  rated_shipments bigint,
+  address_verifications bigint,
+  labels_purchased bigint,
+  cache_hits bigint,
+  cache_misses bigint,
+  blocked_requests bigint,
+  failed_quote_requests bigint,
+  estimated_overage_cost_cents bigint,
+  shipping_revenue_cents bigint,
+  postage_cents bigint,
+  packaging_cents bigint,
+  shipping_margin_cents bigint
+)
+language sql
+security definer
+set search_path = public
+as $$
+  with usage as (
+    select
+      coalesce(sum(rating_operations), 0)::bigint rating_operations,
+      coalesce(sum(rated_shipments), 0)::bigint rated_shipments,
+      coalesce(sum(address_verifications), 0)::bigint address_verifications,
+      coalesce(sum(labels_purchased), 0)::bigint labels_purchased,
+      coalesce(sum(cache_hits), 0)::bigint cache_hits,
+      coalesce(sum(cache_misses), 0)::bigint cache_misses,
+      coalesce(sum(blocked_requests), 0)::bigint blocked_requests,
+      coalesce(sum(failed_quote_requests), 0)::bigint failed_quote_requests,
+      coalesce(sum(estimated_overage_cost_cents), 0)::bigint estimated_overage_cost_cents
+    from easypost_usage_ledger
+    where created_at >= date_trunc('month', now())
+  ), financials as (
+    select
+      coalesce(sum(charged_shipping_cents), 0)::bigint shipping_revenue_cents,
+      coalesce(sum(postage_cents), 0)::bigint postage_cents,
+      coalesce(sum(packaging_cents), 0)::bigint packaging_cents,
+      coalesce(sum(shipping_margin_cents), 0)::bigint shipping_margin_cents
+    from checkout_shipping_quotes
+    where created_at >= date_trunc('month', now())
+      and status in ('attached', 'purchased')
+  )
+  select date_trunc('month', now())::date, usage.*, financials.*
+  from usage cross join financials;
+$$;
+
+revoke all on function public.reserve_easypost_quote(
+  text, text, text, text, jsonb, date, timestamptz, integer, integer, integer, integer, integer
+) from public, anon, authenticated;
+revoke all on function public.fail_easypost_quote(uuid) from public, anon, authenticated;
+revoke all on function public.get_easypost_usage_summary() from public, anon, authenticated;
+grant execute on function public.reserve_easypost_quote(
+  text, text, text, text, jsonb, date, timestamptz, integer, integer, integer, integer, integer
+) to service_role;
+grant execute on function public.fail_easypost_quote(uuid) to service_role;
+grant execute on function public.get_easypost_usage_summary() to service_role;

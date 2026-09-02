@@ -8,7 +8,6 @@ import {
   normalizeProductType
 } from "@/lib/shippingPricing";
 import { getRouteRateLimitConfig } from "@/lib/rateLimit";
-import { autoPurchaseFastestShippingLabels } from "@/lib/shipmentLabelAutomation";
 import {
   stripeConfig,
   stripeRequest,
@@ -172,7 +171,7 @@ const cancelUnattachedCheckoutQuote = async (paymentIntentId, effectiveAt) => {
     .from("checkout_shipping_quotes")
     .update({ status: "cancelled", updated_at: effectiveAt })
     .eq("payment_session_id", paymentIntentId)
-    .eq("status", "quoted");
+    .in("status", ["quoted", "attached"]);
   return error;
 };
 
@@ -409,7 +408,7 @@ const runOrderSideEffects = async ({
     failOnAutomationError: strictConfirmationEmailAutomation
   });
 
-  const { shipmentId, error: shipmentError } = await syncShipmentForOrder(orderId);
+  const { error: shipmentError } = await syncShipmentForOrder(orderId);
   if (shipmentError) {
     console.error("sync_shipment_for_order error:", shipmentError);
     return {
@@ -417,14 +416,6 @@ const runOrderSideEffects = async ({
       error: "Unable to sync shipment.",
       status: 500
     };
-  }
-
-  if (shipmentId) {
-    try {
-      await autoPurchaseFastestShippingLabels(shipmentId);
-    } catch (labelError) {
-      console.error("automatic EasyPost label purchase failed:", labelError?.message || labelError);
-    }
   }
 
   return confirmationResult;

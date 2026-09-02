@@ -1,11 +1,8 @@
 import { parseSearchParams, shipmentsQuerySchema } from "@/lib/adminSchemas";
-import {
-  isMissingShipmentAutomationColumn,
-  readShipmentsWithLegacyFallback
-} from "@/lib/adminShipmentPolicy";
+import { readShipmentsWithLegacyFallback } from "@/lib/adminShipmentPolicy";
 import { secureAdminRoute } from "@/lib/apiSecurity";
 import { getRouteRateLimitConfig } from "@/lib/rateLimit";
-import { autoPurchaseFastestShippingLabels } from "@/lib/shipmentLabelAutomation";
+import { getShipmentReleaseBlockReason } from "@/lib/shipmentReleasePolicy";
 import { isEasyPostTestMode } from "@/lib/easypost";
 import { supabaseAdmin } from "@/lib/supabaseAdmin";
 
@@ -22,8 +19,6 @@ const ADMIN_SHIPMENTS_REFRESH_RATE_LIMIT = getRouteRateLimitConfig("ADMIN_SHIPME
 });
 
 const ADMIN_SHIPMENTS_ROLES = ["admin", "ops_admin"];
-const AUTOMATIC_LABEL_WORKER_LIMIT = 2;
-const AUTOMATIC_LABEL_WORKER_BUDGET_MS = 25_000;
 
 const toInt = (value, fallback = 0) => {
   const parsed = Number.parseInt(value, 10);
@@ -36,12 +31,23 @@ const toUpperText = (value, fallback) => {
 };
 
 const CURRENT_SHIPMENT_SELECTION =
-  "id, order_id, payment_session_id, payment_reference, status, label_provider, label_url, label_purchase_error, tracking_number, carrier, service, customer_name, customer_email, customer_phone, address1, address2, city, state, postal_code, country, items_summary, items_json, item_count, amount_total, currency, shipping_tier, shipping_option, shipping_option_label, shipping_estimate, sauerkraut_count, hot_sauce_count, notes, label_purchased_at, label_purchase_started_at, shipped_at, created_at, updated_at, orders(note, amount_shipping), shipment_parcels(parcel_index, package_code, product_family, postage_cents, box_cost_cents, carrier, service, tracking_number, label_url, label_pdf_url, status)";
+  "id, order_id, payment_session_id, payment_reference, status, label_provider, label_url, label_purchase_error, tracking_number, carrier, service, customer_name, customer_email, customer_phone, address1, address2, city, state, postal_code, country, items_summary, items_json, item_count, amount_total, currency, shipping_tier, shipping_option, shipping_option_label, shipping_estimate, sauerkraut_count, hot_sauce_count, notes, label_purchased_at, label_purchase_started_at, tracking_email_sent_at, shipped_at, created_at, updated_at, orders(note, amount_shipping, status, fulfillment, is_test_order, preorder_queue(remaining)), shipment_parcels(parcel_index, package_code, product_family, postage_cents, box_cost_cents, carrier, service, tracking_number, label_url, label_pdf_url, status)";
 
 // Production may briefly lag the application during a rolling migration. Only
 // retry the known legacy shape; every other database error must still surface.
 const LEGACY_SHIPMENT_SELECTION =
-  "id, order_id, payment_session_id, payment_reference, status, label_provider, label_url, tracking_number, carrier, service, customer_name, customer_email, customer_phone, address1, address2, city, state, postal_code, country, items_summary, items_json, item_count, amount_total, currency, shipping_tier, shipping_option, shipping_option_label, shipping_estimate, sauerkraut_count, hot_sauce_count, notes, label_purchased_at, shipped_at, created_at, updated_at, orders(note, amount_shipping), shipment_parcels(parcel_index, package_code, product_family, postage_cents, box_cost_cents, carrier, service, tracking_number, label_url, label_pdf_url, status)";
+  "id, order_id, payment_session_id, payment_reference, status, label_provider, label_url, tracking_number, carrier, service, customer_name, customer_email, customer_phone, address1, address2, city, state, postal_code, country, items_summary, items_json, item_count, amount_total, currency, shipping_tier, shipping_option, shipping_option_label, shipping_estimate, sauerkraut_count, hot_sauce_count, notes, label_purchased_at, shipped_at, created_at, updated_at, orders(note, amount_shipping, status, fulfillment, is_test_order, preorder_queue(remaining)), shipment_parcels(parcel_index, package_code, product_family, postage_cents, box_cost_cents, carrier, service, tracking_number, label_url, label_pdf_url, status)";
+
+const getReleaseState = (row) => {
+  const order = Array.isArray(row?.orders) ? row.orders[0] : row?.orders;
+  const blockReason = getShipmentReleaseBlockReason({
+    shipment: row,
+    order,
+    hasOutstandingPreorders: (order?.preorder_queue || [])
+      .some((entry) => Number(entry?.remaining || 0) > 0)
+  });
+  return { eligible: !blockReason, blockReason };
+};
 
 const buildShipmentQuery = ({ selection, limit, status }) => {
   let query = supabaseAdmin
@@ -74,6 +80,17 @@ const readShipments = async ({ limit, status }) => {
   });
 };
 
+const readTrackingEmailStatuses = async (shipmentIds) => {
+  if (shipmentIds.length === 0) return new Map();
+  const { data, error } = await supabaseAdmin
+    .from("email_jobs")
+    .select("shipment_id, status")
+    .eq("type", "shipment_tracking")
+    .in("shipment_id", shipmentIds);
+  if (error) throw error;
+  return new Map((data || []).map((job) => [job.shipment_id, job.status]));
+};
+
 const refreshShipments = async () => {
   const allowTestLabels = isEasyPostTestMode();
   let testShipmentSyncCount = 0;
@@ -87,78 +104,8 @@ const refreshShipments = async () => {
   );
   if (syncError) throw new Error("SHIPMENT_SYNC_FAILED", { cause: syncError });
 
-  let pendingQuery = supabaseAdmin
-    .from("shipments")
-    .select("id, label_purchase_error, orders!inner(status, is_test_order)")
-    .in("status", ["pending_label", "purchasing_label"])
-    .eq("orders.status", "paid")
-    .order("updated_at", { ascending: true })
-    .limit(50);
-  if (!allowTestLabels) pendingQuery = pendingQuery.eq("orders.is_test_order", false);
-  let pendingResult = await pendingQuery;
-
-  let automationSchemaReady = true;
-  if (isMissingShipmentAutomationColumn(pendingResult.error)) {
-    automationSchemaReady = false;
-    let legacyPendingQuery = supabaseAdmin
-      .from("shipments")
-      .select("id, orders!inner(status, is_test_order)")
-      .in("status", ["pending_label", "purchasing_label"])
-      .eq("orders.status", "paid")
-      .order("updated_at", { ascending: true })
-      .limit(50);
-    if (!allowTestLabels) {
-      legacyPendingQuery = legacyPendingQuery.eq("orders.is_test_order", false);
-    }
-    pendingResult = await legacyPendingQuery;
-  }
-
-  const automaticLabelErrors = [];
-  let automaticLabelsPurchased = 0;
-  let automaticLabelsDeferred = 0;
-  if (pendingResult.error) {
-    console.error("pending shipment label read error:", pendingResult.error);
-    automaticLabelErrors.push({ error: "Pending shipments could not be checked." });
-  } else if (!automationSchemaReady) {
-    automaticLabelErrors.push({
-      error: "Shipment reporting is available, but the automatic-label database migration still needs to be applied."
-    });
-  } else {
-    let attemptedLabels = 0;
-    const eligiblePendingShipments = (pendingResult.data || []).filter(
-      (pendingShipment) =>
-        (allowTestLabels ||
-          !String(pendingShipment.label_purchase_error || "").toLowerCase().includes("financial test order")) &&
-        !String(pendingShipment.label_purchase_error || "").includes("preorder items are ready")
-    );
-    const workerDeadlineAt = Date.now() + AUTOMATIC_LABEL_WORKER_BUDGET_MS;
-    for (let index = 0; index < eligiblePendingShipments.length; index += 1) {
-      const pendingShipment = eligiblePendingShipments[index];
-      if (
-        attemptedLabels >= AUTOMATIC_LABEL_WORKER_LIMIT ||
-        Date.now() >= workerDeadlineAt
-      ) {
-        automaticLabelsDeferred += eligiblePendingShipments.length - index;
-        break;
-      }
-      attemptedLabels += 1;
-      try {
-        const result = await autoPurchaseFastestShippingLabels(pendingShipment.id);
-        if (result.state === "label_purchased") automaticLabelsPurchased += 1;
-      } catch (labelError) {
-        const message = String(labelError?.message || labelError || "Automatic label purchase failed.");
-        console.error("automatic EasyPost label retry failed:", message);
-        automaticLabelErrors.push({ shipment_id: pendingShipment.id, error: message });
-      }
-    }
-  }
-
   return {
-    refreshed_count: toInt(syncCount, 0) + testShipmentSyncCount,
-    automatic_labels_purchased: automaticLabelsPurchased,
-    automatic_labels_deferred: automaticLabelsDeferred,
-    automatic_label_errors: automaticLabelErrors,
-    automation_schema_ready: automationSchemaReady
+    refreshed_count: toInt(syncCount, 0) + testShipmentSyncCount
   };
 };
 
@@ -203,8 +150,21 @@ export async function GET(request) {
     );
   }
 
-  const shipments = (data || []).map((row) => ({
-    id: row.id,
+  let trackingEmailStatuses;
+  try {
+    trackingEmailStatuses = await readTrackingEmailStatuses((data || []).map((row) => row.id));
+  } catch (trackingStatusError) {
+    console.error("shipment tracking email status read error:", trackingStatusError);
+    return respond.json(
+      { error: "We couldn't load shipment email statuses right now." },
+      { status: 500 }
+    );
+  }
+
+  const shipments = (data || []).map((row) => {
+    const release = getReleaseState(row);
+    return {
+      id: row.id,
     order_id: row.order_id,
     payment_session_id: row.payment_session_id,
     payment_reference: row.payment_reference || "",
@@ -248,20 +208,21 @@ export async function GET(request) {
     ),
     label_purchased_at: row.label_purchased_at || null,
     label_purchase_started_at: row.label_purchase_started_at || null,
+    release_eligible: release.eligible,
+    release_block_reason: release.blockReason,
+    tracking_email_status: row.tracking_email_sent_at
+      ? "sent"
+      : trackingEmailStatuses.get(row.id) || "not_queued",
     shipped_at: row.shipped_at || null,
     parcels: Array.isArray(row.shipment_parcels)
       ? row.shipment_parcels.sort((a, b) => a.parcel_index - b.parcel_index)
       : [],
     created_at: row.created_at,
-    updated_at: row.updated_at
-  }));
-
-  return respond.json({
-    refreshed_count: 0,
-    automatic_labels_purchased: 0,
-    automatic_label_errors: [],
-    shipments
+      updated_at: row.updated_at
+    };
   });
+
+  return respond.json({ refreshed_count: 0, shipments });
 }
 
 export async function POST(request) {

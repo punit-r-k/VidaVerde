@@ -148,23 +148,32 @@ For shipping orders, customers choose Shipping or Expedited Shipping. Shipping s
 the fastest EasyPost rate estimated at 3–5 business days and excludes estimates
 under three days; Expedited selects the fastest eligible 1–3-business-day rate.
 The server adds exact packaging cost to the selected postage and rounds the combined
-charge up to the nearest dollar. Once the shipping address is valid, the storefront
-automatically refreshes that final charge and expected arrival whenever the cart,
-address, or shipping method changes. Shipping and Expedited previews are calculated
-concurrently, so both final charges and expected arrival dates appear together.
-Expedited is displayed only when it is faster and costs more than Shipping. If its
-label is cheaper, that label is used for Shipping and Expedited is hidden. Multi-parcel
-orders use one carrier for every parcel. Before an address has been rated, only
-Shipping is displayed; Expedited can appear after calculation only when it qualifies.
-Checkout recalculates the authoritative amount,
-stores the reserved quote and expected arrival with the PaymentIntent, then reuses the
-same quote to buy the prepaid label automatically after payment. Preorder labels are
-deferred until every preorder item is ready. Carrier handoff is estimated for the
+charge up to the nearest dollar; caps and implicit discounts are forbidden. The
+customer explicitly clicks **Calculate shipping** (or **Update shipping** after a
+change). Only the selected service and one deterministic local parcel plan are rated.
+The result is cached in Supabase for 45 minutes under an HMAC-SHA-256 fingerprint;
+the browser receives only an opaque quote token. Identical unexpired requests are
+cache hits and make no EasyPost calls. Checkout validates and attaches that token to
+the PaymentIntent and never rates again. Payment finalization, Stripe webhooks,
+preorder processing, and scheduled shipment refreshes only synchronize shipment
+records; they never purchase labels. An operator releases up to ten selected rows
+from **Shipping -> Release Selected Shipments** in the connected Google Sheet. The
+action reuses an unexpired checkout quote without rating, or lets an authenticated
+operator explicitly preview and confirm replacement postage when necessary. It then
+purchases each order independently. Preorder shipments cannot be released until
+every preorder item is ready. Carrier handoff is estimated for the
 next configured shipping day. With the current schedule, orders completed strictly
 before 7:00 AM Central on Saturday are estimated to be handed to the carrier that
 Saturday; orders completed at or after 7:00 AM use the next shipping cycle. Delivery
 timing is calculated from that estimated carrier-handoff date. The customer-facing
-confirmation email includes tracking when it is available.
+confirmation email does not require tracking. Customer-facing shipment-tracking
+emails and optional advanced tracking are disabled. The carrier-generated tracking
+number bundled with each purchased label remains stored internally for operations
+and refunds; no standalone EasyPost Tracker object is created.
+
+Deploy `20260901120000_manual_shipment_release_tracking_email.sql` and
+`20260901130000_easypost_quote_cache_budget.sql` before deploying the application,
+then update and reopen the Apps Script spreadsheet so the new Shipping menu is loaded.
 
 Required environment variables:
 - `NEXT_PUBLIC_SUPABASE_URL`
@@ -174,6 +183,11 @@ Required environment variables:
 - `STRIPE_WEBHOOK_SECRET`
 - `EASYPOST_API_KEY` (use a production key before purchasing real labels)
 - `EASYPOST_WEBHOOK_SECRET`
+- `SHIPPING_QUOTE_HMAC_SECRET` (at least 32 random bytes; never expose it publicly)
+- `EASYPOST_LIVE_QUOTES_ENABLED=true`
+- `EASYPOST_MONTHLY_OVERAGE_LIMIT_CENTS`
+- `EASYPOST_DAILY_RATING_LIMIT`
+- `EASYPOST_DAILY_ADDRESS_VERIFICATION_LIMIT`
 - `EASYPOST_FROM_NAME`
 - `EASYPOST_FROM_STREET1`
 - `EASYPOST_FROM_CITY`
@@ -190,6 +204,17 @@ Required environment variables:
   `HH:mm` format (currently `07:00`; orders at exactly this time roll forward)
 - `NEXT_PUBLIC_SHIPPING_TIME_ZONE` is the IANA timezone used by every shipping
   calculation and displayed cutoff (currently `America/Chicago`)
+
+EasyPost account-owner checklist (manual dashboard/support work only):
+
+- Confirm the Free Access / Wallet Carriers plan.
+- Cancel **Account Settings -> Billing -> Advanced Tracking**.
+- Disable automatic EasyPost Guard insurance unless it is intentionally wanted.
+- Reconnect or replace the failing ACH account, then verify auto-reload settings.
+- Avoid credit-card funding because it carries a convenience fee.
+- Ask EasyPost Support for courtesy credits for the $48.02 Rating Overage and
+  $18.66 Address Verification Overage.
+- Ask whether EasyPost can place a hard overage ceiling on the account.
 
 Optional for customer order confirmation and preorder-ready emails:
 - `SMTP_HOST`

@@ -33,7 +33,17 @@ const isHostedProduction = () =>
     .toLowerCase() === "production";
 
 const assertSafeProductionCorsConfig = () => {
-  if (getSecurityEnvironmentBucket() !== "PRODUCTION") {
+  const environmentBucket = getSecurityEnvironmentBucket();
+  const easyPostApiKey = String(process.env.EASYPOST_API_KEY || "").trim();
+  if (
+    easyPostApiKey.startsWith("EZAK") &&
+    (environmentBucket === "STAGING" || String(process.env.NODE_ENV).toLowerCase() === "test")
+  ) {
+    throw new Error(
+      "Unsafe non-production shipping configuration: staging and test environments cannot use an EasyPost production key."
+    );
+  }
+  if (environmentBucket !== "PRODUCTION") {
     return;
   }
 
@@ -71,6 +81,11 @@ const assertSafeProductionCorsConfig = () => {
   const requiredShippingVariables = [
     "EASYPOST_API_KEY",
     "EASYPOST_WEBHOOK_SECRET",
+    "SHIPPING_QUOTE_HMAC_SECRET",
+    "EASYPOST_LIVE_QUOTES_ENABLED",
+    "EASYPOST_MONTHLY_OVERAGE_LIMIT_CENTS",
+    "EASYPOST_DAILY_RATING_LIMIT",
+    "EASYPOST_DAILY_ADDRESS_VERIFICATION_LIMIT",
     "EASYPOST_FROM_STREET1",
     "EASYPOST_FROM_CITY",
     "EASYPOST_FROM_STATE",
@@ -87,6 +102,11 @@ const assertSafeProductionCorsConfig = () => {
   if (missingShippingVariables.length > 0) {
     throw new Error(
       `Incomplete production shipping configuration: set ${missingShippingVariables.join(", ")}.`
+    );
+  }
+  if (Buffer.byteLength(String(process.env.SHIPPING_QUOTE_HMAC_SECRET || ""), "utf8") < 32) {
+    throw new Error(
+      "Unsafe production shipping configuration: SHIPPING_QUOTE_HMAC_SECRET must contain at least 32 UTF-8 bytes."
     );
   }
 
@@ -150,8 +170,6 @@ const assertSafeProductionCorsConfig = () => {
     const stripePublishableKey = String(
       process.env.NEXT_PUBLIC_STRIPE_PUBLISHABLE_KEY || ""
     ).trim();
-    const easyPostApiKey = String(process.env.EASYPOST_API_KEY || "").trim();
-
     if (stripeSecretKey.startsWith("sk_test_") || stripePublishableKey.startsWith("pk_test_")) {
       throw new Error(
         "Unsafe production payments configuration: Stripe test API keys cannot be deployed to production."

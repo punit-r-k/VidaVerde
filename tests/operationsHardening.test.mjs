@@ -11,6 +11,7 @@ const emailJobsRoute = read("app/api/admin/email-jobs/route.js");
 const healthRoute = read("app/api/admin/health/route.js");
 const trackerRoute = read("app/api/webhooks/easypost/route.js");
 const labelAutomation = read("lib/shipmentLabelAutomation.js");
+const shipmentReleasePolicy = read("lib/shipmentReleasePolicy.js");
 const emailQueue = read("lib/emailJobQueue.js");
 const storefront = read("app/components/Storefront.jsx");
 const repoSecurityChecks = read("scripts/repo-security-checks.mjs");
@@ -61,13 +62,15 @@ test("shipment sheet starts with the producer's requested fulfillment columns", 
 });
 
 test("test shipment rows are clearly marked as ineligible for labels", () => {
-  assert.match(appsScript, /Not applicable — test order/u);
-  assert.match(appsScript, /No label — cancelled/u);
+  assert.match(appsScript, /Not applicable - test order/u);
+  assert.match(appsScript, /No label - cancelled/u);
 });
 
-test("test labels are enabled only by an EasyPost test key", () => {
-  assert.match(labelAutomation, /is_test_order === true && !isEasyPostTestMode\(\)/u);
-  assert.match(shippingQuoteRoute, /Shipping rates are temporarily unavailable/u);
+test("manual release rejects every financial test order", () => {
+  assert.match(shipmentReleasePolicy, /order\.is_test_order === true/u);
+  assert.match(shipmentReleasePolicy, /Financial test orders cannot be released/u);
+  assert.doesNotMatch(labelAutomation, /isEasyPostTestMode/u);
+  assert.match(shippingQuoteRoute, /Shipping is temporarily unavailable/u);
   assert.match(nextConfig, /EasyPost test API key cannot be deployed to production/u);
 });
 
@@ -95,38 +98,30 @@ test("payment SDK promise failures always unlock the submit button", () => {
   assert.match(submitHandler.slice(catchIndex), /failPayment\(error/u);
 });
 
-test("shipping tiers share one bounded EasyPost rating context", () => {
-  assert.match(shippingQuoteRoute, /ipMax: 12/u);
-  assert.match(
-    shippingQuoteRoute,
-    /const ratingContext = createEasyPostRatingContext\(\{ startedAt: orderCreatedAt \}\)[\s\S]*shipping\.options\.map[\s\S]*ratingContext/u
-  );
-  assert.match(
-    checkoutRoute,
-    /const ratingContext = createEasyPostRatingContext\(\{ startedAt: orderCreatedAt \}\)[\s\S]*shipping\.options\.map[\s\S]*ratingContext/u
-  );
+test("shipping quotes use one selected plan and checkout never rates again", () => {
+  assert.match(shippingQuoteRoute, /windowMs: 10 \* 60_000[\s\S]*ipMax: 6/u);
+  assert.match(shippingQuoteRoute, /reserveShippingQuoteUsage/u);
+  assert.match(shippingQuoteRoute, /reservation\.state === "cache_hit"/u);
+  assert.match(shippingQuoteRoute, /const ratingContext = createEasyPostRatingContext/u);
+  assert.doesNotMatch(checkoutRoute, /createEasyPostRatingContext|getEasyPostQuotes|selectCheckoutShippingQuote/u);
   assert.match(shippingQuotes, /shipmentPromises: new Map\(\)/u);
   assert.match(shippingQuotes, /getParcelRatingKey\(planKey, parcelIndex, parcel, options\)/u);
-  assert.match(shippingQuotes, /for \(const \[parcelIndex, parcel\] of plan\.parcels\.entries\(\)\)/u);
-  assert.match(shippingQuotes, /verifiedAddressPromise/u);
+  assert.match(shippingQuotes, /shipmentCreateLimit = plan\.parcels\.length/u);
+  assert.match(shippingQuotes, /verify: \["delivery"\]/u);
+  assert.doesNotMatch(shippingQuotes, /createAndVerifyEasyPostAddress/u);
   assert.match(shippingQuotes, /labelDate: estimatedShipDate\?\.toISOString\(\) \|\| ""/u);
   assert.match(shippingQuotes, /EASYPOST_RATING_BUDGET_MS = 25_000/u);
   assert.match(shippingQuotes, /EASYPOST_RATING_REQUEST_TIMEOUT_MS = 10_000/u);
-  assert.match(shippingQuotes, /MAX_EASYPOST_SHIPMENT_CREATES_PER_RATING = 12/u);
-  assert.match(shippingParcels, /MAX_RATED_PARCELS_PER_QUOTE = 12/u);
+  assert.match(shippingParcels, /return combinedPlans\.slice\(0, 1\)/u);
   assert.match(
     labelAutomation,
-    /createEasyPostRatingContext\(\{ deadlineAt: workerDeadlineAt \}\)/u
+    /getEasyPostQuotesForParcels\(shipment/u
   );
   assert.match(shippingQuotes, /estimatedShipDate/u);
   assert.match(shippingQuotes, /expectedArrivalDate/u);
   assert.match(shippingQuoteRoute, /estimatedShipDate: selection\.estimatedShipDateKey/u);
   assert.match(checkoutRoute, /estimatedShipDate: estimatedShipDateKey/u);
-  assert.match(
-    shippingQuoteRoute,
-    /Shipping rates are temporarily unavailable\. Please try again in a few minutes\./u
-  );
-  assert.match(shippingQuoteRoute, /status: noEligibleRates \? 422 : 503/u);
+  assert.match(shippingQuoteRoute, /click Update shipping/iu);
   assert.match(nextConfig, /Incomplete production shipping configuration/u);
   assert.match(nextConfig, /EASYPOST_FROM_STREET1/u);
   assert.match(nextConfig, /NEXT_PUBLIC_SHIPPING_DAYS/u);
@@ -200,12 +195,18 @@ test("shipment refresh reports even when synchronization returns a warning", () 
   assert.match(source, /toastIfAvailable_\(/u);
 });
 
-test("shipment label refresh uses a bounded time-aware worker", () => {
+test("shipment sheet defaults to clipped text instead of wrapping", () => {
+  assert.match(
+    appsScript,
+    /getRange\(1, 1, Math\.max\(sheet\.getMaxRows\(\), 1\), headerValues\[0\]\.length\)[\s\S]*?setWrapStrategy\(SpreadsheetApp\.WrapStrategy\.CLIP\)/u
+  );
+});
+
+test("shipment refresh synchronizes records without rating or buying labels", () => {
   const shipmentRoute = read("app/api/admin/shipments/route.js");
-  assert.match(shipmentRoute, /AUTOMATIC_LABEL_WORKER_LIMIT = 2/u);
-  assert.match(shipmentRoute, /AUTOMATIC_LABEL_WORKER_BUDGET_MS = 25_000/u);
-  assert.match(shipmentRoute, /Date\.now\(\) >= workerDeadlineAt/u);
-  assert.match(shipmentRoute, /automatic_labels_deferred/u);
+  assert.match(shipmentRoute, /sync_all_shipments/u);
+  assert.doesNotMatch(shipmentRoute, /purchaseReleasedShippingLabels|buyEasyPostShipment|getEasyPostQuotes/u);
+  assert.doesNotMatch(shipmentRoute, /automatic_labels_/u);
 });
 
 test("legacy label claims recover and health reporting includes null timestamps", () => {
