@@ -23,7 +23,7 @@ This document is the operating guide for every EasyPost-related process in VidaV
 | --- | --- |
 | Storefront shipping controls | `app/components/Storefront.jsx` |
 | Public quote endpoint | `app/api/shipping/quote/route.js` |
-| Address, cart, and quote request validation | `lib/shippingSchemas.js` and the quote route |
+| Address, cart, and quote request validation | `lib/checkoutSchema.js` and the quote route |
 | Deterministic parcel planning | `lib/shippingParcels.js` |
 | EasyPost Shipment rating | `lib/shippingQuotes.js` |
 | Quote fingerprint, cache, and budgets | `lib/shippingQuoteCache.js` |
@@ -36,7 +36,7 @@ This document is the operating guide for every EasyPost-related process in VidaV
 | Monotonic tracking-state policy | `lib/shippingOperationsPolicy.js` |
 | Stripe refund/dispute retirement | `app/api/stripe/webhook/route.js` |
 | Operations monitoring | `app/api/admin/health/route.js` |
-| Quote/cache/budget database objects | `supabase/migrations/20260901130000_easypost_quote_cache_budget.sql` |
+| Quote/cache/budget database objects | `supabase/migrations/20260901130000_easypost_quote_cache_budget.sql` plus `supabase/migrations/20260902120000_atomic_easypost_quote_budgets.sql` |
 
 The main database objects are:
 
@@ -44,7 +44,7 @@ The main database objects are:
 - `shipment_quotes` and `shipment_parcels`: order-level shipping decision and parcel-level label/tracking records.
 - `easypost_usage_ledger`: rating, verification, cache, label, blocked, failed, and estimated-cost events.
 - `easypost_usage_alerts`: deduplicated 50%, 80%, and 100% budget alerts.
-- `reserve_easypost_quote(...)`: atomic cache lookup and budget reservation under a PostgreSQL advisory lock.
+- `reserve_easypost_quote(...)`: fingerprint-locked cache lookup plus a globally serialized, per-session-safe budget reservation transaction.
 - `get_easypost_usage_summary()`: current usage and financial summary for admin health.
 
 ## 3. End-to-end lifecycle
@@ -52,28 +52,28 @@ The main database objects are:
 ### 3.1 Storefront quote request
 
 1. The customer enters a complete destination and chooses **Calculate shipping**.
-2. The browser sends the normalized cart, destination, shipping service, and opaque browser quote-session ID to `POST /api/shipping/quote`.
+2. The browser sends the normalized cart, destination, and opaque browser quote-session ID to `POST /api/shipping/quote`.
 3. The server rejects incomplete or invalid data before any provider request.
 4. The server creates one deterministic parcel plan locally.
-5. The server creates an HMAC-SHA-256 fingerprint from normalized destination, cart, parcel plan, ship date, requested service, carrier configuration, and origin configuration. Raw addresses are not used as cache keys.
+5. The server creates an HMAC-SHA-256 fingerprint from normalized destination, cart, parcel plan, ship date, the combined service-tier operation, carrier configuration, and origin configuration. Raw addresses are not used as cache keys.
 6. `reserve_easypost_quote(...)` serializes equivalent requests and checks for an unexpired cached quote.
 7. On a cache hit, the route returns the existing opaque quote token and makes no EasyPost request.
 8. On a miss, the database atomically checks the per-session, per-fingerprint, daily, and monthly limits. If a limit is exceeded, it records a blocked event and the server does not contact EasyPost.
-9. If allowed, the application creates one EasyPost Shipment per planned parcel. The first Shipment performs inline delivery-address verification. If there are additional parcels, they reuse the verified EasyPost Address ID.
-10. The server selects the requested service, stores the EasyPost Shipment and Rate IDs, and computes the customer charge.
+9. If allowed, the application strict-verifies the destination once with `POST /addresses`, requires `verifications.delivery.success === true`, and reuses the returned Address ID for every parcel.
+10. The application creates one EasyPost Shipment per planned parcel. It derives Normal and Expedited candidates locally from those same Shipment responses, with no second rating operation. Both multi-parcel options require one common carrier. Expedited is returned only when it is faster and more expensive than Normal. If no Normal rate falls inside the preferred transit window, a faster rate from that same response may be used; slower rates are never used as a fallback.
 11. The customer charge is `postage + packaging`, rounded upward to the next whole dollar. No discount, cap, or hidden subsidy is applied.
-12. The quote is stored as `quoted`, returned with an opaque UUID token, and expires after 45 minutes.
+12. The eligible options are stored behind one opaque UUID token and expire after 45 minutes. At checkout, the record is narrowed to the selected option so only that option's Shipment and Rate IDs can reach label purchase.
 
 Important behavior:
 
-- One parcel means at most one Shipment-rating request.
-- Two parcels mean at most two Shipment-rating requests, with verification requested only on the first.
+- One parcel means one strict Address request plus at most one Shipment-rating request.
+- Two parcels mean one strict Address request plus at most two Shipment-rating requests.
 - Browser retries are not automatic. A customer can explicitly try again after a displayed failure.
 - Cache hits do not consume new provider-rating or budget reservations, but every public request remains subject to endpoint abuse rate limiting.
 
 ### 3.2 Quote cache and concurrency
 
-Equivalent requests share the same fingerprint. The reservation RPC uses an advisory lock so simultaneous requests cannot both miss the cache and spend the same budget independently.
+Equivalent requests share the same fingerprint lock, preventing duplicate cache misses. After cache and in-progress checks, a separate global advisory transaction lock serializes the short usage-ledger read/check/insert across distinct fingerprints; a session advisory lock makes the session window explicit. Provider calls begin only after the RPC commits, so slow EasyPost responses do not hold the budget lock. The daily rating decision sums `rated_shipments` and adds the requested physical parcel count; daily verification remains a separate one-per-new-quote counter.
 
 The cache lifetime is 45 minutes. Configuration that changes rating behavior is part of the fingerprint, so a quote is not incorrectly reused after a carrier account, service, origin, parcel plan, or API-key mode change.
 
@@ -95,7 +95,8 @@ If the token is missing, expired, mismatched, or already unusable, the order is 
 Shipment release is an authenticated admin action.
 
 - If the checkout quote remains usable, the preview reuses its stored EasyPost Shipment and Rate IDs and makes zero provider requests.
-- If it has expired, an authenticated admin may preview a replacement. Replacement preview rates exactly the deterministic parcel plan again.
+- If it has expired, an authenticated admin first reuses an unexpired compatible `RELEASE__` quote for the same shipment, selected option/tier, and persisted parcel plan, provided no parcel from it was purchased.
+- Only when neither checkout nor compatible release preview is reusable does the preview strict-verify the destination once and rate exactly the persisted parcel plan again.
 - Replacement is never automatic and requires confirmation before purchase.
 - Replacement is blocked if its total postage and packaging exceed shipping revenue collected from the customer.
 - Paid-order data, rather than browser input, is used for the destination and parcel plan.
@@ -146,17 +147,21 @@ There is no general-purpose automated EasyPost label-refund process in this repo
 
 ## 4. EasyPost request budget
 
-| Event | EasyPost request maximum |
-| --- | ---: |
-| Page load, cart edit, address typing | 0 |
-| Valid cached quote | 0 |
-| New one-parcel quote | 1 Shipment create/rate request |
-| New two-parcel quote | 2 Shipment create/rate requests |
-| Order creation | 0 |
-| Admin preview using a valid checkout quote | 0 |
-| Admin replacement preview | 1 Shipment create/rate request per parcel |
-| Normal label purchase | 1 Shipment GET + 1 buy POST per parcel |
-| Tracking | 0 standalone Tracker creates |
+| Customer/admin action | Address verification | Shipment rating | Shipment retrieval | Label purchase | Standalone Tracker | Maximum total EasyPost calls |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: |
+| Page load, cart edit, address typing | 0 | 0 | 0 | 0 | 0 | 0 |
+| Valid cached customer quote | 0 | 0 | 0 | 0 | 0 | 0 |
+| New customer quote with `N` parcels | 1 | `N` | 0 | 0 | 0 | `N + 1` |
+| Filter/compare Normal and Expedited | 0 | 0 | 0 | 0 | 0 | 0 additional |
+| Checkout/order creation | 0 | 0 | 0 | 0 | 0 | 0 |
+| Browser order finalization | 0 | 0 | 0 | 0 | 0 | 0 |
+| Admin preview using a valid checkout quote | 0 | 0 | 0 | 0 | 0 | 0 |
+| Repeated compatible admin `RELEASE__` preview | 0 | 0 | 0 | 0 | 0 | 0 |
+| New admin replacement preview with `N` parcels | 1 | `N` | 0 | 0 | 0 | `N + 1` |
+| Successful normal label submission with `N` parcels | 0 | 0 | `N` | `N` | 0 | `2N` |
+| Ambiguous label submission requiring recovery | 0 | 0 | up to `2N` | up to `N` | 0 | up to `3N` |
+| Concurrent duplicate label submission that loses the database lease | 0 | 0 | 0 | 0 | 0 | 0 |
+| EasyPost tracking webhook processing | 0 | 0 | 0 | 0 | 0 | 0 |
 
 EasyPost currently bills rating overages per Shipment rated beyond the plan allowance, not merely per customer quote. The internal ledger therefore distinguishes a quote/rating operation from the number of rated Shipments.
 
@@ -173,7 +178,7 @@ EASYPOST_RATING_OVERAGE_UNIT_CENTS=2
 EASYPOST_ADDRESS_VERIFICATION_OVERAGE_UNIT_CENTS=2
 ```
 
-The values above are an example policy, not a universal budget. Set the three limits to amounts approved by the business. The two unit-cost values should match the current EasyPost contract; EasyPost's published Free Access overage examples currently use $0.02 per rated Shipment and $0.02 per eligible domestic address verification.
+The values above are an example policy, not a universal budget. Set the three limits to amounts approved by the business. The two unit-cost values should match the current EasyPost contract. All five budget/unit-cost variables are required in production and must be non-negative integers; missing or malformed production values stop startup rather than falling back to one cent. Test and development retain deterministic local defaults.
 
 Other controls include:
 
@@ -193,7 +198,7 @@ When a ceiling is reached, the correct outcome is to block a new quote and show 
 At minimum, production uses:
 
 ```dotenv
-EASYPOST_API_KEY=EZAK_live_key_from_secret_manager
+EASYPOST_API_KEY=production-key-from-secret-manager
 EASYPOST_WEBHOOK_SECRET=secret_from_easypost_webhook_configuration
 EASYPOST_LIVE_QUOTES_ENABLED=true
 SHIPPING_QUOTE_HMAC_SECRET=at_least_32_random_bytes
@@ -235,7 +240,7 @@ This is the procedure for requesting a one-time courtesy credit for the `$48.02`
 3. Download the invoice that contains both overage lines. Record its invoice number, billing period, issue date, and payment status.
 4. If useful, export or capture the corresponding payment-log entry.
 5. Prepare a short incident timeline: when excessive calls began, when they stopped, and when the production safeguards were deployed.
-6. Prepare the corrective-action list: explicit quote button, 45-minute cache, deterministic parcel count, inline one-time verification, atomic usage reservation, daily/monthly circuit breakers, and 50/80/100 alerts.
+6. Prepare the corrective-action list: explicit quote button, 45-minute cache, deterministic parcel count, one strict verification per quote, atomic usage reservation, daily/monthly circuit breakers, and 50/80/100 alerts.
 7. Redact customer addresses, API credentials, payment details, and unrelated invoice data from attachments.
 
 ### Submit the request
@@ -269,7 +274,7 @@ We have now deployed the following controls:
 - shipping rates are requested only after an explicit customer action;
 - equivalent quotes are cached for 45 minutes;
 - only one deterministic parcel plan is rated;
-- delivery-address verification happens inline on only the first Shipment;
+- delivery-address verification happens once before rating and its Address ID is reused by every Shipment;
 - duplicate concurrent requests are serialized atomically;
 - daily rating, daily verification, and monthly cost circuit breakers block excess calls; and
 - usage alerts are generated at 50%, 80%, and 100% of the approved budget.
@@ -441,7 +446,7 @@ Deployment order matters:
 
 1. Back up or snapshot the production database according to the normal release procedure.
 2. Choose one database setup path. For an existing database, apply unapplied files from `supabase/migrations/` in filename order. For a completely fresh rebuild, use `supabase/schema.sql` instead. Do not run the schema snapshot after the migrations on the same database.
-3. Apply `supabase/migrations/20260901130000_easypost_quote_cache_budget.sql` before deploying application code that calls its RPCs when using the migration path.
+3. Apply `supabase/migrations/20260901130000_easypost_quote_cache_budget.sql` and then `supabase/migrations/20260902120000_atomic_easypost_quote_budgets.sql` before deploying application code that calls the corrected RPC when using the migration path.
 4. Configure all production secrets and approved circuit-breaker limits.
 5. Deploy the application.
 6. Confirm the EasyPost webhook points to `/api/webhooks/easypost` and uses the configured webhook secret.

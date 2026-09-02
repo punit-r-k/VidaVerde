@@ -172,15 +172,20 @@ test("destination addresses are strictly verified before rating", async (context
     return {
       ok: true,
       status: 200,
-      json: async () => ({ id: "adr_verified", street1: "10 Main St" })
+      json: async () => ({
+        id: "adr_verified",
+        street1: "10 Main St",
+        verifications: { delivery: { success: true, errors: [] } }
+      })
     };
   };
 
   const verified = await createAndVerifyEasyPostAddress({ street1: "10 Main Street" });
   assert.equal(verified.id, "adr_verified");
-  assert.match(requestedUrl, /\/addresses\/create_and_verify$/);
+  assert.match(requestedUrl, /\/addresses$/);
   assert.deepEqual(requestedBody, {
-    address: { street1: "10 Main Street" }
+    address: { street1: "10 Main Street" },
+    verify_strict: true
   });
 });
 

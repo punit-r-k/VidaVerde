@@ -1323,7 +1323,6 @@ export default function Storefront({ products, inventory = null, pickupDetails =
   const shippingQuoteRequestPayload = useMemo(
     () => ({
       checkoutSessionToken: shippingQuoteSessionTokenRef.current,
-      shippingOption: normalizedShippingOptionId,
       customer: {
         address1: String(formValues.address1 || "").trim(),
         address2: String(formValues.address2 || "").trim(),
@@ -1343,8 +1342,7 @@ export default function Storefront({ products, inventory = null, pickupDetails =
       formValues.address2,
       formValues.city,
       formValues.postalCode,
-      formValues.state,
-      normalizedShippingOptionId
+      formValues.state
     ]
   );
   const shippingQuoteRequestFingerprint = useMemo(
@@ -1365,7 +1363,11 @@ export default function Storefront({ products, inventory = null, pickupDetails =
     hasActiveShippingPreview && Array.isArray(shippingPreview?.options)
       ? shippingPreview.options
       : [];
-  const displayedCustomerShippingOptions = customerShippingOptions;
+  const displayedCustomerShippingOptions = hasActiveShippingPreview
+    ? customerShippingOptions.filter((option) => activeShippingPreviewOptions.some(
+        (preview) => normalizeShippingOptionId(preview?.id) === option.id
+      ))
+    : customerShippingOptions;
   const expeditedShippingIsDisplayed = displayedCustomerShippingOptions.some(
     (option) => option.id === "expedited"
   );
@@ -1414,7 +1416,7 @@ export default function Storefront({ products, inventory = null, pickupDetails =
           ? "Updating..."
           : selectedShippingPreviewResult?.error || shippingPreviewError
             ? "Unavailable"
-            : "Calculated from address";
+            : "Click Calculate shipping";
   const preorderUnitsInCart = cartItems.reduce((sum, item) => sum + item.preorderUnits, 0);
   const hasPreorderItems = preorderUnitsInCart > 0;
   const estimatedShipDate = getEstimatedShipDate({
@@ -1463,6 +1465,11 @@ export default function Storefront({ products, inventory = null, pickupDetails =
       }
       if (shippingPreviewRequestRef.current !== requestId) return;
       setShippingPreview({ options: quotedOptions, requestFingerprint: shippingQuoteRequestFingerprint });
+      if (!quotedOptions.some((option) =>
+        normalizeShippingOptionId(option?.id) === normalizedShippingOptionId
+      )) {
+        setShippingOptionId(normalizeShippingOptionId(quotedOptions[0]?.id));
+      }
       setShippingPreviewStatus("ready");
       setShippingPreviewError("");
     } catch (error) {
@@ -1480,7 +1487,8 @@ export default function Storefront({ products, inventory = null, pickupDetails =
     shippingPreviewStatus,
     shippingPreviewReady,
     shippingQuoteRequestFingerprint,
-    shippingQuoteRequestPayload
+    shippingQuoteRequestPayload,
+    normalizedShippingOptionId
   ]);
 
   const pickupAcknowledgementError = fulfillment === "market" &&
@@ -3020,7 +3028,7 @@ export default function Storefront({ products, inventory = null, pickupDetails =
           Shipping is available across the {CONTINENTAL_US_SHIPPING_AREA_LABEL}.
           {hasActiveShippingPreview && !expeditedShippingIsDisplayed
             ? " The final price and expected arrival are shown below."
-            : " Choose Shipping for delivery in an estimated 3–5 business days or Expedited Shipping for 1–3 business days after the estimated carrier-handoff date. Final prices and expected arrival dates are shown before payment."}
+            : " Choose Shipping for delivery in an estimated 3–5 business days or Expedited Shipping for 1–3 business days after the estimated carrier-handoff date. Click Calculate shipping to see the amount before payment. The amount covers live postage and packaging and is rounded up to the next whole dollar."}
         </p>
         {renderShippingScheduleNotice({ id: "checkout", showShipDate: true })}
         <button
@@ -3060,7 +3068,7 @@ export default function Storefront({ products, inventory = null, pickupDetails =
                   ? "Updating..."
                   : optionPreviewResult?.error
                     ? "Unavailable"
-                    : "Calculated from address";
+                    : "Click Calculate shipping";
             const expectedDeliveryText = renderedOption?.expectedArrivalLabel
               ? `Expected arrival: ${renderedOption.expectedArrivalLabel}`
               : "";

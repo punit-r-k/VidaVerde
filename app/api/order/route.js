@@ -14,7 +14,9 @@ import {
 } from "@/lib/shippingPricing";
 import {
   assertShippingChargeCoversCosts,
-  createShippingQuoteFingerprint
+  createShippingQuoteFingerprint,
+  getShippingQuoteSelectionUpdate,
+  getStoredShippingSelection
 } from "@/lib/shippingQuoteCache";
 import { buildShippingPlan } from "@/lib/shippingParcels";
 import { getInventoryMap } from "@/lib/stock";
@@ -468,6 +470,7 @@ export async function POST(request) {
   ) || shipping.normalOption;
   let selectedShippingOption = isPickup ? null : requestedOption;
   let checkoutShippingQuote = null;
+  let checkoutShippingSelection = null;
   let estimatedShipDateKey = "";
   let estimatedShipDateLabel = "";
   let expectedArrivalDateKey = "";
@@ -509,20 +512,19 @@ export async function POST(request) {
         items: itemsPayload,
         parcelPlan,
         plannedShipDate: savedQuote.planned_ship_date,
-        serviceLevel: requestedOption.id
+        serviceLevel: "all"
       });
-      if (
-        fingerprint !== savedQuote.fingerprint ||
-        requestedOption.id !== savedQuote.service_level
-      ) {
+      const storedSelection = getStoredShippingSelection(savedQuote, requestedOption.id);
+      if (fingerprint !== savedQuote.fingerprint || !storedSelection) {
         throw new Error("The address, cart, or shipping method changed after the quote.");
       }
       const covered = assertShippingChargeCoversCosts({
-        postageCents: savedQuote.postage_cents,
-        packagingCents: savedQuote.packaging_cents,
-        customerShippingChargeCents: savedQuote.charged_shipping_cents
+        postageCents: storedSelection.charge?.postageCents,
+        packagingCents: storedSelection.charge?.packagingCents,
+        customerShippingChargeCents: storedSelection.charge?.amountCents
       });
       checkoutShippingQuote = savedQuote;
+      checkoutShippingSelection = storedSelection;
       shippingCharge = {
         postageCents: covered.postageCents,
         packagingCents: covered.packagingCents,
@@ -534,12 +536,13 @@ export async function POST(request) {
       };
       selectedShippingOption = {
         ...requestedOption,
+        ...storedSelection.option,
         amountCents: shippingCharge.amountCents
       };
-      estimatedShipDateKey = String(savedQuote.planned_ship_date || "");
-      estimatedShipDateLabel = String(savedQuote.quote_json?.estimatedShipDateLabel || "");
-      expectedArrivalDateKey = String(savedQuote.expected_arrival_date || "");
-      expectedArrivalLabel = String(savedQuote.quote_json?.expectedArrivalLabel || "");
+      estimatedShipDateKey = String(storedSelection.estimatedShipDateKey || "");
+      estimatedShipDateLabel = String(storedSelection.estimatedShipDateLabel || "");
+      expectedArrivalDateKey = String(storedSelection.expectedArrivalDateKey || "");
+      expectedArrivalLabel = String(storedSelection.expectedArrivalLabel || "");
     } catch (shippingError) {
       console.error("saved checkout shipping quote validation failed:", shippingError?.message || shippingError);
       return respond.json(
@@ -734,6 +737,7 @@ export async function POST(request) {
         const { data: attachedQuote, error: attachQuoteError } = await supabaseAdmin
           .from("checkout_shipping_quotes")
           .update({
+            ...getShippingQuoteSelectionUpdate(checkoutShippingSelection),
             payment_session_id: data.id,
             status: "attached",
             updated_at: new Date().toISOString()

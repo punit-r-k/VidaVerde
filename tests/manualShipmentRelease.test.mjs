@@ -44,7 +44,9 @@ test("release previews rate exactly the persisted parcel plan", () => {
   assert.match(labelRelease, /plan_key: `RELEASE__/u);
   assert.match(labelRelease, /QUOTE_LIFETIME_MS = 60 \* 60 \* 1000/u);
   assert.match(shippingQuotes, /getEasyPostQuotesForParcels/u);
-  assert.match(shippingQuotes, /for \(const \[parcelIndex, parcel\] of selectedParcels\.entries\(\)\)/u);
+  assert.match(shippingQuotes, /for \(const \[parcelIndex, parcel\] of parcels\.entries\(\)\)/u);
+  assert.match(labelRelease, /getOrCreateCompatibleReleaseQuote/u);
+  assert.match(labelRelease, /providerCalls: reused \? 0/u);
 });
 
 test("confirmed purchases validate ownership, expiry, eligibility, and recovery identity", () => {

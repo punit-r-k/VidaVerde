@@ -3,6 +3,7 @@ import test from "node:test";
 import {
   chooseFastestQuote,
   compareRatesBySpeed,
+  filterRatesForTransitWindow,
   getSameCarrierRateSets,
   getQuoteLatestDeliveryDate,
   getQuoteTransitDays,
@@ -90,6 +91,31 @@ test("normal shipping excludes rates faster than three or slower than five days"
   assert.equal(isRateWithinTransitWindow({ deliveryDays: 3 }, window), true);
   assert.equal(isRateWithinTransitWindow({ deliveryDays: 5 }, window), true);
   assert.equal(isRateWithinTransitWindow({ deliveryDays: 6 }, window), false);
+});
+
+test("a faster carrier estimate is used only when the preferred window is unavailable", () => {
+  const window = { minimumDays: 3, maximumDays: 5 };
+  const faster = { id: "local-ground", deliveryDays: 1, amountCents: 700 };
+  const preferred = { id: "ground", deliveryDays: 4, amountCents: 900 };
+  const slow = { id: "slow", deliveryDays: 6, amountCents: 500 };
+
+  assert.deepEqual(
+    filterRatesForTransitWindow([faster, preferred, slow], window),
+    [preferred]
+  );
+  assert.deepEqual(
+    filterRatesForTransitWindow([faster, slow], window),
+    [faster]
+  );
+});
+
+test("rates with unknown or overly slow delivery estimates are not fallbacks", () => {
+  const window = { minimumDays: 3, maximumDays: 5 };
+
+  assert.deepEqual(filterRatesForTransitWindow([
+    { id: "unknown", deliveryDays: null, amountCents: 500 },
+    { id: "slow", deliveryDays: 6, amountCents: 600 }
+  ], window), []);
 });
 
 test("expedited shipping accepts one-to-three-day rates and rejects unknown estimates", () => {

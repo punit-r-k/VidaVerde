@@ -3768,8 +3768,14 @@ begin
   if coalesce(length(p_fingerprint), 0) <> 64
      or coalesce(length(p_session_fingerprint), 0) <> 64
      or coalesce(length(p_ip_fingerprint), 0) <> 64
-     or p_service_level not in ('normal', 'expedited')
-     or p_parcel_count < 1
+     or coalesce(p_service_level, '') not in ('normal', 'expedited')
+     or coalesce(p_parcel_count, 0) < 1
+     or coalesce(p_daily_rating_limit, -1) < 0
+     or coalesce(p_daily_verification_limit, -1) < 0
+     or coalesce(p_monthly_overage_limit_cents, -1) < 0
+     or coalesce(p_estimated_overage_cost_cents, -1) < 0
+     or coalesce(jsonb_typeof(p_parcel_plan), '') <> 'object'
+     or p_expires_at is null
      or p_expires_at <= v_now then
     raise exception 'Invalid EasyPost quote reservation.';
   end if;
@@ -3819,8 +3825,16 @@ begin
     set status = 'cancelled', updated_at = v_now
     where fingerprint = p_fingerprint and status = 'rating';
 
+  -- Fingerprint locking above suppresses duplicate provider work. This global
+  -- transaction lock serializes only the short budget decision/reservation;
+  -- provider verification and rating happen after this RPC commits.
+  perform pg_advisory_xact_lock(hashtextextended('easypost-quote-budget-global-v1', 0));
+  perform pg_advisory_xact_lock(
+    hashtextextended('easypost-quote-session:' || p_session_fingerprint, 0)
+  );
+
   select
-    coalesce(sum(rating_operations), 0),
+    coalesce(sum(rated_shipments), 0),
     coalesce(sum(address_verifications), 0)
   into v_daily_ratings, v_daily_verifications
   from easypost_usage_ledger
@@ -3843,7 +3857,7 @@ begin
 
   if v_session_misses >= 2
      or v_fingerprint_misses >= 2
-     or v_daily_ratings + 1 > p_daily_rating_limit
+     or v_daily_ratings + p_parcel_count > p_daily_rating_limit
      or v_daily_verifications + 1 > p_daily_verification_limit
      or v_monthly_overage + p_estimated_overage_cost_cents > p_monthly_overage_limit_cents then
     insert into easypost_usage_ledger (

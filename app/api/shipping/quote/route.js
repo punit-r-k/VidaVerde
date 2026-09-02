@@ -1,6 +1,6 @@
 import { securePublicRoute } from "@/lib/apiSecurity";
 import { mapCheckoutIssuesToFieldErrors, shippingQuotePayloadSchema } from "@/lib/checkoutSchema";
-import { selectCheckoutShippingQuote } from "@/lib/checkoutShippingQuote";
+import { selectCheckoutShippingOptions } from "@/lib/checkoutShippingQuote";
 import { getAuthoritativeProductMap } from "@/lib/products";
 import { getClientId, getRouteRateLimitConfig } from "@/lib/rateLimit";
 import { readBoundedJsonBody } from "@/lib/requestBody";
@@ -11,7 +11,8 @@ import {
   isLiveQuoteFeatureEnabled,
   markReservedShippingQuoteFailed,
   reserveShippingQuoteUsage,
-  serializeCachedShippingSelection
+  serializeCachedShippingSelections,
+  serializeStoredShippingSelection
 } from "@/lib/shippingQuoteCache";
 import { buildShippingPlan } from "@/lib/shippingParcels";
 import { createEasyPostRatingContext } from "@/lib/shippingQuotes";
@@ -36,18 +37,6 @@ const toCount = (value) => {
   const count = Number(value);
   return Number.isFinite(count) && count > 0 ? Math.floor(count) : 0;
 };
-const formatSelection = (selection, quoteToken) => ({
-  quoteToken,
-  id: selection.option.id,
-  label: selection.option.label,
-  amountCents: selection.charge.amountCents,
-  transitLabel: selection.option.transitLabel,
-  deliveryEstimate: selection.option.deliveryEstimate,
-  estimatedShipDate: selection.estimatedShipDateKey,
-  estimatedShipDateLabel: selection.estimatedShipDateLabel,
-  expectedArrivalDate: selection.expectedArrivalDateKey,
-  expectedArrivalLabel: selection.expectedArrivalLabel
-});
 const getCachedQuote = async (quoteId) => {
   if (!quoteId || !supabaseAdmin) return null;
   const { data, error } = await supabaseAdmin.from("checkout_shipping_quotes")
@@ -83,7 +72,7 @@ export async function POST(request) {
     }, { status: 400 });
   }
 
-  const { customer, items, shippingOption, checkoutSessionToken } = parsedPayload.data;
+  const { customer, items, checkoutSessionToken } = parsedPayload.data;
   const [productMap, inventoryMap] = await Promise.all([
     getAuthoritativeProductMap(items.map((item) => item.sku)),
     getInventoryMap()
@@ -121,7 +110,7 @@ export async function POST(request) {
   const plannedShipDateKey = plannedShipDate?.toISOString().slice(0, 10) || "";
   const fingerprint = createShippingQuoteFingerprint({
     customer, items: itemsPayload, parcelPlan,
-    plannedShipDate: plannedShipDateKey, serviceLevel: shippingOption
+    plannedShipDate: plannedShipDateKey, serviceLevel: "all"
   });
   const sessionFingerprint = createSafeIdentifierFingerprint("checkout-session", checkoutSessionToken);
   const ipFingerprint = createSafeIdentifierFingerprint("ip", getClientId(request));
@@ -129,7 +118,7 @@ export async function POST(request) {
   let reservation;
   try {
     reservation = await reserveShippingQuoteUsage({
-      fingerprint, sessionFingerprint, ipFingerprint, serviceLevel: shippingOption,
+      fingerprint, sessionFingerprint, ipFingerprint, serviceLevel: "normal",
       parcelPlan, plannedShipDate: plannedShipDateKey,
       parcelCount: parcelPlan.parcels.length, now: orderCreatedAt
     });
@@ -140,13 +129,12 @@ export async function POST(request) {
 
   const subtotalCents = lineItems.reduce((sum, item) => sum + item.quantity * item.unitAmount, 0);
   const shipping = getShippingOptionsForCart({ items: lineItems, subtotalCents });
-  const requestedOption = shipping.options.find((option) => option.id === shippingOption) || shipping.normalOption;
   if (reservation.state === "cache_hit") {
     try {
       const cached = await getCachedQuote(reservation.quote_id);
       if (!cached) throw new Error("The cached quote is unavailable.");
       return respond.json({
-        shippingOptions: [serializeCachedShippingSelection(cached, requestedOption)],
+        shippingOptions: serializeCachedShippingSelections(cached, shipping.options),
         cacheHit: true
       }, { status: 200, headers: { "Cache-Control": "no-store" } });
     } catch (error) {
@@ -163,15 +151,25 @@ export async function POST(request) {
 
   try {
     const ratingContext = createEasyPostRatingContext({ startedAt: orderCreatedAt });
-    const selection = await selectCheckoutShippingQuote({
-      customer, itemsPayload, requestedOption, hasPreorderItems, orderCreatedAt, ratingContext
+    const selections = await selectCheckoutShippingOptions({
+      customer,
+      itemsPayload,
+      normalOption: shipping.normalOption,
+      expeditedOption: shipping.expeditedOption,
+      hasPreorderItems,
+      orderCreatedAt,
+      ratingContext
     });
-    selection.verifiedAddressId = ratingContext.verifiedAddressId;
+    selections.forEach((selection) => {
+      selection.verifiedAddressId = ratingContext.verifiedAddressId;
+    });
     const saved = await finalizeReservedShippingQuote({
-      quoteId: reservation.quote_id, selection, fingerprint
+      quoteId: reservation.quote_id, selections, fingerprint
     });
     return respond.json({
-      shippingOptions: [formatSelection(selection, saved.id)],
+      shippingOptions: selections.map((selection) =>
+        serializeStoredShippingSelection(selection, saved.id)
+      ),
       cacheHit: false
     }, { status: 200, headers: { "Cache-Control": "no-store" } });
   } catch (error) {

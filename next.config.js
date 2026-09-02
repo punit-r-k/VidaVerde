@@ -86,6 +86,8 @@ const assertSafeProductionCorsConfig = () => {
     "EASYPOST_MONTHLY_OVERAGE_LIMIT_CENTS",
     "EASYPOST_DAILY_RATING_LIMIT",
     "EASYPOST_DAILY_ADDRESS_VERIFICATION_LIMIT",
+    "EASYPOST_RATING_OVERAGE_UNIT_CENTS",
+    "EASYPOST_ADDRESS_VERIFICATION_OVERAGE_UNIT_CENTS",
     "EASYPOST_FROM_STREET1",
     "EASYPOST_FROM_CITY",
     "EASYPOST_FROM_STATE",
@@ -102,6 +104,23 @@ const assertSafeProductionCorsConfig = () => {
   if (missingShippingVariables.length > 0) {
     throw new Error(
       `Incomplete production shipping configuration: set ${missingShippingVariables.join(", ")}.`
+    );
+  }
+  const integerShippingVariables = [
+    "EASYPOST_MONTHLY_OVERAGE_LIMIT_CENTS",
+    "EASYPOST_DAILY_RATING_LIMIT",
+    "EASYPOST_DAILY_ADDRESS_VERIFICATION_LIMIT",
+    "EASYPOST_RATING_OVERAGE_UNIT_CENTS",
+    "EASYPOST_ADDRESS_VERIFICATION_OVERAGE_UNIT_CENTS"
+  ];
+  const invalidIntegerShippingVariables = integerShippingVariables.filter((name) => {
+    const rawValue = String(process.env[name] || "").trim();
+    const value = Number(rawValue);
+    return !/^\d+$/u.test(rawValue) || !Number.isSafeInteger(value) || value < 0;
+  });
+  if (invalidIntegerShippingVariables.length > 0) {
+    throw new Error(
+      `Invalid production shipping configuration: ${invalidIntegerShippingVariables.join(", ")} must be non-negative integers.`
     );
   }
   if (Buffer.byteLength(String(process.env.SHIPPING_QUOTE_HMAC_SECRET || ""), "utf8") < 32) {

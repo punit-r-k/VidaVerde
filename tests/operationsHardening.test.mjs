@@ -106,9 +106,9 @@ test("shipping quotes use one selected plan and checkout never rates again", () 
   assert.doesNotMatch(checkoutRoute, /createEasyPostRatingContext|getEasyPostQuotes|selectCheckoutShippingQuote/u);
   assert.match(shippingQuotes, /shipmentPromises: new Map\(\)/u);
   assert.match(shippingQuotes, /getParcelRatingKey\(planKey, parcelIndex, parcel, options\)/u);
-  assert.match(shippingQuotes, /shipmentCreateLimit = plan\.parcels\.length/u);
-  assert.match(shippingQuotes, /verify: \["delivery"\]/u);
-  assert.doesNotMatch(shippingQuotes, /createAndVerifyEasyPostAddress/u);
+  assert.match(shippingQuotes, /shipmentCreateLimit = parcels\.length/u);
+  assert.match(shippingQuotes, /createAndVerifyEasyPostAddress/u);
+  assert.match(shippingQuotes, /verifications\?\.delivery\?\.success === true/u);
   assert.match(shippingQuotes, /labelDate: estimatedShipDate\?\.toISOString\(\) \|\| ""/u);
   assert.match(shippingQuotes, /EASYPOST_RATING_BUDGET_MS = 25_000/u);
   assert.match(shippingQuotes, /EASYPOST_RATING_REQUEST_TIMEOUT_MS = 10_000/u);
@@ -119,7 +119,7 @@ test("shipping quotes use one selected plan and checkout never rates again", () 
   );
   assert.match(shippingQuotes, /estimatedShipDate/u);
   assert.match(shippingQuotes, /expectedArrivalDate/u);
-  assert.match(shippingQuoteRoute, /estimatedShipDate: selection\.estimatedShipDateKey/u);
+  assert.match(shippingQuoteRoute, /serializeStoredShippingSelection/u);
   assert.match(checkoutRoute, /estimatedShipDate: estimatedShipDateKey/u);
   assert.match(shippingQuoteRoute, /click Update shipping/iu);
   assert.match(nextConfig, /Incomplete production shipping configuration/u);

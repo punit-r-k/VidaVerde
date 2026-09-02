@@ -4,7 +4,11 @@ import path from "node:path";
 import test from "node:test";
 import {
   assertShippingChargeCoversCosts,
-  createShippingQuoteFingerprint
+  createShippingQuoteFingerprint,
+  getEasyPostBudgetConfig,
+  getShippingQuoteSelectionUpdate,
+  getStoredShippingSelection,
+  serializeCachedShippingSelections
 } from "../lib/shippingQuoteCache.js";
 import { buildShippingPlan } from "../lib/shippingParcels.js";
 
@@ -16,6 +20,9 @@ const orderRoute = read("app/api/order/route.js");
 const quotes = read("lib/shippingQuotes.js");
 const labels = read("lib/shipmentLabelAutomation.js");
 const ledgerMigration = read("supabase/migrations/20260901130000_easypost_quote_cache_budget.sql");
+const atomicBudgetMigration = read(
+  "supabase/migrations/20260902120000_atomic_easypost_quote_budgets.sql"
+);
 const nextConfig = read("next.config.js");
 const allRuntimeSource = [
   ...fs.readdirSync(path.join(root, "lib")).filter((file) => file.endsWith(".js"))
@@ -52,13 +59,72 @@ test("quote fingerprints are HMACs and address or cart changes invalidate them",
   assert.notEqual(fingerprint({ serviceLevel: "expedited" }), original);
 });
 
+test("production cost configuration requires explicit non-negative integers", () => {
+  const valid = {
+    NODE_ENV: "production",
+    EASYPOST_DAILY_RATING_LIMIT: "10",
+    EASYPOST_DAILY_ADDRESS_VERIFICATION_LIMIT: "8",
+    EASYPOST_MONTHLY_OVERAGE_LIMIT_CENTS: "500",
+    EASYPOST_RATING_OVERAGE_UNIT_CENTS: "2",
+    EASYPOST_ADDRESS_VERIFICATION_OVERAGE_UNIT_CENTS: "3"
+  };
+  assert.deepEqual(getEasyPostBudgetConfig(valid), {
+    dailyRatingLimit: 10,
+    dailyAddressVerificationLimit: 8,
+    monthlyOverageLimitCents: 500,
+    ratingOverageUnitCents: 2,
+    addressVerificationOverageUnitCents: 3
+  });
+  for (const invalid of ["", "-1", "1.5", "one"]) {
+    assert.throws(
+      () => getEasyPostBudgetConfig({
+        ...valid,
+        EASYPOST_RATING_OVERAGE_UNIT_CENTS: invalid
+      }),
+      /EASYPOST_RATING_OVERAGE_UNIT_CENTS must be configured as a non-negative integer/u
+    );
+  }
+  assert.equal(getEasyPostBudgetConfig({ NODE_ENV: "test" }).ratingOverageUnitCents, 1);
+});
+
+test("one opaque token carries both options and narrows to the chosen provider IDs", () => {
+  const selection = (id, amountCents, rateId) => ({
+    option: { id, label: id === "normal" ? "Shipping" : "Expedited Shipping" },
+    quote: {
+      planKey: `plan__${id}`,
+      parcels: [{
+        selectedRate: { id: rateId, carrier: "UPS", service: id }
+      }]
+    },
+    charge: { postageCents: amountCents - 200, packagingCents: 200, amountCents },
+    deliveryDays: id === "normal" ? 4 : 2,
+    estimatedShipDateKey: "2026-09-05",
+    expectedArrivalDateKey: id === "normal" ? "2026-09-11" : "2026-09-09"
+  });
+  const normal = selection("normal", 1200, "rate_ground");
+  const expedited = selection("expedited", 1700, "rate_air");
+  const row = {
+    id: "11111111-1111-4111-8111-111111111111",
+    quote_json: { shippingOptions: [normal, expedited] }
+  };
+
+  const serialized = serializeCachedShippingSelections(row);
+  assert.deepEqual(serialized.map((option) => option.quoteToken), [row.id, row.id]);
+  assert.deepEqual(serialized.map((option) => option.id), ["normal", "expedited"]);
+  const storedExpedited = getStoredShippingSelection(row, "expedited");
+  const update = getShippingQuoteSelectionUpdate(storedExpedited);
+  assert.equal(update.service_level, "expedited");
+  assert.equal(update.quote_json.parcels[0].selectedRate.id, "rate_air");
+  assert.equal(update.quote_json.shippingOptions, undefined);
+});
+
 test("deterministic planning creates exactly the parcels that can be rated", () => {
   assert.equal(buildShippingPlan([{ sku: "VV1", quantity: 1 }]).parcels.length, 1);
   assert.equal(buildShippingPlan([
     { sku: "VV1", quantity: 1 },
     { sku: "VV5", quantity: 1 }
   ]).parcels.length, 2);
-  assert.match(quotes, /shipmentCreateLimit = plan\.parcels\.length/u);
+  assert.match(quotes, /shipmentCreateLimit = parcels\.length/u);
   assert.doesNotMatch(quotes, /MAX_EASYPOST_SHIPMENT_CREATES_PER_RATING\s*=\s*12/u);
 });
 
@@ -72,25 +138,48 @@ test("the storefront only rates after an enabled explicit action and never retri
   assert.ok(calculateStart > 0 && calculateEnd > calculateStart);
   assert.equal((storefront.slice(calculateStart, calculateEnd).match(/fetch\("\/api\/shipping\/quote"/gu) || []).length, 1);
   assert.doesNotMatch(storefront, /SHIPPING_QUOTE_DEBOUNCE_MS/u);
+  assert.match(storefront, /covers live postage and packaging and is rounded up to the next whole dollar/u);
 });
 
-test("database reservation returns cache hits before provider calls and enforces ceilings", () => {
+test("service-tier filtering is local and never performs a provider request", () => {
+  const filteringStart = quotes.indexOf("const buildQuotesFromRatedParcels");
+  const filteringEnd = quotes.indexOf("const getCheckoutPlan", filteringStart);
+  const filtering = quotes.slice(filteringStart, filteringEnd);
+
+  assert.ok(filteringStart >= 0 && filteringEnd > filteringStart);
+  assert.match(filtering, /filterRatesForTransitWindow\(parcel\.rates/u);
+  assert.doesNotMatch(filtering, /createEasyPostShipment|getRatedEasyPostShipment/u);
+  assert.match(
+    read("lib/shippingRateRanking.js"),
+    /only filters rates already returned by the existing rating/u
+  );
+});
+
+test("database reservation serializes distinct fingerprints before checking every ceiling", () => {
   const cacheBranch = quoteRoute.indexOf('reservation.state === "cache_hit"');
-  const providerCall = quoteRoute.indexOf("selectCheckoutShippingQuote({");
+  const providerCall = quoteRoute.indexOf("selectCheckoutShippingOptions({");
   assert.ok(cacheBranch > 0 && providerCall > cacheBranch);
-  assert.match(ledgerMigration, /pg_advisory_xact_lock/u);
-  assert.match(ledgerMigration, /v_session_misses >= 2/u);
-  assert.match(ledgerMigration, /p_daily_rating_limit/u);
-  assert.match(ledgerMigration, /p_daily_verification_limit/u);
-  assert.match(ledgerMigration, /p_monthly_overage_limit_cents/u);
+  const globalLock = atomicBudgetMigration.indexOf("easypost-quote-budget-global-v1");
+  const budgetRead = atomicBudgetMigration.indexOf("coalesce(sum(rated_shipments), 0)");
+  assert.ok(globalLock > 0 && budgetRead > globalLock);
+  assert.match(atomicBudgetMigration, /hashtextextended\(p_fingerprint, 0\)/u);
+  assert.match(atomicBudgetMigration, /easypost-quote-session:/u);
+  assert.match(atomicBudgetMigration, /v_session_misses >= 2/u);
+  assert.match(atomicBudgetMigration, /v_daily_ratings \+ p_parcel_count > p_daily_rating_limit/u);
+  assert.match(atomicBudgetMigration, /v_daily_verifications \+ 1 > p_daily_verification_limit/u);
+  assert.match(
+    atomicBudgetMigration,
+    /v_monthly_overage \+ p_estimated_overage_cost_cents > p_monthly_overage_limit_cents/u
+  );
   assert.match(quoteRoute, /Shipping usage could not be recorded|SAFE_UNAVAILABLE_MESSAGE/u);
 });
 
-test("one inline address verification is reused by every parcel", () => {
-  assert.match(quotes, /verify: \["delivery"\]/u);
-  assert.match(quotes, /context\.verifiedAddressId/u);
-  assert.match(quotes, /toAddress: inlineToAddress/u);
-  assert.doesNotMatch(quotes, /createAndVerifyEasyPostAddress/u);
+test("one strict delivery verification is reused by every rated parcel", () => {
+  assert.match(quotes, /createAndVerifyEasyPostAddress/u);
+  assert.match(quotes, /verifiedAddressPromise/u);
+  assert.match(quotes, /verifications\?\.delivery\?\.success === true/u);
+  assert.match(quotes, /toAddress: \{ id: verifiedAddressId \}/u);
+  assert.doesNotMatch(quotes, /verify: \["delivery"\]/u);
 });
 
 test("checkout consumes the opaque quote token and performs no rating", () => {

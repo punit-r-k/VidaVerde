@@ -145,8 +145,10 @@ and full refunds retire outstanding work. Partial refunds preserve fulfillment
 for operator review, and already-purchased labels remain available for audit.
 
 For shipping orders, customers choose Shipping or Expedited Shipping. Shipping selects
-the fastest EasyPost rate estimated at 3–5 business days and excludes estimates
-under three days; Expedited selects the fastest eligible 1–3-business-day rate.
+the fastest EasyPost rate estimated at 3–5 business days. If that preferred window has
+no eligible rate, a faster estimate may be used, but a slower one may not. Expedited
+selects the fastest eligible 1–3-business-day rate. The faster-rate fallback filters
+the response already received and does not make another EasyPost request.
 The server adds exact packaging cost to the selected postage and rounds the combined
 charge up to the nearest dollar; caps and implicit discounts are forbidden. The
 customer explicitly clicks **Calculate shipping** (or **Update shipping** after a
@@ -171,8 +173,9 @@ emails and optional advanced tracking are disabled. The carrier-generated tracki
 number bundled with each purchased label remains stored internally for operations
 and refunds; no standalone EasyPost Tracker object is created.
 
-Deploy `20260901120000_manual_shipment_release_tracking_email.sql` and
-`20260901130000_easypost_quote_cache_budget.sql` before deploying the application,
+Deploy `20260901120000_manual_shipment_release_tracking_email.sql`,
+`20260901130000_easypost_quote_cache_budget.sql`, and
+`20260902120000_atomic_easypost_quote_budgets.sql` before deploying the application,
 then update and reopen the Apps Script spreadsheet so the new Shipping menu is loaded.
 
 Required environment variables:
@@ -188,6 +191,8 @@ Required environment variables:
 - `EASYPOST_MONTHLY_OVERAGE_LIMIT_CENTS`
 - `EASYPOST_DAILY_RATING_LIMIT`
 - `EASYPOST_DAILY_ADDRESS_VERIFICATION_LIMIT`
+- `EASYPOST_RATING_OVERAGE_UNIT_CENTS`
+- `EASYPOST_ADDRESS_VERIFICATION_OVERAGE_UNIT_CENTS`
 - `EASYPOST_FROM_NAME`
 - `EASYPOST_FROM_STREET1`
 - `EASYPOST_FROM_CITY`
@@ -204,6 +209,10 @@ Required environment variables:
   `HH:mm` format (currently `07:00`; orders at exactly this time roll forward)
 - `NEXT_PUBLIC_SHIPPING_TIME_ZONE` is the IANA timezone used by every shipping
   calculation and displayed cutoff (currently `America/Chicago`)
+
+The five EasyPost daily/monthly limit and unit-cost values must be explicit
+non-negative integers in production. Startup fails if any is missing or malformed;
+test and development builds use deterministic local defaults.
 
 EasyPost account-owner checklist (manual dashboard/support work only):
 
