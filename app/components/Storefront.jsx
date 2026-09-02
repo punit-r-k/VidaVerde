@@ -6,6 +6,11 @@ import dynamic from "next/dynamic";
 import Image from "next/image";
 import { createPortal } from "react-dom";
 import { trackAnalyticsEvent } from "@/lib/analytics";
+import {
+  CHECKOUT_DRAFT_STORAGE_KEY,
+  getStoredShippingPreviewExpiration,
+  sanitizeCheckoutDraft
+} from "@/lib/checkoutDraft";
 import { lockPageScroll, unlockPageScroll } from "@/lib/scrollLock";
 import {
   SUPPORT_EMAIL,
@@ -304,6 +309,7 @@ export default function Storefront({ products, inventory = null, pickupDetails =
   const searchParams = useSearchParams();
   const [cart, setCart] = useState({});
   const [cartHydrated, setCartHydrated] = useState(false);
+  const [checkoutDraftHydrated, setCheckoutDraftHydrated] = useState(false);
   const [status, setStatus] = useState("idle");
   const [notice, setNotice] = useState("");
   const [checkoutStep, setCheckoutStep] = useState("details");
@@ -439,10 +445,19 @@ export default function Storefront({ products, inventory = null, pickupDetails =
   }, [resetCartChangeTracking]);
 
   const resetCheckoutAfterSuccess = useCallback(() => {
+    try {
+      window.sessionStorage.removeItem(CHECKOUT_DRAFT_STORAGE_KEY);
+    } catch {
+      // Ignore local persistence cleanup errors.
+    }
+    shippingQuoteSessionTokenRef.current = globalThis.crypto?.randomUUID?.() || "";
     setCart({});
     setFulfillment(DEFAULT_FULFILLMENT);
     setShippingOptionId(DEFAULT_SHIPPING_OPTION_ID);
     setFormValues(INITIAL_FORM_VALUES);
+    setShippingPreview(null);
+    setShippingPreviewStatus("idle");
+    setShippingPreviewError("");
     setFieldErrors({});
     setTouchedFields({});
     setSubmitAttempted(false);
@@ -950,6 +965,44 @@ export default function Storefront({ products, inventory = null, pickupDetails =
   }, [cart, cartHydrated]);
 
   useEffect(() => {
+    try {
+      const storedDraft = window.sessionStorage.getItem(CHECKOUT_DRAFT_STORAGE_KEY);
+      if (!storedDraft) return;
+
+      const draft = sanitizeCheckoutDraft(JSON.parse(storedDraft));
+      if (!draft) {
+        window.sessionStorage.removeItem(CHECKOUT_DRAFT_STORAGE_KEY);
+        return;
+      }
+
+      if (draft.checkoutSessionToken) {
+        shippingQuoteSessionTokenRef.current = draft.checkoutSessionToken;
+      }
+      setFormValues(draft.formValues);
+      setFulfillment(draft.fulfillment);
+
+      const restoredOptions = draft.shippingPreview?.options || [];
+      const restoredOptionId = restoredOptions.some((option) =>
+        option.id === draft.shippingOptionId
+      )
+        ? draft.shippingOptionId
+        : normalizeShippingOptionId(restoredOptions[0]?.id || draft.shippingOptionId);
+      setShippingOptionId(restoredOptionId);
+      setShippingPreview(draft.shippingPreview);
+      setShippingPreviewStatus(draft.shippingPreview ? "ready" : "idle");
+      setShippingPreviewError("");
+    } catch {
+      try {
+        window.sessionStorage.removeItem(CHECKOUT_DRAFT_STORAGE_KEY);
+      } catch {
+        // Ignore local persistence cleanup errors.
+      }
+    } finally {
+      setCheckoutDraftHydrated(true);
+    }
+  }, []);
+
+  useEffect(() => {
     if (!showCartChangeModal) return undefined;
 
     cartChangeLastFocusedRef.current =
@@ -1412,11 +1465,13 @@ export default function Storefront({ products, inventory = null, pickupDetails =
       ? formatCurrency(0)
       : displayedShipping
         ? formatCurrency(shippingCents)
-        : shippingPreviewStatus === "loading" && shippingPreviewReady
-          ? "Updating..."
-          : selectedShippingPreviewResult?.error || shippingPreviewError
-            ? "Unavailable"
-            : "Click Calculate shipping";
+        : !shippingPreviewReady
+          ? "Enter shipping details on the left"
+          : shippingPreviewStatus === "loading"
+            ? "Updating..."
+            : selectedShippingPreviewResult?.error || shippingPreviewError
+              ? "Unavailable"
+              : "Use Calculate shipping on the left";
   const preorderUnitsInCart = cartItems.reduce((sum, item) => sum + item.preorderUnits, 0);
   const hasPreorderItems = preorderUnitsInCart > 0;
   const estimatedShipDate = getEstimatedShipDate({
@@ -1490,6 +1545,70 @@ export default function Storefront({ products, inventory = null, pickupDetails =
     shippingQuoteRequestPayload,
     normalizedShippingOptionId
   ]);
+
+  useEffect(() => {
+    if (!checkoutDraftHydrated || !cartHydrated) return;
+
+    try {
+      if (itemCount <= 0) {
+        window.sessionStorage.removeItem(CHECKOUT_DRAFT_STORAGE_KEY);
+        return;
+      }
+
+      const savedAt = Date.now();
+      const activePreview = shippingPreview?.requestFingerprint ===
+        shippingQuoteRequestFingerprint
+        ? shippingPreview
+        : null;
+      const draft = sanitizeCheckoutDraft({
+        version: 1,
+        savedAt,
+        checkoutSessionToken: shippingQuoteSessionTokenRef.current,
+        formValues,
+        fulfillment,
+        shippingOptionId: normalizedShippingOptionId,
+        shippingPreview: activePreview
+      }, { now: savedAt });
+
+      if (draft) {
+        window.sessionStorage.setItem(
+          CHECKOUT_DRAFT_STORAGE_KEY,
+          JSON.stringify(draft)
+        );
+      }
+    } catch {
+      // Ignore session persistence errors; checkout remains functional.
+    }
+  }, [
+    cartHydrated,
+    checkoutDraftHydrated,
+    formValues,
+    fulfillment,
+    itemCount,
+    normalizedShippingOptionId,
+    shippingPreview,
+    shippingQuoteRequestFingerprint
+  ]);
+
+  useEffect(() => {
+    const expirationMs = getStoredShippingPreviewExpiration(shippingPreview);
+    if (!Number.isFinite(expirationMs)) return undefined;
+
+    const clearExpiredPreview = () => {
+      shippingPreviewRequestRef.current += 1;
+      setShippingPreview(null);
+      setShippingPreviewStatus("idle");
+      setShippingPreviewError("");
+    };
+    const remainingMs = expirationMs - Date.now();
+    if (remainingMs <= 0) {
+      clearExpiredPreview();
+      return undefined;
+    }
+
+    const timeoutId = window.setTimeout(clearExpiredPreview, remainingMs);
+    return () => window.clearTimeout(timeoutId);
+  }, [shippingPreview]);
 
   const pickupAcknowledgementError = fulfillment === "market" &&
     !pickupAcknowledged &&
@@ -3033,7 +3152,7 @@ export default function Storefront({ products, inventory = null, pickupDetails =
         {renderShippingScheduleNotice({ id: "checkout", showShipDate: true })}
         <button
           type="button"
-          className="button button--dark"
+          className="button button--accent"
           onClick={calculateShipping}
           disabled={
             !shippingPreviewReady ||
@@ -3064,11 +3183,13 @@ export default function Storefront({ products, inventory = null, pickupDetails =
               ? shippingPriceText
               : hasPreviewQuote
                 ? formatCurrency(optionPreviewResult.amountCents)
-                : shippingPreviewStatus === "loading" && shippingPreviewReady
-                  ? "Updating..."
-                  : optionPreviewResult?.error
-                    ? "Unavailable"
-                    : "Click Calculate shipping";
+                : !shippingPreviewReady
+                  ? "Enter shipping details above"
+                  : shippingPreviewStatus === "loading"
+                    ? "Updating..."
+                    : optionPreviewResult?.error
+                      ? "Unavailable"
+                      : "Use Calculate shipping above";
             const expectedDeliveryText = renderedOption?.expectedArrivalLabel
               ? `Expected arrival: ${renderedOption.expectedArrivalLabel}`
               : "";

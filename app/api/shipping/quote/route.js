@@ -168,7 +168,7 @@ export async function POST(request) {
     });
     return respond.json({
       shippingOptions: selections.map((selection) =>
-        serializeStoredShippingSelection(selection, saved.id)
+        serializeStoredShippingSelection(selection, saved.id, saved.expires_at)
       ),
       cacheHit: false
     }, { status: 200, headers: { "Cache-Control": "no-store" } });

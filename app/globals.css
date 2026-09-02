@@ -363,6 +363,14 @@ img {
   box-shadow: var(--shadow);
 }
 
+.button--accent {
+  background: var(--accent);
+  color: var(--ink);
+  border: 1px solid transparent;
+  box-shadow: var(--shadow);
+  font-weight: 700;
+}
+
 .button:disabled {
   cursor: not-allowed;
   opacity: 0.6;

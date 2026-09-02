@@ -141,6 +141,23 @@ test("the storefront only rates after an enabled explicit action and never retri
   assert.match(storefront, /covers live postage and packaging and is rounded up to the next whole dollar/u);
 });
 
+test("checkout details and unexpired shipping calculations survive a page refresh", () => {
+  assert.match(storefront, /window\.sessionStorage\.getItem\(CHECKOUT_DRAFT_STORAGE_KEY\)/u);
+  assert.match(storefront, /window\.sessionStorage\.setItem\(/u);
+  assert.match(storefront, /shippingPreview:\s*activePreview/u);
+  assert.match(storefront, /shippingPreview\?\.requestFingerprint ===[\s\S]*shippingQuoteRequestFingerprint/u);
+  assert.match(storefront, /getStoredShippingPreviewExpiration\(shippingPreview\)/u);
+  assert.match(quoteRoute, /serializeStoredShippingSelection\(selection, saved\.id, saved\.expires_at\)/u);
+});
+
+test("shipping guidance points customers to required details and the accent calculation button", () => {
+  assert.match(storefront, /Enter shipping details on the left/u);
+  assert.match(storefront, /Use Calculate shipping on the left/u);
+  assert.match(storefront, /Enter shipping details above/u);
+  assert.match(storefront, /className="button button--accent"[\s\S]*onClick=\{calculateShipping\}/u);
+  assert.match(read("app/globals.css"), /\.button--accent\s*\{[\s\S]*background: var\(--accent\);[\s\S]*color: var\(--ink\);/u);
+});
+
 test("service-tier filtering is local and never performs a provider request", () => {
   const filteringStart = quotes.indexOf("const buildQuotesFromRatedParcels");
   const filteringEnd = quotes.indexOf("const getCheckoutPlan", filteringStart);
