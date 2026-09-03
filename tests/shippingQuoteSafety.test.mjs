@@ -154,6 +154,8 @@ test("shipping guidance points customers to required details and the accent calc
   assert.match(storefront, /Enter shipping details on the left/u);
   assert.match(storefront, /Press "Calculate Shipping" on the left/u);
   assert.match(storefront, /Enter shipping details above/u);
+  assert.match(storefront, /: "_____";/u);
+  assert.doesNotMatch(storefront, /Use Calculate shipping above/u);
   assert.match(storefront, /className="button button--accent"[\s\S]*onClick=\{calculateShipping\}/u);
   assert.match(read("app/globals.css"), /\.button--accent\s*\{[\s\S]*background: var\(--accent\);[\s\S]*color: var\(--ink\);/u);
 });
