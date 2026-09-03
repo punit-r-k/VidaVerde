@@ -152,7 +152,7 @@ test("checkout details and unexpired shipping calculations survive a page refres
 
 test("shipping guidance points customers to required details and the accent calculation button", () => {
   assert.match(storefront, /Enter shipping details on the left/u);
-  assert.match(storefront, /Use Calculate shipping on the left/u);
+  assert.match(storefront, /Press "Calculate Shipping" on the left/u);
   assert.match(storefront, /Enter shipping details above/u);
   assert.match(storefront, /className="button button--accent"[\s\S]*onClick=\{calculateShipping\}/u);
   assert.match(read("app/globals.css"), /\.button--accent\s*\{[\s\S]*background: var\(--accent\);[\s\S]*color: var\(--ink\);/u);

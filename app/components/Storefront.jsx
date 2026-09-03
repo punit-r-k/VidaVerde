@@ -1471,7 +1471,7 @@ export default function Storefront({ products, inventory = null, pickupDetails =
             ? "Updating..."
             : selectedShippingPreviewResult?.error || shippingPreviewError
               ? "Unavailable"
-              : "Use Calculate shipping on the left";
+              : "Press "Calculate Shipping" on the left";
   const preorderUnitsInCart = cartItems.reduce((sum, item) => sum + item.preorderUnits, 0);
   const hasPreorderItems = preorderUnitsInCart > 0;
   const estimatedShipDate = getEstimatedShipDate({
